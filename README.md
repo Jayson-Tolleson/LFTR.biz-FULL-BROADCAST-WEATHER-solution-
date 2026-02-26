@@ -7,3 +7,4 @@ Description:
 ## Run ▶
 
 sudo bash broadcast.sh
+  - add domain for turn name...
