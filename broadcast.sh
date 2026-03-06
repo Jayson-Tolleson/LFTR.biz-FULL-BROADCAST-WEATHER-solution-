@@ -931,13 +931,42 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
 </div>
 
 <script>
-(() => {
+window.BROADCAST_CONFIG = {
+  socketPath: '/socket.io',
+  iceConfigUrl: '/webrtc/ice-config',
+  aiChatUrl: '/ai/chat',
+  aiTtsUrl: '/ai/tts',
+  aiWebSearchUrl: '/ai/websearch',
+  role: 'broadcast',
+  debug: true
+};
+</script>
+<script src="/static/js/broadcast.js"></script>
+</body>
+</html>
+
+EOF_STATIC_BROADCAST_HTML
+
+
+write_file "static/js/broadcast.js" <<'EOF_STATIC_JS_BROADCAST_JS'
+// static/js/broadcast.js
+(function () {
+  const cfg = window.BROADCAST_CONFIG || {};
+  const DEBUG = Boolean(cfg.debug);
+  const dbg = (...args) => { if (DEBUG) console.log('[broadcast]', ...args); };
+
+  const BroadcastApp = {
+    initialized: false,
+    init() {
+      if (this.initialized) return;
+      this.initialized = true;
+      dbg('init');
   const params=new URLSearchParams(location.search);
   const room=(params.get('room')||'default').trim() || 'default';
   document.getElementById('stRoom').textContent = room;
 
   const socket=io(location.origin,{
-    path:'/socket.io',
+    path: cfg.socketPath || '/socket.io',
     transports:['websocket'],
     upgrade:false,
     query:{room,role:'broadcast'}
@@ -991,7 +1020,7 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
 
   async function getIceServers(){
     try{
-      const r=await fetch('/webrtc/ice-config',{cache:'no-store'});
+      const r=await fetch(cfg.iceConfigUrl || '/webrtc/ice-config',{cache:'no-store'});
       if(!r.ok) throw new Error('bad status '+r.status);
       const j=await r.json();
       if(j && j.iceServers && Array.isArray(j.iceServers)) return j.iceServers;
@@ -1339,6 +1368,7 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
 
   // ---------------- Socket events ----------------
   socket.on('connect', async()=>{
+    dbg('socket connected', room);
     stSock.textContent='connected';
     setLed(ledSock,true,true);
 
@@ -1384,6 +1414,7 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
   });
 
   socket.on('disconnect', ()=>{
+    dbg('socket disconnected');
     stSock.textContent='disconnected';
     setLed(ledSock,false);
   });
@@ -1474,14 +1505,14 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
     stopCompositor();
     try{ if(pc) pc.close(); }catch(e){}
   });
+      dbg('ready');
+    }
+  };
+
+  window.BroadcastApp = BroadcastApp;
+  window.addEventListener('DOMContentLoaded', () => BroadcastApp.init(), { once: true });
 })();
-</script>
-</body>
-</html>
-
-EOF_STATIC_BROADCAST_HTML
-
-
+EOF_STATIC_JS_BROADCAST_JS
 
 
 write_file "static/watch.html" <<'EOF_STATIC_WATCH_HTML'
