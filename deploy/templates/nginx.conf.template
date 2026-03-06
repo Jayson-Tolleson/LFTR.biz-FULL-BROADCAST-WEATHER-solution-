@@ -1,0 +1,23 @@
+server {
+    __LISTEN_DIRECTIVES__
+    server_name __DOMAIN__;
+    __SSL_BLOCK__
+
+    location / {
+        proxy_pass http://__APP_BIND_HOST__:__APP_BIND_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    location /static/ {
+        alias __APP_DIR__/static/;
+        access_log off;
+        expires -1;
+    }
+}
+
+__REDIRECT_BLOCK__
