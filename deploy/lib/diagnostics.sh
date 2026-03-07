@@ -16,6 +16,9 @@ run_diagnostics() {
 
   if [[ "$ENABLE_NGINX" == "true" ]]; then
     run_optional "HTTP reverse proxy check" curl -fsS "http://127.0.0.1/watch"
+    if [[ "$ENABLE_GFS_PROXY" == "true" ]]; then
+      run_optional "HTTP /gfs/health check" curl -fsS "http://127.0.0.1/gfs/health"
+    fi
   fi
 
   if [[ "$ENABLE_TLS" == "true" ]]; then

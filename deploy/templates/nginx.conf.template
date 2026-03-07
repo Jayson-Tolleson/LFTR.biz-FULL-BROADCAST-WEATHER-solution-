@@ -1,3 +1,5 @@
+__GFS_SHARED_BLOCK__
+
 server {
     __LISTEN_DIRECTIVES__
     server_name __DOMAIN__;
@@ -18,6 +20,8 @@ server {
         access_log off;
         expires -1;
     }
+
+    __GFS_LOCATIONS__
 }
 
 __REDIRECT_BLOCK__
