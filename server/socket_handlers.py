@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
+from server import ai
 from server.config import Settings
 from server.rtc import RTCManager
 from server.state import AppState
@@ -117,10 +118,27 @@ def register_socket_handlers(sio, state: AppState, settings: Settings, rtc: RTCM
         room_id, role = state.get_sid_meta(sid)
         if role != "broadcast":
             return
-        # compatibility path: accept chunks; mock transcript event
+
+        payload = data or {}
+        b64_audio = payload.get("b64") or payload.get("content_base64") or ""
+        if not b64_audio:
+            return
+
+        try:
+            import base64
+
+            audio_bytes = base64.b64decode(b64_audio)
+        except Exception:
+            log.warning("invalid stt_chunk payload room=%s sid=%s", room_id, sid)
+            return
+
+        text = await ai.transcribe_track([audio_bytes], mime=(payload.get("mime") or "audio/webm"))
+        if not text:
+            return
+
         await sio.emit(
             "stt_text",
-            {"text": "", "ts": now_ms()},
+            {"text": text, "ts": now_ms()},
             to=f"room:{room_id}:all",
         )
 
