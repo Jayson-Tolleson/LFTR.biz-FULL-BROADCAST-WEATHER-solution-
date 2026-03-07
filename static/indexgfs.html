@@ -9,61 +9,214 @@
     .wrap { padding: 12px; display: grid; gap: 12px; }
     .card { border: 1px solid #2a3550; background: #121a2c; border-radius: 10px; padding: 10px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #22314f; padding: 6px; text-align: left; font-size: 13px; }
+    .marker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+    .marker-content { border: 1px solid #334161; border-radius: 8px; padding: 8px; cursor: pointer; background: #0f1a30; }
+    .marker-content:hover { border-color: #60a5fa; }
+    .marker-name { font-weight: 700; font-size: 13px; }
+    .marker-coord { font-size: 12px; opacity: 0.8; }
+    .hud { position: fixed; right: 12px; bottom: 12px; width: min(420px, calc(100% - 24px)); background: #101a31; border: 1px solid #334161; border-radius: 10px; padding: 10px; display: none; z-index: 999; }
+    .hud.show { display: block; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    input, textarea, button { background: #0b1220; color: #e8eefc; border: 1px solid #334161; border-radius: 6px; padding: 6px; }
+    textarea { width: 100%; min-height: 78px; }
+    .videos a { color: #93c5fd; display: block; margin: 4px 0; }
+    .status { font-size: 12px; opacity: 0.85; }
   </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card"><strong>GFS not connected</strong> — modular placeholder is active.</div>
   <div class="card">
-    <div><strong>Health</strong></div>
+    <strong>GFS status</strong>
     <pre id="health" class="mono">loading...</pre>
   </div>
   <div class="card">
-    <div><strong>Fish Locations</strong></div>
-    <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Lat</th><th>Lon</th></tr></thead>
-      <tbody id="fishRows"></tbody>
-    </table>
+    <strong>Fish markers</strong>
+    <div id="markerGrid" class="marker-grid"></div>
   </div>
+  <div class="card status" id="liveStatus">Live updates: connecting...</div>
+</div>
+
+<template id="markerTemplate">
+  <marker-3d-interactive-element class="marker-host">
+    <div class="marker-content">
+      <div class="marker-name"></div>
+      <div class="marker-coord"></div>
+    </div>
+  </marker-3d-interactive-element>
+</template>
+
+<div id="popupHud" class="hud">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <strong id="hudTitle">Location</strong>
+    <button id="closeHud">Close</button>
+  </div>
+  <div class="status" id="hudKey"></div>
+
+  <div class="row">
+    <button id="connectLiveBtn">Connect Live</button>
+    <input id="liveUrl" placeholder="Live stream URL (optional)">
+  </div>
+
+  <div class="row">
+    <input id="videoFile" type="file" accept="video/*">
+    <button id="uploadBtn">Upload Video</button>
+  </div>
+
+  <div class="row">
+    <textarea id="reportText" placeholder="Write fishing report for this location"></textarea>
+    <button id="saveReportBtn">Save Report</button>
+  </div>
+
   <div class="card">
-    <div><strong>Live updates</strong></div>
-    <pre id="live" class="mono">connecting...</pre>
+    <strong>Location media</strong>
+    <div id="mediaInfo" class="status">No media loaded yet.</div>
+    <div id="videoList" class="videos"></div>
   </div>
 </div>
 
 <script>
-async function loadHealth() {
-  const r = await fetch('/gfs/api/health');
-  const j = await r.json();
-  document.getElementById('health').textContent = JSON.stringify(j, null, 2);
-}
+(() => {
+  const markerGrid = document.getElementById('markerGrid');
+  const markerTemplate = document.getElementById('markerTemplate');
+  const hud = document.getElementById('popupHud');
+  const hudTitle = document.getElementById('hudTitle');
+  const hudKey = document.getElementById('hudKey');
+  const reportText = document.getElementById('reportText');
+  const mediaInfo = document.getElementById('mediaInfo');
+  const videoList = document.getElementById('videoList');
+  const liveUrl = document.getElementById('liveUrl');
+  const videoFile = document.getElementById('videoFile');
 
-async function loadFish() {
-  const r = await fetch('/gfs/api/fish');
-  const j = await r.json();
-  const rows = document.getElementById('fishRows');
-  rows.innerHTML = '';
-  (j.items || []).forEach((p) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${p.id}</td><td>${p.name}</td><td>${p.lat}</td><td>${p.lon}</td>`;
-    rows.appendChild(tr);
-  });
-}
+  const state = {
+    fish: [],
+    selected: null,
+  };
 
-(function connectWs() {
-  const wsProto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const ws = new WebSocket(`${wsProto}${location.host}/gfs/ws/updates`);
-  const live = document.getElementById('live');
-  ws.onopen = () => { live.textContent = 'connected'; };
-  ws.onmessage = (ev) => { live.textContent = ev.data; };
-  ws.onerror = () => { live.textContent = 'error'; };
-  ws.onclose = () => { setTimeout(connectWs, 1500); };
+  async function json(url, opts) {
+    const r = await fetch(url, opts);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || `request failed (${r.status})`);
+    return j;
+  }
+
+  async function loadHealth() {
+    const j = await json('/gfs/api/health');
+    document.getElementById('health').textContent = JSON.stringify(j, null, 2);
+  }
+
+  function renderMarkers() {
+    markerGrid.innerHTML = '';
+    state.fish.forEach((p) => {
+      const node = markerTemplate.content.firstElementChild.cloneNode(true);
+      const body = node.querySelector('.marker-content');
+      node.querySelector('.marker-name').textContent = p.name;
+      node.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
+      body.addEventListener('click', () => openHud(p));
+      markerGrid.appendChild(node);
+    });
+  }
+
+  async function loadFish() {
+    const j = await json('/gfs/api/fish');
+    state.fish = j.items || [];
+    renderMarkers();
+  }
+
+  function setHudMessage(msg) {
+    mediaInfo.textContent = msg;
+  }
+
+  function renderVideos(uploads) {
+    videoList.innerHTML = '';
+    (uploads || []).forEach((u) => {
+      const a = document.createElement('a');
+      a.href = u.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `${u.filename || 'video'} (${new Date(u.uploaded_at || Date.now()).toLocaleString()})`;
+      videoList.appendChild(a);
+    });
+  }
+
+  async function refreshLocationContext() {
+    if (!state.selected) return;
+    const j = await json(`/gfs/api/location_media?location_key=${encodeURIComponent(state.selected.location_key)}`);
+    reportText.value = j.report_text || '';
+    renderVideos(j.uploads || []);
+    const live = j.live || { active: false, stream_url: '' };
+    liveUrl.value = live.stream_url || '';
+    setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : 'Live inactive');
+  }
+
+  async function openHud(point) {
+    state.selected = point;
+    hudTitle.textContent = point.name;
+    hudKey.textContent = `location_key: ${point.location_key}`;
+    hud.classList.add('show');
+    await refreshLocationContext();
+  }
+
+  async function saveReport() {
+    if (!state.selected) return;
+    await json('/gfs/api/report/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key, report_text: reportText.value || '' }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Report saved.');
+  }
+
+  async function uploadVideo() {
+    if (!state.selected) return;
+    const file = videoFile.files && videoFile.files[0];
+    if (!file) {
+      setHudMessage('Select a video file first.');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('location_key', state.selected.location_key);
+    fd.append('file', file);
+    await json('/gfs/api/upload_video', { method: 'POST', body: fd });
+    videoFile.value = '';
+    await refreshLocationContext();
+    setHudMessage('Video uploaded.');
+  }
+
+  async function connectLive() {
+    if (!state.selected) return;
+    const streamUrl = (liveUrl.value || '').trim();
+    await json('/gfs/api/live/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key, active: true, stream_url: streamUrl }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Live session updated.');
+  }
+
+  function startLiveSocket() {
+    const wsProto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(`${wsProto}${location.host}/gfs/ws/updates`);
+    const liveStatus = document.getElementById('liveStatus');
+    ws.onopen = () => { liveStatus.textContent = 'Live updates: connected'; };
+    ws.onmessage = (ev) => { liveStatus.textContent = `Live updates: ${ev.data}`; };
+    ws.onerror = () => { liveStatus.textContent = 'Live updates: error'; };
+    ws.onclose = () => {
+      liveStatus.textContent = 'Live updates: reconnecting...';
+      setTimeout(startLiveSocket, 1500);
+    };
+  }
+
+  document.getElementById('saveReportBtn').addEventListener('click', () => saveReport().catch((e) => setHudMessage(e.message)));
+  document.getElementById('uploadBtn').addEventListener('click', () => uploadVideo().catch((e) => setHudMessage(e.message)));
+  document.getElementById('connectLiveBtn').addEventListener('click', () => connectLive().catch((e) => setHudMessage(e.message)));
+  document.getElementById('closeHud').addEventListener('click', () => hud.classList.remove('show'));
+
+  loadHealth().catch(() => {});
+  loadFish().catch((e) => { markerGrid.textContent = e.message; });
+  startLiveSocket();
 })();
-
-loadHealth().catch(() => {});
-loadFish().catch(() => {});
 </script>
 </body>
 </html>

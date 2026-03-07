@@ -129,10 +129,53 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         return jsonify(gfs.config())
 
     @app.get("/gfs/api/fish")
+    @app.get("/gfs/api/points")
     async def gfs_fish():
         payload = gfs.fish_payload()
         status = 200 if payload.get("ok") else 500
         return jsonify(payload), status
+
+    @app.get("/gfs/api/location_media")
+    async def gfs_location_media():
+        location_key = (request.args.get("location_key") or "").strip()
+        payload = gfs.location_media(location_key)
+        status = 200 if payload.get("ok") else 400
+        return jsonify(payload), status
+
+    @app.post("/gfs/api/report/upsert")
+    async def gfs_report_upsert():
+        payload = await request.get_json(force=True)
+        location_key = (payload or {}).get("location_key") or ""
+        report_text = (payload or {}).get("report_text") or ""
+        result = gfs.upsert_report(location_key, report_text)
+        status = 200 if result.get("ok") else 400
+        return jsonify(result), status
+
+    @app.post("/gfs/api/live/upsert")
+    async def gfs_live_upsert():
+        payload = await request.get_json(force=True)
+        location_key = (payload or {}).get("location_key") or ""
+        active = bool((payload or {}).get("active"))
+        stream_url = (payload or {}).get("stream_url") or ""
+        result = gfs.upsert_live(location_key, active, stream_url)
+        status = 200 if result.get("ok") else 400
+        return jsonify(result), status
+
+    @app.post("/gfs/api/upload_video")
+    async def gfs_upload_video():
+        form = await request.form
+        files = await request.files
+        location_key = (form.get("location_key") or "").strip()
+        file_obj = files.get("file")
+        if not location_key:
+            return jsonify({"ok": False, "error": "missing location_key"}), 400
+        if not file_obj:
+            return jsonify({"ok": False, "error": "missing file"}), 400
+
+        data = file_obj.read()
+        result = gfs.save_upload_video(location_key=location_key, filename=file_obj.filename or "upload.mp4", raw=data)
+        status = 200 if result.get("ok") else 400
+        return jsonify(result), status
 
     @app.get("/gfs/api/frame")
     async def gfs_frame():
