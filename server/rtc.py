@@ -89,6 +89,25 @@ class RTCManager:
 
         self._pending_cleanup[key] = asyncio.create_task(_runner())
 
+
+    async def enable_stt_for_broadcaster(self, room_id: str, sid: str) -> tuple[bool, str]:
+        room = self.state.ensure_room(room_id)
+        if room.broadcaster_sid != sid:
+            return False, "not_broadcaster"
+        room.settings.stt_enabled = True
+        await self._emit_room(room_id, "stt_status", {"enabled": True, "reason": "enabled", "ts": now_ms()})
+        await self._emit_status(room_id)
+        return True, "enabled"
+
+    async def disable_stt_for_broadcaster(self, room_id: str, sid: str) -> tuple[bool, str]:
+        room = self.state.ensure_room(room_id)
+        if room.broadcaster_sid != sid:
+            return False, "not_broadcaster"
+        room.settings.stt_enabled = False
+        await self._emit_room(room_id, "stt_status", {"enabled": False, "reason": "disabled", "ts": now_ms()})
+        await self._emit_status(room_id)
+        return True, "disabled"
+
     async def start_broadcaster_from_offer(self, room_id: str, sid: str, sdp: str, sdp_type: str) -> Dict[str, str]:
         existing = self.broadcasters.get(room_id)
         if existing:

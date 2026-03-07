@@ -30,7 +30,13 @@ def create_asgi_app():
     state = AppState(default_room=settings.default_room)
     rtc = RTCManager(state)
 
-    sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*", transports=["websocket"], max_http_buffer_size=20000000)
+    sio = socketio.AsyncServer(
+        async_mode="asgi",
+        cors_allowed_origins="*",
+        max_http_buffer_size=20000000,
+        ping_interval=25,
+        ping_timeout=60,
+    )
     state.sio = sio
 
     register_routes(app, state, settings, rtc)

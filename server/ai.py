@@ -133,3 +133,11 @@ async def transcribe_track(chunks: Sequence[bytes], mime: str = "audio/webm") ->
     to keep socket/event compatibility without hard failures.
     """
     return await asyncio.to_thread(_transcribe_sync, list(chunks), mime)
+
+
+def stt_available() -> bool:
+    try:
+        from google.cloud import speech  # noqa: F401
+        return True
+    except Exception:
+        return False

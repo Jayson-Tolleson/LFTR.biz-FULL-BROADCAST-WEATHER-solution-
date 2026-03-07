@@ -97,14 +97,36 @@ def register_socket_handlers(sio, state: AppState, settings: Settings, rtc: RTCM
             room.settings.stt_enabled = bool(payload.get("stt_enabled"))
         await _emit_room_status(sio, room_id, room)
 
-    @sio.on("stt_toggle")
-    async def stt_toggle(sid, data):
+    @sio.on("ai_stt_enable")
+    async def ai_stt_enable(sid, data):
         room_id, role = state.get_sid_meta(sid)
         if role != "broadcast":
             return
         room = state.ensure_room(room_id)
-        room.settings.stt_enabled = bool((data or {}).get("enabled"))
-        await _emit_room_status(sio, room_id, room)
+        if not ai.stt_available():
+            room.settings.stt_enabled = False
+            await sio.emit("stt_status", {"enabled": False, "reason": "google_speech_unavailable", "ts": now_ms()}, to=sid)
+            await sio.emit("stt_error", {"message": "Google Speech client unavailable", "ts": now_ms()}, to=sid)
+            await _emit_room_status(sio, room_id, room)
+            return
+        ok, reason = await rtc.enable_stt_for_broadcaster(room_id, sid)
+        await sio.emit("stt_status", {"enabled": bool(ok), "reason": reason, "ts": now_ms()}, to=sid)
+
+    @sio.on("ai_stt_disable")
+    async def ai_stt_disable(sid, data):
+        room_id, role = state.get_sid_meta(sid)
+        if role != "broadcast":
+            return
+        ok, reason = await rtc.disable_stt_for_broadcaster(room_id, sid)
+        await sio.emit("stt_status", {"enabled": False if ok else None, "reason": reason, "ts": now_ms()}, to=sid)
+
+    @sio.on("stt_toggle")
+    async def stt_toggle(sid, data):
+        enabled = bool((data or {}).get("enabled"))
+        if enabled:
+            await ai_stt_enable(sid, data)
+        else:
+            await ai_stt_disable(sid, data)
 
     @sio.on("chat_message")
     async def chat_message(sid, data):

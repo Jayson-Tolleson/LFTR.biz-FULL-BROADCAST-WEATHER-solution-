@@ -22,8 +22,7 @@ video{width:100%;height:100%;object-fit:contain}
     <span class="badge" id="label">PUBLIC ACCESS</span>
     <span class="badge" id="mode">STANDBY</span>
     <span class="badge" id="conn">connecting</span>
-    <span class="badge" id="stt">STT off</span>
-    <span class="badge" id="ai">AI idle</span>
+        <span class="badge" id="ai">AI idle</span>
   </div>
   <div class="stage">
     <div class="videoWrap">
@@ -35,20 +34,32 @@ video{width:100%;height:100%;object-fit:contain}
 <script>
 (() => {
   const room = (new URLSearchParams(location.search).get('room') || 'default').trim() || 'default';
-  const socket = io(window.location.origin, { path: '/socket.io', transports: ['websocket'], upgrade: false, query: { room, role: 'watch' } });
+  const socket = io(window.location.origin, { path: '/socket.io', transports: ['polling', 'websocket'], query: { room, role: 'watch' } });
   const v = document.getElementById('v');
   const standby = document.getElementById('standby');
   const conn = document.getElementById('conn');
   const mode = document.getElementById('mode');
-  const stt = document.getElementById('stt');
   const ai = document.getElementById('ai');
   const label = document.getElementById('label');
 
   let pc = null;
+  let iceRestarted = false;
 
-  function ensurePc() {
+  async function fetchIceServers() {
+    try {
+      const r = await fetch('/webrtc/ice-config');
+      const j = await r.json();
+      console.log('[watch] iceServers', j && j.iceServers);
+      return (j && Array.isArray(j.iceServers)) ? j.iceServers : [{ urls: 'stun:stun.l.google.com:19302' }];
+    } catch (e) {
+      console.log('[watch] ice config failed', e);
+      return [{ urls: 'stun:stun.l.google.com:19302' }];
+    }
+  }
+
+  function ensurePc(iceServers) {
     if (pc) return pc;
-    pc = new RTCPeerConnection();
+    pc = new RTCPeerConnection({ iceServers });
     pc.ontrack = (ev) => {
       v.srcObject = ev.streams[0];
       standby.style.display = 'none';
@@ -57,15 +68,29 @@ video{width:100%;height:100%;object-fit:contain}
     pc.onicecandidate = (e) => {
       if (e.candidate) socket.emit('watch_ice', { candidate: e.candidate });
     };
+    pc.onconnectionstatechange = () => {
+      console.log('[watch] pc.connectionState', pc.connectionState);
+    };
+    pc.oniceconnectionstatechange = async () => {
+      console.log('[watch] pc.iceConnectionState', pc.iceConnectionState);
+      if ((pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') && !iceRestarted) {
+        iceRestarted = true;
+        try {
+          socket.emit('watch_join', { room });
+        } catch (_) {}
+      }
+    };
+
     return pc;
   }
 
-  socket.on('connect', () => { conn.textContent = 'connected'; socket.emit('watch_join', { room }); });
-  socket.on('disconnect', () => { conn.textContent = 'disconnected'; });
+  socket.on('connect', () => { conn.textContent = 'connected'; console.log('[watch] socket connected'); socket.emit('watch_join', { room }); });
+  socket.on('disconnect', () => { conn.textContent = 'disconnected'; console.log('[watch] socket disconnected'); });
+  socket.on('reconnect_attempt', () => { conn.textContent = 'reconnecting'; console.log('[watch] socket reconnect_attempt'); });
+  socket.on('reconnect_error', (e) => { conn.textContent = 'reconnect error'; console.log('[watch] socket reconnect_error', e); });
 
   socket.on('room_status', (p) => {
     if (!p) return;
-    stt.textContent = p.stt_enabled ? 'STT on' : 'STT off';
     ai.textContent = p.ai && p.ai.enabled ? 'AI on' : 'AI off';
   });
 
@@ -88,7 +113,8 @@ video{width:100%;height:100%;object-fit:contain}
   });
 
   socket.on('watch_offer', async (offer) => {
-    const c = ensurePc();
+    const iceServers = await fetchIceServers();
+    const c = ensurePc(iceServers);
     await c.setRemoteDescription(offer);
     const answer = await c.createAnswer();
     await c.setLocalDescription(answer);

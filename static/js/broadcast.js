@@ -218,8 +218,7 @@
     connectSocket() {
       const socket = io(window.location.origin, {
         path: this.config.socketPath,
-        transports: ['websocket'],
-        upgrade: false,
+        transports: ['polling', 'websocket'],
         query: { room: this.state.room, role: this.config.role },
       });
 
@@ -275,6 +274,16 @@
         if (this.dom.stSock) this.dom.stSock.textContent = 'disconnected';
       });
 
+      s.on('reconnect_attempt', () => {
+        dbg('socket reconnect_attempt');
+        if (this.dom.stSock) this.dom.stSock.textContent = 'reconnecting';
+      });
+
+      s.on('reconnect_error', (err) => {
+        dbg('socket reconnect_error', err);
+        if (this.dom.stSock) this.dom.stSock.textContent = 'reconnect error';
+      });
+
       s.on('webrtc_answer', async (ans) => {
         try {
           await this.createPeerConnection();
@@ -298,6 +307,15 @@
 
       s.on('chat_message', (msg) => this.renderChatMessage(msg));
       s.on('stt_text', (p) => this.renderChatMessage({ sender: 'stt', role: 'broadcaster_stt', text: p.text, ts: p.ts || Date.now() }));
+      s.on('stt_status', (p) => {
+        dbg('stt_status', p);
+        if (!p) return;
+        if (p.enabled === false) this.stopStt();
+      });
+      s.on('stt_error', (p) => {
+        dbg('stt_error', p);
+        this.renderSystemMessage(`[stt] ${p && p.message ? p.message : 'unavailable'}`);
+      });
       s.on('stage_state', (p) => {
         if (!p) return;
         if (p.mode === 'upload' && p.latestUploadUrl) {
@@ -539,7 +557,8 @@
         this.setLed(this.dom.ledRtc, pc.connectionState === 'connected', pc.connectionState === 'connecting');
         dbg('pc connectionState', pc.connectionState);
       };
-      pc.oniceconnectionstatechange = () => {
+      pc._iceRestarted = false;
+      pc.oniceconnectionstatechange = async () => {
         if (this.dom.stIce) this.dom.stIce.textContent = pc.iceConnectionState;
         this.setLed(
           this.dom.ledIce,
@@ -547,6 +566,19 @@
           pc.iceConnectionState === 'checking',
         );
         dbg('pc iceConnectionState', pc.iceConnectionState);
+        if ((pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') && !pc._iceRestarted) {
+          pc._iceRestarted = true;
+          try {
+            dbg('attempting ICE restart');
+            const offer = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(offer);
+            if (this.state.socket) {
+              this.state.socket.emit('webrtc_offer', { sdp: pc.localDescription.sdp, type: pc.localDescription.type, room: this.state.room });
+            }
+          } catch (err) {
+            dbg('ice restart failed', err);
+          }
+        }
       };
     },
 
@@ -618,7 +650,7 @@
         const r = await fetch(this.config.iceConfigUrl, { cache: 'no-store' });
         if (!r.ok) throw new Error(`bad status ${r.status}`);
         const j = await r.json();
-        if (j && j.iceServers && Array.isArray(j.iceServers)) return j.iceServers;
+        if (j && j.iceServers && Array.isArray(j.iceServers)) { dbg('iceServers', j.iceServers); return j.iceServers; }
       } catch (err) {
         dbg('ice-config fetch failed; using STUN only', err);
       }
@@ -737,13 +769,13 @@
       };
       this.state.sttRec.start(500);
       this.state.sttEnabled = true;
-      if (this.dom.sttTxt) this.dom.sttTxt.textContent = 'STT: on';
+      if (this.dom.sttTxt) this.dom.sttTxt.textContent = 'STT on';
       if (this.dom.stStt) this.dom.stStt.textContent = 'on';
       this.setLed(this.dom.sttLed, true, true);
       this.setLed(this.dom.ledStt, true, true);
       if (this.state.socket) {
         this.state.socket.emit('set_room_settings', { stt_enabled: true });
-        this.state.socket.emit('stt_toggle', { enabled: true });
+        this.state.socket.emit('ai_stt_enable', { enabled: true });
       }
       dbg('stt started');
     },
@@ -756,13 +788,13 @@
       }
       this.state.sttRec = null;
       this.state.sttEnabled = false;
-      if (this.dom.sttTxt) this.dom.sttTxt.textContent = 'STT: off';
+      if (this.dom.sttTxt) this.dom.sttTxt.textContent = 'STT off';
       if (this.dom.stStt) this.dom.stStt.textContent = 'off';
       this.setLed(this.dom.sttLed, false);
       this.setLed(this.dom.ledStt, false);
       if (this.state.socket) {
         this.state.socket.emit('set_room_settings', { stt_enabled: false });
-        this.state.socket.emit('stt_toggle', { enabled: false });
+        this.state.socket.emit('ai_stt_disable', { enabled: false });
       }
       dbg('stt stopped');
     },

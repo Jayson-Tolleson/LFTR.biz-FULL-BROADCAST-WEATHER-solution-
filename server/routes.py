@@ -31,36 +31,35 @@ def _normalize_ice_url(raw: str, default_scheme: str = "turn") -> str:
 
 
 def build_ice_servers(settings: Settings):
-    servers = [{"urls": "stun:stun.l.google.com:19302"}]
+    servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
 
-    turn_urls = []
+    raw_urls = []
     if settings.turn_url:
-        turn_urls.append(_normalize_ice_url(settings.turn_url, "turn"))
+        raw_urls.append(_normalize_ice_url(settings.turn_url, "turn"))
     if settings.turns_url:
-        turn_urls.append(_normalize_ice_url(settings.turns_url, "turns"))
+        raw_urls.append(_normalize_ice_url(settings.turns_url, "turns"))
 
     for raw in settings.turn_urls.split(","):
         raw = raw.strip()
-        if not raw:
+        if raw:
+            raw_urls.append(_normalize_ice_url(raw, "turn"))
+
+    host = settings.domain or settings.public_ip
+    if host:
+        raw_urls.extend([
+            f"turn:{host}:3478?transport=udp",
+            f"turn:{host}:3478?transport=tcp",
+            f"turns:{host}:5349",
+        ])
+
+    turn_urls = []
+    seen = set()
+    for url in raw_urls:
+        u = (url or "").strip()
+        if not u or u in seen:
             continue
-        turn_urls.append(_normalize_ice_url(raw, "turn"))
-
-    if not turn_urls and settings.public_ip:
-        turn_urls.extend(
-            [
-                f"turn:{settings.public_ip}:3478?transport=udp",
-                f"turn:{settings.public_ip}:3478?transport=tcp",
-            ]
-        )
-
-    if not turn_urls and settings.domain:
-        turn_urls.extend(
-            [
-                f"turn:{settings.domain}:3478?transport=udp",
-                f"turn:{settings.domain}:3478?transport=tcp",
-                f"turns:{settings.domain}:5349",
-            ]
-        )
+        seen.add(u)
+        turn_urls.append(u)
 
     if turn_urls and settings.turn_username and settings.turn_password:
         servers.append(
