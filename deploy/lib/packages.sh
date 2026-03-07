@@ -11,7 +11,7 @@ install_system_packages() {
 
 install_python_dependencies() {
   [[ "$INSTALL_PY_DEPS" == "true" ]] || { log_info "Skipping python dependency installation"; return 0; }
-  [[ -f "${APP_DIR}/requirements.txt" ]] || { log_warn "requirements.txt missing; skipping pip install"; return 0; }
+  [[ -f "${APP_DIR}/requirements.txt" ]] || die "requirements.txt missing at ${APP_DIR}; cannot install python dependencies"
 
   run_required "create venv" python3 -m venv "${APP_DIR}/venv"
   run_required "upgrade pip" "${APP_DIR}/venv/bin/pip" install --progress-bar off --upgrade pip setuptools wheel
