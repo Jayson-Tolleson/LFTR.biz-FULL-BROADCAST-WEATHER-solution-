@@ -3,35 +3,125 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GFS Module</title>
+  <title>GFS v7</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e8eefc; }
+    :root {
+      --bg: #060c18;
+      --glass: rgba(12, 22, 43, 0.72);
+      --line: rgba(96, 165, 250, 0.35);
+      --cyan: #22d3ee;
+      --pink: #f472b6;
+      --lime: #84cc16;
+      --amber: #f59e0b;
+      --text: #e6f4ff;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at 18% 10%, #1d4ed8 0%, #08122a 44%, #04070f 100%);
+      color: var(--text);
+    }
     .wrap { padding: 12px; display: grid; gap: 12px; }
-    .card { border: 1px solid #2a3550; background: #121a2c; border-radius: 10px; padding: 10px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .marker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
-    .marker-content { border: 1px solid #334161; border-radius: 8px; padding: 8px; cursor: pointer; background: #0f1a30; }
-    .marker-content:hover { border-color: #60a5fa; }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--glass);
+      border-radius: 12px;
+      padding: 10px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 0 28px rgba(34, 211, 238, 0.08);
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+    .top { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; }
+    .marker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+    .marker-content {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 8px;
+      cursor: pointer;
+      background: linear-gradient(180deg, rgba(30,58,138,.25), rgba(15,23,42,.25));
+      transition: transform .12s ease, border-color .12s ease;
+    }
+    .marker-content:hover { transform: translateY(-1px); border-color: var(--cyan); }
     .marker-name { font-weight: 700; font-size: 13px; }
-    .marker-coord { font-size: 12px; opacity: 0.8; }
-    .hud { position: fixed; right: 12px; bottom: 12px; width: min(420px, calc(100% - 24px)); background: #101a31; border: 1px solid #334161; border-radius: 10px; padding: 10px; display: none; z-index: 999; }
+    .marker-coord { font-size: 12px; opacity: 0.82; }
+    .marker-bait { font-size: 12px; margin-top: 4px; }
+
+    .features { display: flex; flex-wrap: wrap; gap: 8px; }
+    .feature {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #334155;
+      background: rgba(15, 23, 42, 0.55);
+      color: #dbeafe;
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    .light {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #334155;
+      box-shadow: 0 0 0 rgba(0,0,0,0);
+    }
+    .feature.on .light { animation: bl 1.1s linear infinite; }
+    .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+    .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
+    .feature[data-kind="jet"].on .light { background: var(--pink); box-shadow: 0 0 10px var(--pink); }
+    .feature[data-kind="popups"].on .light { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+    .feature[data-kind="markers"].on .light { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
+    .feature[data-kind="bait"].on .light { background: #14b8a6; box-shadow: 0 0 10px #14b8a6; }
+    .feature[data-kind="live"].on .light { background: #f43f5e; box-shadow: 0 0 10px #f43f5e; }
+    .feature[data-kind="report"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
+    @keyframes bl { 0%,100%{opacity:1} 50%{opacity:.28} }
+
+    .hud {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: min(450px, calc(100% - 24px));
+      background: rgba(9, 15, 31, 0.88);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 10px;
+      display: none;
+      z-index: 999;
+      backdrop-filter: blur(12px);
+    }
     .hud.show { display: block; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-    input, textarea, button { background: #0b1220; color: #e8eefc; border: 1px solid #334161; border-radius: 6px; padding: 6px; }
+    input, textarea, button {
+      background: #0b1220;
+      color: #e8eefc;
+      border: 1px solid #334161;
+      border-radius: 6px;
+      padding: 6px;
+    }
     textarea { width: 100%; min-height: 78px; }
     .videos a { color: #93c5fd; display: block; margin: 4px 0; }
-    .status { font-size: 12px; opacity: 0.85; }
+    .status { font-size: 12px; opacity: 0.9; }
+    .context { font-size: 12px; line-height: 1.45; border-top: 1px solid #27324a; padding-top: 8px; }
+    @media (max-width: 980px) { .top { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="top">
+    <div class="card">
+      <strong>Fish markers</strong>
+      <div id="markerGrid" class="marker-grid" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <strong>Feature lights</strong>
+      <div id="features" class="features" style="margin-top:8px"></div>
+    </div>
+  </div>
+
   <div class="card">
     <strong>GFS status</strong>
     <pre id="health" class="mono">loading...</pre>
-  </div>
-  <div class="card">
-    <strong>Fish markers</strong>
-    <div id="markerGrid" class="marker-grid"></div>
   </div>
   <div class="card status" id="liveStatus">Live updates: connecting...</div>
 </div>
@@ -41,6 +131,7 @@
     <div class="marker-content">
       <div class="marker-name"></div>
       <div class="marker-coord"></div>
+      <div class="marker-bait"></div>
     </div>
   </marker-3d-interactive-element>
 </template>
@@ -67,10 +158,11 @@
     <button id="saveReportBtn">Save Report</button>
   </div>
 
-  <div class="card">
+  <div class="card" style="margin-top:8px">
     <strong>Location media</strong>
     <div id="mediaInfo" class="status">No media loaded yet.</div>
     <div id="videoList" class="videos"></div>
+    <div id="intel" class="context"></div>
   </div>
 </div>
 
@@ -86,17 +178,52 @@
   const videoList = document.getElementById('videoList');
   const liveUrl = document.getElementById('liveUrl');
   const videoFile = document.getElementById('videoFile');
+  const intel = document.getElementById('intel');
 
   const state = {
     fish: [],
     selected: null,
+    features: {
+      clouds: true,
+      rain: true,
+      jet: true,
+      popups: true,
+      markers: true,
+      bait: true,
+      live: true,
+      report: true,
+    },
   };
+
+  function mkFeature(kind, label) {
+    const b = document.createElement('button');
+    b.className = `feature on`;
+    b.dataset.kind = kind;
+    b.innerHTML = `<span class="light"></span><span>${label}</span>`;
+    b.onclick = () => {
+      state.features[kind] = !state.features[kind];
+      b.classList.toggle('on', state.features[kind]);
+      if (kind === 'markers') {
+        markerGrid.style.display = state.features[kind] ? 'grid' : 'none';
+      }
+    };
+    return b;
+  }
+
+  const features = document.getElementById('features');
+  [['clouds','Clouds'],['rain','Rain'],['jet','Jet balloons'],['popups','Popups'],['markers','Fish markers'],['bait','Bait layer'],['live','Live media'],['report','Reports']]
+    .forEach(([k,l]) => features.appendChild(mkFeature(k,l)));
 
   async function json(url, opts) {
     const r = await fetch(url, opts);
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.ok === false) throw new Error(j.error || `request failed (${r.status})`);
     return j;
+  }
+
+  function baitText(p) {
+    const bait = (p.bait && p.bait.intensity) || 'unknown';
+    return `Bait: ${bait}`;
   }
 
   async function loadHealth() {
@@ -111,6 +238,7 @@
       const body = node.querySelector('.marker-content');
       node.querySelector('.marker-name').textContent = p.name;
       node.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
+      node.querySelector('.marker-bait').textContent = baitText(p);
       body.addEventListener('click', () => openHud(p));
       markerGrid.appendChild(node);
     });
@@ -138,17 +266,30 @@
     });
   }
 
+  function renderIntel(j) {
+    const bait = j.bait || {};
+    const weather = j.weather || {};
+    intel.textContent = [
+      `Bait signal: ${bait.intensity || 'n/a'} (confidence ${bait.confidence ?? 'n/a'}%)`,
+      `Bite window: ${bait.feeding_window || 'unknown'}`,
+      `Weather: ${weather.summary || 'n/a'}`,
+      `Water context: ${weather.water_context || 'n/a'}`,
+    ].join('\n');
+  }
+
   async function refreshLocationContext() {
     if (!state.selected) return;
     const j = await json(`/gfs/api/location_media?location_key=${encodeURIComponent(state.selected.location_key)}`);
     reportText.value = j.report_text || '';
     renderVideos(j.uploads || []);
+    renderIntel(j);
     const live = j.live || { active: false, stream_url: '' };
     liveUrl.value = live.stream_url || '';
     setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : 'Live inactive');
   }
 
   async function openHud(point) {
+    if (!state.features.popups) return;
     state.selected = point;
     hudTitle.textContent = point.name;
     hudKey.textContent = `location_key: ${point.location_key}`;

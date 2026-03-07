@@ -44,6 +44,35 @@ class GFSService:
         raw = re.sub(r"-{2,}", "-", raw).strip("-")
         return raw[:80]
 
+    def _heuristic_context(self, lat: float | None, lon: float | None, ts_ms: int) -> Dict[str, Any]:
+        minute = (ts_ms // 60000) % 60
+        score = int((abs((lat or 0) * 1.7 + (lon or 0) * 0.9) + minute) % 100)
+        if score >= 70:
+            intensity = "high"
+            window = "next 60-90 min"
+        elif score >= 40:
+            intensity = "medium"
+            window = "next 2-3 hours"
+        else:
+            intensity = "low"
+            window = "late window"
+
+        cloud_pct = min(100, max(0, int((abs(lat or 0) * 3 + minute) % 100)))
+        wind_knots = round(6 + (abs(lon or 0) % 14), 1)
+
+        return {
+            "bait": {
+                "intensity": intensity,
+                "confidence": score,
+                "feeding_window": window,
+                "school_summary": "Heuristic bait-school estimate from local marine/weather context",
+            },
+            "weather": {
+                "summary": f"Clouds {cloud_pct}% | Wind {wind_knots} kt",
+                "water_context": "Near-shore current and wind blend heuristic",
+            },
+        }
+
     def _load_store(self) -> Dict[str, Any]:
         if not self.store_path.exists():
             return {"locations": {}}
@@ -75,13 +104,19 @@ class GFSService:
         if not key:
             return {"ok": False, "error": "missing location_key", "location_key": "", "uploads": [], "live": {}, "report_text": ""}
         rec = self._ensure_location_record(store, key)
+        fish_match = next((p for p in self.state.fish_points if p.get("location_key") == key), None)
+        lat = fish_match.get("lat") if fish_match else None
+        lon = fish_match.get("lon") if fish_match else None
+        intel = self._heuristic_context(lat, lon, self._now_ms())
         return {
             "ok": True,
             "location_key": key,
+            "label": fish_match.get("name") if fish_match else key,
             "report_text": rec.get("report_text") or "",
             "report_updated_at": rec.get("report_updated_at"),
             "uploads": rec.get("uploads") or [],
             "live": rec.get("live") or {"active": False, "stream_url": "", "updated_at": None},
+            **intel,
             "ts": self._now_ms(),
         }
 
@@ -142,6 +177,7 @@ class GFSService:
                             "name": name,
                             "lat": lat,
                             "lon": lon,
+                            **self._heuristic_context(lat, lon, self._now_ms()),
                             "meta": {
                                 k: v
                                 for k, v in row.items()
