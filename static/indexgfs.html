@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GFS v7 Marine Intelligence Globe</title>
+  <style>
+    :root {
+      --bg: #050b18;
+      --glass: rgba(8, 20, 41, 0.66);
+      --line: rgba(56, 189, 248, 0.38);
+      --txt: #e6f4ff;
+      --cyan: #22d3ee;
+      --indigo: #818cf8;
+      --pink: #f472b6;
+      --lime: #84cc16;
+      --amber: #f59e0b;
+      --red: #f43f5e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--txt);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
+    }
+    .layout {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      padding: 10px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 0 24px rgba(34, 211, 238, .12);
+    }
+    .topbar {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 10px;
+      padding: 10px;
+      align-items: center;
+    }
+    .statusline { font-size: 12px; opacity: .9; display: flex; flex-wrap: wrap; gap: 8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .features { display: flex; flex-wrap: wrap; gap: 8px; }
+    .feature {
+      border: 1px solid #334155;
+      background: rgba(15, 23, 42, 0.7);
+      color: #dbeafe;
+      border-radius: 999px;
+      padding: 6px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+    }
+    .light {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #334155;
+    }
+    .feature.on .light { animation: blink 1.15s linear infinite; }
+    .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+    .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
+    .feature[data-kind="jet"].on .light { background: var(--pink); box-shadow: 0 0 10px var(--pink); }
+    .feature[data-kind="markers"].on .light { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
+    .feature[data-kind="bait"].on .light { background: #14b8a6; box-shadow: 0 0 10px #14b8a6; }
+    .feature[data-kind="popups"].on .light { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+    .feature[data-kind="reports"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
+    .feature[data-kind="live"].on .light { background: var(--red); box-shadow: 0 0 10px var(--red); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.28} }
+
+    .main {
+      display: grid;
+      grid-template-columns: 1.8fr 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+    .mapwrap { position: relative; overflow: hidden; }
+    #globe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 460px;
+      border-radius: 12px;
+      background: radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
+    }
+    .overlay {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      border: 1px solid rgba(129, 140, 248, .45);
+      border-radius: 10px;
+      padding: 8px;
+      font-size: 12px;
+      background: rgba(10, 14, 29, 0.74);
+      max-width: min(560px, calc(100% - 20px));
+      pointer-events: none;
+      white-space: pre-wrap;
+    }
+
+    .side {
+      padding: 10px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input, textarea, button {
+      background: #0b1220;
+      color: #e8eefc;
+      border: 1px solid #334161;
+      border-radius: 8px;
+      padding: 7px;
+    }
+    button { cursor: pointer; }
+
+    .markers {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .marker-content {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 8px;
+      cursor: pointer;
+      background: linear-gradient(180deg, rgba(30, 58, 138, .25), rgba(15, 23, 42, .25));
+    }
+    .marker-content:hover { border-color: var(--cyan); }
+    .marker-name { font-weight: 700; font-size: 13px; }
+    .marker-coord, .marker-bait { font-size: 12px; opacity: .9; }
+
+    .hud {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: min(460px, calc(100% - 24px));
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(6, 13, 29, .9);
+      backdrop-filter: blur(12px);
+      z-index: 20;
+      display: none;
+    }
+    .hud.show { display: block; }
+    textarea { width: 100%; min-height: 88px; }
+    .videos a { color: #93c5fd; display: block; margin-top: 4px; }
+    .stale { color: #fca5a5; }
+
+    @media (max-width: 980px) {
+      .topbar, .main { grid-template-columns: 1fr; }
+      #globe { min-height: 320px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <div class="card topbar">
+    <div>
+      <strong>LFTR v7 Marine Intelligence Globe</strong>
+      <div class="statusline" id="statusLine"></div>
+    </div>
+    <div class="features" id="features"></div>
+  </div>
+
+  <div class="main">
+    <div class="card mapwrap">
+      <gmp-map-3d id="globe"
+        center="27.9506,-82.4572,120"
+        range="1800000"
+        tilt="42"
+        heading="18">
+      </gmp-map-3d>
+      <div class="overlay mono" id="health">Loading operational feed…</div>
+    </div>
+
+    <div class="card side">
+      <div class="row">
+        <input id="mapsKey" placeholder="Google Maps API key" style="flex:1" />
+        <button id="saveKeyBtn">Load Globe</button>
+      </div>
+      <div class="row">
+        <button id="refreshFishBtn">Refresh Fish</button>
+        <button id="refreshHealthBtn">Refresh Health</button>
+      </div>
+      <div class="markers" id="markerGrid"></div>
+    </div>
+  </div>
+</div>
+
+<template id="markerTemplate">
+  <marker-3d-interactive-element class="marker-host">
+    <div class="marker-content">
+      <div class="marker-name"></div>
+      <div class="marker-coord"></div>
+      <div class="marker-bait"></div>
+    </div>
+  </marker-3d-interactive-element>
+</template>
+
+<div class="hud" id="hud">
+  <div class="row" style="justify-content:space-between">
+    <strong id="hudTitle">Location</strong>
+    <button id="closeHud">Close</button>
+  </div>
+  <div class="mono" id="hudKey"></div>
+  <div class="row" id="mediaInfo">Loading context…</div>
+
+  <label for="reportText">Report</label>
+  <textarea id="reportText" placeholder="Write location report..."></textarea>
+  <div class="row">
+    <button id="saveReportBtn">Save Report</button>
+    <button id="refreshContextBtn">Refresh Context</button>
+  </div>
+
+  <label for="liveUrl">Live stream URL</label>
+  <input id="liveUrl" placeholder="https://..." style="width:100%">
+  <div class="row">
+    <button id="connectLiveBtn">Update Live URL</button>
+  </div>
+
+  <label for="videoFile">Upload Video</label>
+  <input id="videoFile" type="file" accept="video/*" />
+  <div class="row">
+    <button id="uploadBtn">Upload Video</button>
+  </div>
+
+  <div class="context mono" id="intel"></div>
+  <div class="videos" id="videoList"></div>
+</div>
+
+<script>
+(() => {
+  const markerGrid = document.getElementById('markerGrid');
+  const markerTemplate = document.getElementById('markerTemplate');
+  const healthEl = document.getElementById('health');
+  const statusLine = document.getElementById('statusLine');
+
+  const hud = document.getElementById('hud');
+  const hudTitle = document.getElementById('hudTitle');
+  const hudKey = document.getElementById('hudKey');
+  const reportText = document.getElementById('reportText');
+  const mediaInfo = document.getElementById('mediaInfo');
+  const videoList = document.getElementById('videoList');
+  const liveUrl = document.getElementById('liveUrl');
+  const videoFile = document.getElementById('videoFile');
+  const intel = document.getElementById('intel');
+
+  const mapsKeyInput = document.getElementById('mapsKey');
+  const globeEl = document.getElementById('globe');
+
+  const state = {
+    fish: [],
+    selected: null,
+    feature: {
+      clouds: true,
+      rain: true,
+      jet: true,
+      markers: true,
+      bait: true,
+      popups: true,
+      reports: true,
+      live: true,
+    },
+    mapReady: false,
+    mapMarkers: [],
+    wsConnected: false,
+    lastUpdateAt: 0,
+    hudPollId: null,
+  };
+
+  function setStatus(msg, isStale = false) {
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last update: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • ${msg}`;
+    statusLine.classList.toggle('stale', !!isStale);
+  }
+
+  function setHudMessage(msg) { mediaInfo.textContent = msg; }
+
+  function normalizeFeatureButton(btn, kind) {
+    btn.classList.toggle('on', !!state.feature[kind]);
+  }
+
+  function mkFeature(kind, label) {
+    const btn = document.createElement('button');
+    btn.className = 'feature on';
+    btn.dataset.kind = kind;
+    btn.innerHTML = `<span class="light"></span><span>${label}</span>`;
+    btn.addEventListener('click', () => {
+      state.feature[kind] = !state.feature[kind];
+      normalizeFeatureButton(btn, kind);
+      if (kind === 'markers') {
+        markerGrid.style.display = state.feature.markers ? 'grid' : 'none';
+        state.mapMarkers.forEach((m) => { m.style.display = state.feature.markers ? '' : 'none'; });
+      }
+      if (kind === 'popups' && !state.feature.popups) {
+        hud.classList.remove('show');
+      }
+      renderMarkerBait();
+    });
+    return btn;
+  }
+
+  const featuresEl = document.getElementById('features');
+  [
+    ['clouds', 'Clouds'],
+    ['rain', 'Rain'],
+    ['jet', 'Jet balloons'],
+    ['markers', 'Fish markers'],
+    ['bait', 'Bait layer'],
+    ['popups', 'Popups'],
+    ['reports', 'Reports'],
+    ['live', 'Live media'],
+  ].forEach(([k, l]) => featuresEl.appendChild(mkFeature(k, l)));
+
+  async function json(url, opts) {
+    const res = await fetch(url, opts);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) {
+      throw new Error(body.error || `request failed (${res.status})`);
+    }
+    return body;
+  }
+
+  function baitText(point) {
+    const bait = (point.bait && point.bait.intensity) || 'unknown';
+    const confidence = point.bait && Number.isFinite(point.bait.confidence) ? ` (${point.bait.confidence}%)` : '';
+    return state.feature.bait ? `Bait: ${bait}${confidence}` : 'Bait layer disabled';
+  }
+
+  function renderMarkerBait() {
+    Array.from(markerGrid.querySelectorAll('.marker-card')).forEach((n) => {
+      const p = state.fish.find((x) => x.location_key === n.dataset.key);
+      if (!p) return;
+      const baitEl = n.querySelector('.marker-bait');
+      if (baitEl) baitEl.textContent = baitText(p);
+    });
+  }
+
+  async function loadHealth() {
+    const payload = await json('/gfs/api/health');
+    healthEl.textContent = JSON.stringify(payload, null, 2);
+    state.lastUpdateAt = Date.now();
+    setStatus('Operational feed nominal');
+  }
+
+  function clearMapMarkers() {
+    state.mapMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.mapMarkers = [];
+  }
+
+  async function ensureMapLibrary() {
+    if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
+      return null;
+    }
+    try {
+      return await window.google.maps.importLibrary('maps3d');
+    } catch (err) {
+      console.warn('[gfs] maps3d import failed', err);
+      return null;
+    }
+  }
+
+  async function renderMapMarkers() {
+    clearMapMarkers();
+    if (!state.mapReady || !state.feature.markers) return;
+
+    const lib = await ensureMapLibrary();
+    if (!lib || !lib.Marker3DInteractiveElement) return;
+
+    state.fish.forEach((p) => {
+      const markerNode = markerTemplate.content.firstElementChild.cloneNode(true);
+      const body = markerNode.querySelector('.marker-content');
+      markerNode.querySelector('.marker-name').textContent = p.name;
+      markerNode.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
+      markerNode.querySelector('.marker-bait').textContent = baitText(p);
+
+      const marker = new lib.Marker3DInteractiveElement({
+        position: { lat: p.lat, lng: p.lon, altitude: 10 },
+      });
+      marker.append(markerNode);
+      marker.addEventListener('gmp-click', () => openHud(p));
+      marker.addEventListener('click', () => openHud(p));
+      globeEl.append(marker);
+      state.mapMarkers.push(marker);
+
+      body.addEventListener('click', () => openHud(p));
+    });
+  }
+
+  function renderMarkerCards() {
+    markerGrid.innerHTML = '';
+    state.fish.forEach((p) => {
+      const card = document.createElement('div');
+      card.className = 'marker-content marker-card';
+      card.dataset.key = p.location_key;
+      card.innerHTML = `<div class="marker-name"></div><div class="marker-coord"></div><div class="marker-bait"></div>`;
+      card.querySelector('.marker-name').textContent = p.name;
+      card.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
+      card.querySelector('.marker-bait').textContent = baitText(p);
+      card.addEventListener('click', () => openHud(p));
+      markerGrid.append(card);
+    });
+  }
+
+  async function loadFish() {
+    const payload = await json('/gfs/api/fish');
+    state.fish = payload.items || [];
+    renderMarkerCards();
+    await renderMapMarkers();
+  }
+
+  function renderVideos(uploads) {
+    videoList.innerHTML = '';
+    (uploads || []).forEach((u) => {
+      const a = document.createElement('a');
+      a.href = u.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `${u.filename || 'video'} (${new Date(u.uploaded_at || Date.now()).toLocaleString()})`;
+      videoList.append(a);
+    });
+  }
+
+  function renderIntel(payload) {
+    const bait = payload.bait || {};
+    const weather = payload.weather || {};
+    intel.textContent = [
+      `Bait signal: ${bait.intensity || 'n/a'} (confidence ${bait.confidence ?? 'n/a'}%)`,
+      `Bite window: ${bait.feeding_window || 'unknown'}`,
+      `School summary: ${bait.school_summary || 'n/a'}`,
+      `Weather: ${weather.summary || 'n/a'}`,
+      `Water context: ${weather.water_context || 'n/a'}`,
+    ].join('\n');
+  }
+
+  async function refreshLocationContext() {
+    if (!state.selected) return;
+    const payload = await json(`/gfs/api/location_media?location_key=${encodeURIComponent(state.selected.location_key)}`);
+    reportText.value = payload.report_text || '';
+    renderVideos(payload.uploads || []);
+    renderIntel(payload);
+    const live = payload.live || { active: false, stream_url: '' };
+    liveUrl.value = live.stream_url || '';
+    setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : 'Live inactive');
+  }
+
+  function startHudPolling() {
+    if (state.hudPollId) clearInterval(state.hudPollId);
+    state.hudPollId = setInterval(() => {
+      if (hud.classList.contains('show')) {
+        refreshLocationContext().catch((e) => setHudMessage(e.message));
+      }
+    }, 8000);
+  }
+
+  function stopHudPolling() {
+    if (state.hudPollId) clearInterval(state.hudPollId);
+    state.hudPollId = null;
+  }
+
+  async function openHud(point) {
+    if (!state.feature.popups) return;
+    state.selected = point;
+    hudTitle.textContent = point.name;
+    hudKey.textContent = `location_key: ${point.location_key}`;
+    hud.classList.add('show');
+    startHudPolling();
+    await refreshLocationContext();
+  }
+
+  async function saveReport() {
+    if (!state.selected || !state.feature.reports) return;
+    await json('/gfs/api/report/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key, report_text: reportText.value || '' }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Report saved.');
+  }
+
+  async function uploadVideo() {
+    if (!state.selected) return;
+    const file = videoFile.files && videoFile.files[0];
+    if (!file) {
+      setHudMessage('Select a video file first.');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('location_key', state.selected.location_key);
+    fd.append('file', file);
+    await json('/gfs/api/upload_video', { method: 'POST', body: fd });
+    videoFile.value = '';
+    await refreshLocationContext();
+    setHudMessage('Video uploaded.');
+  }
+
+  async function updateLiveUrl() {
+    if (!state.selected || !state.feature.live) return;
+    await json('/gfs/api/live/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location_key: state.selected.location_key,
+        active: true,
+        stream_url: (liveUrl.value || '').trim(),
+      }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Live URL updated.');
+  }
+
+  function setFreshness(nowTs) {
+    const stale = Date.now() - nowTs > 18000;
+    setStatus(stale ? 'Feed stale' : 'Feed fresh', stale);
+  }
+
+  function connectLiveUpdates() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(`${proto}${location.host}/gfs/ws/updates`);
+    ws.onopen = () => { state.wsConnected = true; setStatus('Feed connected'); };
+    ws.onmessage = (ev) => {
+      state.lastUpdateAt = Date.now();
+      const txt = String(ev.data || '').slice(0, 2800);
+      setFreshness(state.lastUpdateAt);
+      healthEl.textContent = txt;
+    };
+    ws.onerror = () => { setStatus('Feed error', true); };
+    ws.onclose = () => {
+      state.wsConnected = false;
+      setStatus('Reconnecting feed...', true);
+      setTimeout(connectLiveUpdates, 1800);
+    };
+  }
+
+  async function loadGoogleMapScript() {
+    const key = (mapsKeyInput.value || '').trim();
+    if (!key) {
+      setStatus('Google Maps key missing — list + HUD remain active', true);
+      return;
+    }
+    localStorage.setItem('gfs_maps_key', key);
+
+    if (window.google && window.google.maps) {
+      state.mapReady = true;
+      await renderMapMarkers();
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=beta&libraries=maps3d`;
+      s.async = true;
+      s.defer = true;
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.append(s);
+    }).catch(() => {
+      setStatus('Unable to load Maps API script', true);
+    });
+
+    state.mapReady = !!(window.google && window.google.maps);
+    if (state.mapReady) {
+      setStatus('Photorealistic globe connected');
+      await renderMapMarkers();
+    }
+  }
+
+  document.getElementById('saveKeyBtn').addEventListener('click', () => loadGoogleMapScript().catch((e) => setStatus(e.message, true)));
+  document.getElementById('refreshFishBtn').addEventListener('click', () => loadFish().catch((e) => setStatus(e.message, true)));
+  document.getElementById('refreshHealthBtn').addEventListener('click', () => loadHealth().catch((e) => setStatus(e.message, true)));
+  document.getElementById('saveReportBtn').addEventListener('click', () => saveReport().catch((e) => setHudMessage(e.message)));
+  document.getElementById('refreshContextBtn').addEventListener('click', () => refreshLocationContext().catch((e) => setHudMessage(e.message)));
+  document.getElementById('uploadBtn').addEventListener('click', () => uploadVideo().catch((e) => setHudMessage(e.message)));
+  document.getElementById('connectLiveBtn').addEventListener('click', () => updateLiveUrl().catch((e) => setHudMessage(e.message)));
+  document.getElementById('closeHud').addEventListener('click', () => { hud.classList.remove('show'); stopHudPolling(); });
+
+  mapsKeyInput.value = localStorage.getItem('gfs_maps_key') || '';
+
+  loadHealth().catch((e) => setStatus(e.message, true));
+  loadFish().catch((e) => setStatus(e.message, true));
+  loadGoogleMapScript().catch((e) => setStatus(e.message, true));
+  connectLiveUpdates();
+})();
+</script>
+</body>
+</html>
