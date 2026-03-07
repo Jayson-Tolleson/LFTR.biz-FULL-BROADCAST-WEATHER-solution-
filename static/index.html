@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Broadcast Dashboard</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #0f1320; color: #e8eefc; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; height: 100vh; box-sizing: border-box; }
+    iframe { width: 100%; height: 100%; border: 1px solid #2a3550; border-radius: 10px; background: #111827; }
+    @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="grid">
+    <iframe src="/broadcast" title="Broadcast"></iframe>
+    <iframe src="/watch" title="Watch"></iframe>
+  </div>
+</body>
+</html>
