@@ -56,23 +56,18 @@ def _extract_transcript(responses: Iterable[Any]) -> str:
 
 
 def _streaming_recognize_with_google(client: Any, streaming_config: Any, requests: Sequence[Any]) -> Iterable[Any]:
-    """Call Google Speech streaming API across client signature variants.
+    """Call Google Speech streaming API using required config argument variants.
 
-    Some client builds require `config=..., requests=...`, while others expect
-    only `requests` with a leading config request.
+    Some client builds accept positional `(config, requests)`, while others
+    require keyword arguments.
     """
     try:
+        return client.streaming_recognize(streaming_config, iter(requests))
+    except TypeError:
+        pass
+
+    try:
         return client.streaming_recognize(config=streaming_config, requests=iter(requests))
-    except TypeError:
-        pass
-
-    try:
-        return client.streaming_recognize(requests=iter(requests))
-    except TypeError:
-        pass
-
-    try:
-        return client.streaming_recognize(iter(requests))
     except TypeError as exc:
         raise RuntimeError("Unsupported streaming_recognize client signature") from exc
 

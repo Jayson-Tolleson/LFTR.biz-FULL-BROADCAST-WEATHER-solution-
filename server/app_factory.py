@@ -22,7 +22,7 @@ def _configure_logging(debug: bool) -> None:
 
 
 
-def create_asgi_app():
+def create_quart_app() -> Quart:
     settings = load_settings()
     _configure_logging(settings.debug)
 
@@ -45,5 +45,14 @@ def create_asgi_app():
     app.state_obj = state
     app.settings_obj = settings
     app.rtc_manager = rtc
+    app.sio = sio
 
+    return app
+
+
+
+def create_asgi_app():
+    app = create_quart_app()
+    settings = app.settings_obj
+    sio = app.sio
     return socketio.ASGIApp(sio, other_asgi_app=app, socketio_path=settings.socket_path.lstrip("/"))
