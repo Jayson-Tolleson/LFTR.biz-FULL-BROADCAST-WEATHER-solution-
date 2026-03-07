@@ -57,6 +57,7 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
         <button id="aiBtn" class="btn"><span id="aiLed" class="led r"></span><span id="aiTxt">AI: idle</span></button>
         <button id="ttsMonBtn" class="btn"><span id="ttsMonLed" class="led r"></span><span id="ttsMonTxt">Hear AI voice: off</span></button>
         <button id="speakBtn" class="btn"><span class="led b"></span><span>Speak last AI</span></button>
+        <button id="panelBtn" class="btn"><span class="led b"></span><span>Panel</span></button>
       </div>
 
       <div style="padding:0 8px 8px 8px;font-size:12px;opacity:.8">
@@ -66,9 +67,16 @@ textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px soli
 
     <div class="chat">
       <div class="chatHead">
-        <span>Chat</span>
+        <span>Side Panel</span>
         <span id="roomStatus" style="font-size:12px;opacity:.8"></span>
       </div>
+      <div class="row" style="border-top:0">
+        <span class="badge">chat</span>
+        <span class="badge">tools</span>
+        <span class="badge">gfs</span>
+        <span class="badge">settings</span>
+      </div>
+      <div class="entry" style="margin:8px">GFS not connected — map tools coming soon.</div>
       <div id="chat" class="chatList"></div>
       <div class="row">
         <button id="attachBtn" class="btn small">Attach</button>

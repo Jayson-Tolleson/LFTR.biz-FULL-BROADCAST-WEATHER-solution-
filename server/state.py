@@ -8,7 +8,18 @@ from typing import Any, Dict, Optional, Tuple
 class RoomSettings:
     ai_enabled: bool = True
     tts_enabled: bool = True
-    stt_enabled: bool = True
+    stt_enabled: bool = False
+
+
+@dataclass
+class MediaState:
+    mode: str = "none"  # live | upload | none
+    live_active: bool = False
+    latest_upload_url: Optional[str] = None
+    latest_upload_mime: Optional[str] = None
+    latest_upload_at: Optional[int] = None
+    location_id: Optional[str] = None
+    label: str = "PUBLIC ACCESS"
 
 
 @dataclass
@@ -16,6 +27,8 @@ class RoomState:
     broadcaster_sid: Optional[str] = None
     viewers: Dict[str, Any] = field(default_factory=dict)
     settings: RoomSettings = field(default_factory=RoomSettings)
+    media: MediaState = field(default_factory=MediaState)
+    latest_upload: Optional[Dict[str, Any]] = None
 
 
 class AppState:

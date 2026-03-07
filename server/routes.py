@@ -8,7 +8,6 @@ from server.rtc import RTCManager
 from server.state import AppState
 
 
-
 def _normalize_ice_url(raw: str, default_scheme: str = "turn") -> str:
     val = (raw or "").strip()
     if not val:
@@ -29,7 +28,6 @@ def _normalize_ice_url(raw: str, default_scheme: str = "turn") -> str:
         return f"turns:{host}:{port}"
 
     return f"turn:{host}:{port}?transport=udp"
-
 
 
 def build_ice_servers(settings: Settings):
@@ -76,11 +74,10 @@ def build_ice_servers(settings: Settings):
     return servers
 
 
-
 def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCManager) -> None:
     @app.get("/")
     async def index():
-        return await send_from_directory(app.static_folder, "watch.html")
+        return await send_from_directory(app.static_folder, "index.html")
 
     @app.get("/broadcast")
     async def broadcast():
@@ -113,3 +110,15 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     async def ai_websearch():
         payload = await request.get_json(force=True)
         return jsonify(await ai.handle_websearch(payload))
+
+    @app.get("/gfs")
+    async def gfs_root():
+        return jsonify({"enabled": False, "message": "GFS not connected"})
+
+    @app.get("/gfs/health")
+    async def gfs_health():
+        return jsonify({"ok": True, "enabled": False})
+
+    @app.route("/gfs/api/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    async def gfs_api_passthrough(subpath: str):
+        return jsonify({"ok": False, "enabled": False, "path": subpath, "message": "GFS API placeholder"}), 501

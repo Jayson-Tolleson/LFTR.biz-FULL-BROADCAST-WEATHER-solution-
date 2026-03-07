@@ -207,6 +207,8 @@
             mime: f.type,
             content_base64: b64FromArrayBuffer(ab),
             text: `uploaded ${f.name}`,
+            upload_type: 'location_video',
+            locationId: this.state.room,
           });
         });
       }
@@ -296,6 +298,13 @@
 
       s.on('chat_message', (msg) => this.renderChatMessage(msg));
       s.on('stt_text', (p) => this.renderChatMessage({ sender: 'stt', role: 'broadcaster_stt', text: p.text, ts: p.ts || Date.now() }));
+      s.on('stage_state', (p) => {
+        if (!p) return;
+        if (p.mode === 'upload' && p.latestUploadUrl) {
+          this.renderSystemMessage('[stage] using latest upload for PUBLIC ACCESS');
+        }
+      });
+
       s.on('room_status', (p) => {
         if (!p || !this.dom.roomStatus) return;
         this.dom.roomStatus.textContent = `viewers:${p.viewer_count || 0} broadcaster:${p.broadcaster_present ? 'yes' : 'no'}`;
@@ -732,7 +741,10 @@
       if (this.dom.stStt) this.dom.stStt.textContent = 'on';
       this.setLed(this.dom.sttLed, true, true);
       this.setLed(this.dom.ledStt, true, true);
-      if (this.state.socket) this.state.socket.emit('set_room_settings', { stt_enabled: true });
+      if (this.state.socket) {
+        this.state.socket.emit('set_room_settings', { stt_enabled: true });
+        this.state.socket.emit('stt_toggle', { enabled: true });
+      }
       dbg('stt started');
     },
 
@@ -748,7 +760,10 @@
       if (this.dom.stStt) this.dom.stStt.textContent = 'off';
       this.setLed(this.dom.sttLed, false);
       this.setLed(this.dom.ledStt, false);
-      if (this.state.socket) this.state.socket.emit('set_room_settings', { stt_enabled: false });
+      if (this.state.socket) {
+        this.state.socket.emit('set_room_settings', { stt_enabled: false });
+        this.state.socket.emit('stt_toggle', { enabled: false });
+      }
       dbg('stt stopped');
     },
 

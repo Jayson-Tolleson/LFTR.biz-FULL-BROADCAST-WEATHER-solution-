@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Watch</title>
+<script src="/static/socket.io.js"></script>
+<style>
+body{margin:0;background:#0f1320;color:#e8eefc;font-family:Arial,sans-serif}
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+.hud{padding:10px 12px;border-bottom:1px solid #263047;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.badge{padding:4px 8px;border:1px solid #334161;border-radius:999px;background:#121a2c;font-size:12px}
+.stage{padding:12px;height:100%;box-sizing:border-box}
+.videoWrap{height:100%;border:1px solid #2a3550;border-radius:12px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center}
+video{width:100%;height:100%;object-fit:contain}
+#standby{opacity:.8}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hud">
+    <span class="badge" id="label">PUBLIC ACCESS</span>
+    <span class="badge" id="mode">STANDBY</span>
+    <span class="badge" id="conn">connecting</span>
+    <span class="badge" id="stt">STT off</span>
+    <span class="badge" id="ai">AI idle</span>
+  </div>
+  <div class="stage">
+    <div class="videoWrap">
+      <video id="v" autoplay playsinline controls></video>
+      <div id="standby">Waiting for live stream or latest upload...</div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const room = (new URLSearchParams(location.search).get('room') || 'default').trim() || 'default';
+  const socket = io(window.location.origin, { path: '/socket.io', transports: ['websocket'], upgrade: false, query: { room, role: 'watch' } });
+  const v = document.getElementById('v');
+  const standby = document.getElementById('standby');
+  const conn = document.getElementById('conn');
+  const mode = document.getElementById('mode');
+  const stt = document.getElementById('stt');
+  const ai = document.getElementById('ai');
+  const label = document.getElementById('label');
+
+  let pc = null;
+
+  function ensurePc() {
+    if (pc) return pc;
+    pc = new RTCPeerConnection();
+    pc.ontrack = (ev) => {
+      v.srcObject = ev.streams[0];
+      standby.style.display = 'none';
+      mode.textContent = 'LIVE';
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate) socket.emit('watch_ice', { candidate: e.candidate });
+    };
+    return pc;
+  }
+
+  socket.on('connect', () => { conn.textContent = 'connected'; socket.emit('watch_join', { room }); });
+  socket.on('disconnect', () => { conn.textContent = 'disconnected'; });
+
+  socket.on('room_status', (p) => {
+    if (!p) return;
+    stt.textContent = p.stt_enabled ? 'STT on' : 'STT off';
+    ai.textContent = p.ai && p.ai.enabled ? 'AI on' : 'AI off';
+  });
+
+  socket.on('stage_state', (p) => {
+    if (!p) return;
+    label.textContent = p.label || 'PUBLIC ACCESS';
+    if (p.mode === 'upload' && p.latestUploadUrl) {
+      v.srcObject = null;
+      v.src = p.latestUploadUrl;
+      v.muted = false;
+      v.play().catch(() => {});
+      standby.style.display = 'none';
+      mode.textContent = 'LATEST UPLOAD';
+    } else if (p.mode === 'none') {
+      v.srcObject = null;
+      v.removeAttribute('src');
+      standby.style.display = 'block';
+      mode.textContent = 'STANDBY';
+    }
+  });
+
+  socket.on('watch_offer', async (offer) => {
+    const c = ensurePc();
+    await c.setRemoteDescription(offer);
+    const answer = await c.createAnswer();
+    await c.setLocalDescription(answer);
+    socket.emit('watch_answer', { sdp: c.localDescription.sdp, type: c.localDescription.type });
+  });
+
+  socket.on('webrtc_state', (p) => {
+    if (!p) return;
+    if (p.role === 'broadcaster' && p.state !== 'connected' && mode.textContent === 'LIVE') {
+      mode.textContent = 'STANDBY';
+      standby.style.display = 'block';
+    }
+  });
+})();
+</script>
+</body>
+</html>
