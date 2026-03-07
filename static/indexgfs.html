@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GFS Module</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e8eefc; }
+    .wrap { padding: 12px; display: grid; gap: 12px; }
+    .card { border: 1px solid #2a3550; background: #121a2c; border-radius: 10px; padding: 10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #22314f; padding: 6px; text-align: left; font-size: 13px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card"><strong>GFS not connected</strong> — modular placeholder is active.</div>
+  <div class="card">
+    <div><strong>Health</strong></div>
+    <pre id="health" class="mono">loading...</pre>
+  </div>
+  <div class="card">
+    <div><strong>Fish Locations</strong></div>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Lat</th><th>Lon</th></tr></thead>
+      <tbody id="fishRows"></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div><strong>Live updates</strong></div>
+    <pre id="live" class="mono">connecting...</pre>
+  </div>
+</div>
+
+<script>
+async function loadHealth() {
+  const r = await fetch('/gfs/api/health');
+  const j = await r.json();
+  document.getElementById('health').textContent = JSON.stringify(j, null, 2);
+}
+
+async function loadFish() {
+  const r = await fetch('/gfs/api/fish');
+  const j = await r.json();
+  const rows = document.getElementById('fishRows');
+  rows.innerHTML = '';
+  (j.items || []).forEach((p) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.id}</td><td>${p.name}</td><td>${p.lat}</td><td>${p.lon}</td>`;
+    rows.appendChild(tr);
+  });
+}
+
+(function connectWs() {
+  const wsProto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const ws = new WebSocket(`${wsProto}${location.host}/gfs/ws/updates`);
+  const live = document.getElementById('live');
+  ws.onopen = () => { live.textContent = 'connected'; };
+  ws.onmessage = (ev) => { live.textContent = ev.data; };
+  ws.onerror = () => { live.textContent = 'error'; };
+  ws.onclose = () => { setTimeout(connectWs, 1500); };
+})();
+
+loadHealth().catch(() => {});
+loadFish().catch(() => {});
+</script>
+</body>
+</html>
