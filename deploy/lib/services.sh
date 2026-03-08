@@ -30,6 +30,17 @@ install_env_file() {
 
   run_required "ensure env directory" $SUDO mkdir -p "$(dirname "$APP_ENV_FILE")"
   run_required "install app env file" $SUDO cp "$tmp" "$APP_ENV_FILE"
+  if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
+    set_env_value "$tmp" "GOOGLE_MAPS_API_KEY" "$GOOGLE_MAPS_API_KEY"
+    run_required "persist GOOGLE_MAPS_API_KEY" $SUDO cp "$tmp" "$APP_ENV_FILE"
+    log_info "Saved GOOGLE_MAPS_API_KEY=$(mask_secret_value "$GOOGLE_MAPS_API_KEY")"
+  elif [[ -f "$APP_ENV_FILE" ]]; then
+    local existing
+    existing="$(read_env_value_from_file "$APP_ENV_FILE" "GOOGLE_MAPS_API_KEY" || true)"
+    if [[ -n "$existing" ]]; then
+      log_info "Keeping existing GOOGLE_MAPS_API_KEY=$(mask_secret_value "$existing")"
+    fi
+  fi
   run_required "secure env file permissions" $SUDO chmod 600 "$APP_ENV_FILE"
   run_required "set env file ownership" $SUDO chown "${APP_USER}:${APP_GROUP}" "$APP_ENV_FILE"
 

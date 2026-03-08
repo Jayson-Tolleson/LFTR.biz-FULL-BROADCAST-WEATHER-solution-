@@ -23,13 +23,27 @@ configure_google_maps_api_key() {
   fi
 
   if [[ -t 0 && -t 1 ]]; then
+    local input_key=""
     if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
       log_info "GOOGLE_MAPS_API_KEY already set in app env file; press enter to keep current value"
-      read -r -p "GOOGLE_MAPS_API_KEY [keep existing]: " input_key || true
+      read -r -p "Enter Google Maps JavaScript API key for Maps 3D/maps3d (press enter to keep existing): " input_key || true
     else
-      read -r -p "Enter GOOGLE_MAPS_API_KEY for /gfs (leave blank to skip): " input_key || true
+      while [[ -z "${GOOGLE_MAPS_API_KEY:-}" ]]; do
+        read -r -p "Enter Google Maps JavaScript API key for Maps 3D/maps3d library: " input_key || true
+        input_key="${input_key:-}"
+        input_key="${input_key#${input_key%%[![:space:]]*}}"
+        input_key="${input_key%${input_key##*[![:space:]]}}"
+        if [[ -n "$input_key" ]]; then
+          GOOGLE_MAPS_API_KEY="$input_key"
+          break
+        fi
+        log_warn "Google Maps API key is required for 3D globe unless already configured in ${APP_ENV_FILE}"
+      done
     fi
 
+    input_key="${input_key:-}"
+    input_key="${input_key#${input_key%%[![:space:]]*}}"
+    input_key="${input_key%${input_key##*[![:space:]]}}"
     if [[ -n "${input_key:-}" ]]; then
       GOOGLE_MAPS_API_KEY="$input_key"
     fi

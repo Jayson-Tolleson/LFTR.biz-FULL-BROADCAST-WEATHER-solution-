@@ -57,3 +57,25 @@ render_template() {
   done
   printf '%s\n' "$content" > "$dst"
 }
+
+
+mask_secret_value() {
+  local value="$1"
+  local len=${#value}
+  if (( len <= 10 )); then
+    printf '%s' '***'
+    return
+  fi
+  printf '%s...%s' "${value:0:6}" "${value: -4}"
+}
+
+set_env_value() {
+  local env_file="$1" key="$2" value="$3"
+  local escaped
+  escaped=$(printf '%s' "$value" | sed 's/[\&]/\\&/g')
+  if [[ -f "$env_file" ]] && grep -qE "^${key}=" "$env_file"; then
+    sed -i "s|^${key}=.*$|${key}=${escaped}|" "$env_file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$env_file"
+  fi
+}

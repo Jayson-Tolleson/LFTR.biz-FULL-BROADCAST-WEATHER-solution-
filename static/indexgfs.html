@@ -1196,15 +1196,79 @@
     return specs;
   }
 
+  function resolveAltitudeMode(featureType = 'surface', preferred = null) {
+    const AltitudeMode = state.maps3dLib?.AltitudeMode || window.google?.maps?.maps3d?.AltitudeMode;
+    if (!AltitudeMode) return null;
+    if (preferred && AltitudeMode[preferred]) return AltitudeMode[preferred];
+    if (featureType === 'elevated') return AltitudeMode.ABSOLUTE;
+    if (featureType === 'column') return AltitudeMode.RELATIVE_TO_GROUND;
+    if (featureType === 'mesh') return AltitudeMode.RELATIVE_TO_MESH || AltitudeMode.RELATIVE_TO_GROUND;
+    return AltitudeMode.CLAMP_TO_GROUND;
+  }
+
+  function isAbsoluteLikeMode(mode) {
+    const AltitudeMode = state.maps3dLib?.AltitudeMode || window.google?.maps?.maps3d?.AltitudeMode;
+    return mode === AltitudeMode?.ABSOLUTE || mode === AltitudeMode?.RELATIVE_TO_GROUND || mode === AltitudeMode?.RELATIVE_TO_MESH;
+  }
+
+  function normalizePolygonPath(points, mode, opts = {}) {
+    const out = [];
+    const useAltitude = isAbsoluteLikeMode(mode);
+    for (const p of (points || [])) {
+      const lat = Number(p?.lat);
+      const lng = Number(p?.lng ?? p?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (useAltitude) {
+        let altitude = Number(p?.altitude ?? opts.altitude ?? 0);
+        if (!Number.isFinite(altitude)) {
+          console.warn('[gfs] invalid polygon altitude; defaulting to 0');
+          altitude = 0;
+        }
+        out.push({ lat, lng, altitude });
+      } else {
+        out.push({ lat, lng });
+      }
+    }
+    return out;
+  }
+
+  function appendPolygon3D(points, opts = {}) {
+    try {
+      const mode = resolveAltitudeMode(opts.type || 'surface', opts.altitudeMode);
+      const path = normalizePolygonPath(points, mode, opts);
+      if (path.length < 3) {
+        console.warn('[gfs] polygon skipped: insufficient valid points', { featureType: opts.featureType || opts.type, pointCount: path.length });
+        return null;
+      }
+      const Ctor = opts.interactive ? state.maps3dLib.Polygon3DInteractiveElement : state.maps3dLib.Polygon3DElement;
+      const polygon = new Ctor({
+        altitudeMode: mode,
+        drawsOccludedSegments: !!opts.drawsOccludedSegments,
+        extruded: !!opts.extruded,
+        fillColor: opts.fillColor ?? 'rgba(0,224,255,0.2)',
+        geodesic: true,
+        path,
+        innerPaths: (opts.innerPaths || []).map((h) => normalizePolygonPath(h, mode, opts)).filter((h) => h.length >= 3),
+        strokeColor: opts.strokeColor ?? 'rgba(255,255,255,0.2)',
+        strokeWidth: opts.strokeWidth ?? 0.6,
+        zIndex: opts.zIndex || 1,
+      });
+      globeEl.append(polygon);
+      return polygon;
+    } catch (error) {
+      console.error('[gfs] polygon creation failed', { featureType: opts.featureType || opts.type, mode: opts.type, pointCount: (points || []).length, error });
+      return null;
+    }
+  }
+
   function createCloudPolygonElement(shellSpec, interactive = false) {
-    const Ctor = interactive ? state.maps3dLib.Polygon3DInteractiveElement : state.maps3dLib.Polygon3DElement;
-    return new Ctor({
-      altitudeMode: 'absolute',
+    return appendPolygon3D(shellSpec.path, {
+      type: shellSpec.extruded ? 'elevated' : 'elevated',
+      featureType: `cloud-${shellSpec.role || 'shell'}`,
+      interactive,
       drawsOccludedSegments: true,
       extruded: shellSpec.extruded,
       fillColor: shellSpec.fillColor,
-      geodesic: true,
-      path: shellSpec.path,
       innerPaths: shellSpec.innerPaths || [],
       strokeColor: shellSpec.strokeColor,
       strokeWidth: shellSpec.strokeWidth,
@@ -1214,6 +1278,7 @@
 
   function appendCloudPolygon(shellSpec, interactive = false) {
     const poly = createCloudPolygonElement(shellSpec, interactive);
+    if (!poly) return null;
     if (interactive) {
       poly.addEventListener('gmp-click', () => {
         setHudMessage(`Storm ${shellSpec.meta?.tile_id || 'cell'} • importance ${Math.round((shellSpec.meta?.importance || 0) * 100)}%`);
@@ -1320,23 +1385,22 @@
     return ensureClosedRing(points);
   }
 
-  function appendSimplePolygon(path, fillColor, strokeColor, zIndex, targetArray, interactive = false, title = '') {
-    const Ctor = interactive ? state.maps3dLib.Polygon3DInteractiveElement : state.maps3dLib.Polygon3DElement;
-    const poly = new Ctor({
-      altitudeMode: 'absolute',
-      drawsOccludedSegments: true,
-      extruded: true,
+  function appendSimplePolygon(path, fillColor, strokeColor, zIndex, targetArray, interactive = false, title = '', featureType = 'surface', extruded = true) {
+    const poly = appendPolygon3D(path, {
+      type: featureType,
+      featureType,
+      interactive,
+      extruded,
       fillColor,
-      geodesic: true,
-      path,
-      innerPaths: [],
       strokeColor,
       strokeWidth: 0.5,
       zIndex,
+      drawsOccludedSegments: true,
     });
+    if (!poly) return null;
     if (interactive) poly.addEventListener('gmp-click', () => setHudMessage(title || 'Severe storm cell'));
-    globeEl.append(poly);
     targetArray.push(poly);
+    return poly;
   }
 
   function renderHailAndLightning(lod) {
@@ -1347,10 +1411,10 @@
       const key = `${tile.tile_id || 'tile'}:${tile.seed || tile.updated_at || 0}`;
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
       const hailRing = buildStormRing(lat, lon, seededRange(`${key}:hs`, 0.03, 0.08), `${key}:hail`);
-      appendSimplePolygon(buildAltitudePath(hailRing, Number(tile.bands?.mid?.base_altitude_m || 2400)), 'rgba(216,252,255,0.20)', 'rgba(238,255,255,0.35)', 80, state.hailCorePolygons, Number(tile.importance || 0) > 0.75, `Hail core ${tile.tile_id || ''}`);
+      appendSimplePolygon(buildAltitudePath(hailRing, Number(tile.bands?.mid?.base_altitude_m || 2400)), 'rgba(216,252,255,0.20)', 'rgba(238,255,255,0.35)', 80, state.hailCorePolygons, Number(tile.importance || 0) > 0.75, `Hail core ${tile.tile_id || ''}`, 'elevated', true);
 
       const flashRing = buildStormRing(lat, lon, seededRange(`${key}:ls`, 0.05, 0.11), `${key}:lightning`);
-      appendSimplePolygon(buildAltitudePath(flashRing, Number(tile.bands?.high?.base_altitude_m || 6500)), 'rgba(255,242,160,0.14)', 'rgba(255,232,120,0.36)', 92, state.lightningPolygons, false);
+      appendSimplePolygon(buildAltitudePath(flashRing, Number(tile.bands?.high?.base_altitude_m || 6500)), 'rgba(255,242,160,0.14)', 'rgba(255,232,120,0.36)', 92, state.lightningPolygons, false, '', 'elevated', false);
 
       const hailDrops = Math.max(6, Math.min(22, Math.round(8 + Number(tile.convection_factor || tile.convection || 0) * 20)));
       for (let i = 0; i < hailDrops; i += 1) {
@@ -1542,9 +1606,9 @@
       const intensity = fish?.bait?.intensity === 'high' ? 1 : fish?.bait?.intensity === 'medium' ? 0.68 : 0.42;
       const key = `${fish.location_key || fish.name || 'fish'}:${fish?.bait?.confidence || 0}`;
       const zoneRing = makeEllipseRing(lat, lon, 0.06 + intensity * 0.05, 0.09 + intensity * 0.07, `${key}:zone`);
-      appendSimplePolygon(buildAltitudePath(zoneRing, 8), `rgba(62,220,188,${0.08 + intensity * 0.12})`, 'rgba(106,255,228,0.30)', 65, state.baitPolygons, false);
+      appendSimplePolygon(zoneRing, `rgba(62,220,188,${0.08 + intensity * 0.12})`, 'rgba(106,255,228,0.30)', 65, state.baitPolygons, false, '', 'surface', false);
       const laneRing = makeEllipseRing(lat + seededRange(`${key}:dlat`, -0.03, 0.03), lon + seededRange(`${key}:dlon`, -0.04, 0.04), 0.026 + intensity * 0.03, 0.12 + intensity * 0.07, `${key}:lane`);
-      appendSimplePolygon(buildAltitudePath(laneRing, 12), `rgba(100,240,220,${0.05 + intensity * 0.1})`, 'rgba(160,255,245,0.18)', 66, state.baitPolygons, false);
+      appendSimplePolygon(laneRing, `rgba(100,240,220,${0.05 + intensity * 0.1})`, 'rgba(160,255,245,0.18)', 66, state.baitPolygons, false, '', 'surface', false);
     }
   }
 
@@ -1888,6 +1952,11 @@
   }
 
   async function loadMapsScript() {
+    if (!state.mapsApiKey) {
+      console.error('[gfs] missing Google Maps API key');
+      throw new Error('missing Google Maps API key');
+    }
+    console.info('[gfs] loading Google Maps JS API');
     if (state.mapsScriptLoading) return state.mapsScriptLoading;
 
     state.mapsScriptLoading = new Promise((resolve, reject) => {
@@ -1904,8 +1973,8 @@
       s.async = true;
       s.defer = true;
       s.dataset.gmaps3d = '1';
-      s.onload = resolve;
-      s.onerror = reject;
+      s.onload = () => { console.info('[gfs] Google Maps JS API loaded'); resolve(); };
+      s.onerror = (err) => { console.error('[gfs] Google Maps JS API load failed', err); reject(err); };
       document.head.appendChild(s);
     });
 
@@ -1947,8 +2016,8 @@
       state.mapReady = true;
       showGlobeFallback(false);
       setStatus('Photorealistic globe connected');
-      await renderMapMarkers();
-      await loadClouds(true);
+      try { await renderMapMarkers(); } catch (err) { console.error('[gfs] renderMapMarkers failed', err); }
+      try { await loadClouds(true); } catch (err) { console.error('[gfs] weather bootstrap failed', err); }
     } catch (err) {
       console.error('[gfs] unable to load Google 3D globe', err);
       state.mapReady = false;
@@ -1959,7 +2028,7 @@
 
   async function loadRuntimeConfig() {
     const cfg = await json('/gfs/api/config');
-    state.mapsApiKey = (cfg.google_maps_api_key || '').trim();
+    state.mapsApiKey = (cfg.google_maps_api_key || cfg.mapsApiKey || '').trim();
 
     if (!cfg.maps3d_available) {
       showGlobeFallback(true);

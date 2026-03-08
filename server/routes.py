@@ -135,6 +135,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     async def gfs_config():
         payload = gfs.config()
         payload["google_maps_api_key"] = settings.google_maps_api_key
+        payload["mapsApiKey"] = settings.google_maps_api_key
         payload["maps3d_available"] = bool(settings.google_maps_api_key)
         return jsonify(payload)
 
