@@ -24,7 +24,6 @@
     }
 
     * { box-sizing: border-box; }
-
     html, body {
       margin: 0;
       height: 100%;
@@ -33,8 +32,6 @@
       background: radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
       overflow: hidden;
     }
-
-    body { min-height: 100vh; }
 
     .layout {
       height: 100vh;
@@ -61,27 +58,9 @@
       align-items: center;
     }
 
-    .title {
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: .02em;
-    }
-
-    .subline {
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .statusline {
-      margin-top: 8px;
-      font-size: 12px;
-      opacity: .94;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
+    .title { font-size: 18px; font-weight: 800; letter-spacing: .02em; }
+    .subline { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .statusline { margin-top: 8px; font-size: 12px; opacity: .94; display: flex; flex-wrap: wrap; gap: 8px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
     .features {
@@ -104,19 +83,8 @@
       transition: transform .12s ease, border-color .12s ease, background .12s ease;
     }
 
-    .feature:hover {
-      transform: translateY(-1px);
-      border-color: rgba(148, 163, 184, .6);
-    }
-
-    .light {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      background: #334155;
-      flex: 0 0 10px;
-    }
-
+    .feature:hover { transform: translateY(-1px); border-color: rgba(148, 163, 184, .6); }
+    .light { width: 10px; height: 10px; border-radius: 999px; background: #334155; flex: 0 0 10px; }
     .feature.on .light { animation: blink 1.15s linear infinite; }
     .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
     .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
@@ -127,22 +95,10 @@
     .feature[data-kind="reports"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
     .feature[data-kind="live"].on .light { background: var(--red); box-shadow: 0 0 10px var(--red); }
 
-    @keyframes blink {
-      0%,100% { opacity: 1; }
-      50% { opacity: .28; }
-    }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .28; } }
 
-    .main {
-      min-height: 0;
-      position: relative;
-    }
-
-    .mapwrap {
-      position: relative;
-      overflow: hidden;
-      min-height: 460px;
-      height: 100%;
-    }
+    .main { min-height: 0; position: relative; }
+    .mapwrap { position: relative; overflow: hidden; min-height: 460px; height: 100%; }
 
     #globe {
       display: block;
@@ -167,7 +123,6 @@
     }
 
     .globe-fallback.show { display: grid; }
-
     .globe-fallback .inner {
       max-width: 560px;
       border: 1px solid rgba(129, 140, 248, .38);
@@ -192,46 +147,60 @@
       z-index: 4;
     }
 
-    .map-tools {
-      position: absolute;
-      right: 10px;
-      top: 10px;
-      display: grid;
-      gap: 8px;
-      z-index: 4;
-      width: min(290px, calc(100% - 20px));
+    .fish-pin {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(220, 252, 231, 0.92);
+      background: radial-gradient(circle at 35% 32%, #deffe9 0%, #88ffad 22%, #26e963 48%, #0d8f35 78%, #06391a 100%);
+      box-shadow:
+        0 0 12px rgba(34, 255, 102, 0.95),
+        0 0 24px rgba(34, 255, 102, 0.72),
+        0 0 42px rgba(16, 185, 129, 0.5),
+        inset 0 -3px 7px rgba(2, 20, 8, 0.72),
+        inset 0 3px 8px rgba(255, 255, 255, 0.34);
+      animation: fishPinPulse 1.8s ease-in-out infinite;
+      transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
     }
 
-    .toolbox {
-      padding: 10px;
-      border-radius: 12px;
-      border: 1px solid rgba(129, 140, 248, .28);
-      background: rgba(8, 15, 29, .76);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      box-shadow: var(--shadow);
+    .fish-pin-low { transform: scale(1); }
+    .fish-pin-medium { transform: scale(1.08); }
+    .fish-pin-high { transform: scale(1.16); }
+
+    .fish-pin.hover,
+    .fish-pin.active {
+      filter: saturate(1.2) brightness(1.08);
+      box-shadow:
+        0 0 16px rgba(74, 222, 128, 1),
+        0 0 30px rgba(34, 255, 102, 0.9),
+        0 0 50px rgba(16, 185, 129, 0.62),
+        inset 0 -4px 8px rgba(2, 20, 8, 0.8),
+        inset 0 4px 9px rgba(255, 255, 255, 0.4);
     }
 
-    .row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
+    .fish-pin.active { transform: scale(1.22); }
+    @keyframes fishPinPulse { 0%,100% { opacity: 1; } 50% { opacity: .86; } }
+
+    .weather-pin {
+      border-radius: 999px;
+      border: 1px solid rgba(226, 232, 240, 0.6);
+      box-shadow: 0 0 10px rgba(226,232,240,.32);
+      transition: opacity .2s ease;
     }
 
-    input, textarea, button {
-      background: #0b1220;
-      color: #e8eefc;
-      border: 1px solid #334161;
-      border-radius: 8px;
-      padding: 8px;
-      font: inherit;
+    .weather-rain {
+      border-radius: 3px;
+      border: 1px solid rgba(125, 211, 252, .35);
+      background: linear-gradient(180deg, rgba(125,211,252,.08), rgba(14,165,233,.62), rgba(2,6,23,.06));
+      box-shadow: 0 0 12px rgba(56,189,248,.45);
     }
 
-    button { cursor: pointer; }
-    button:hover { border-color: rgba(34, 211, 238, .55); }
-
-    .toolbox button { flex: 1 1 auto; }
+    .weather-jet {
+      border-radius: 999px;
+      border: 1px solid rgba(244, 114, 182, .55);
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.85), rgba(244,114,182,.7), rgba(79,70,229,.62));
+      box-shadow: 0 0 15px rgba(244,114,182,.5), 0 0 28px rgba(129,140,248,.4);
+    }
 
     .hover-hud {
       position: fixed;
@@ -262,90 +231,18 @@
 
     .hover-hud.show { display: block; }
     .hover-hud.locked { border-color: rgba(132, 204, 22, .48); box-shadow: 0 20px 64px rgba(8, 18, 20, .7), 0 0 26px rgba(132, 204, 22, .14); }
+    .hud-scroll { position: relative; z-index: 1; max-height: min(72vh, 760px); overflow: auto; padding: 12px; }
+    .hud-hero { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; margin-bottom: 10px; }
+    .hud-title { margin-top: 6px; font-size: 16px; font-weight: 800; letter-spacing: .01em; line-height: 1.15; }
+    .hud-subgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 8px; }
 
-    .hud-scroll {
-      position: relative;
-      z-index: 1;
-      max-height: min(72vh, 760px);
-      overflow: auto;
-      padding: 12px;
-    }
-
-    .hud-hero {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      align-items: start;
-      margin-bottom: 10px;
-    }
-
-    .hud-heading {
-      min-width: 0;
-    }
-
-    .hud-title {
-      margin-top: 6px;
-      font-size: 16px;
-      font-weight: 800;
-      letter-spacing: .01em;
-      line-height: 1.15;
-    }
-
-    .hud-subgrid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin: 10px 0 8px;
-    }
-
-    .mini-stat {
-      border: 1px solid rgba(148, 163, 184, 0.16);
-      border-radius: 12px;
-      padding: 8px 9px;
-      background: rgba(15, 23, 42, 0.34);
-      min-width: 0;
-    }
-
-    .mini-stat-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: rgba(191, 219, 254, .65);
-      margin-bottom: 3px;
-    }
-
-    .mini-stat-value {
-      font-size: 12px;
-      color: #e0f2fe;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .hud-actions {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-
-    .hud-actions.tight3 {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .hud-section {
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid rgba(148, 163, 184, 0.12);
-    }
-
-    .hud-section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: rgba(191, 219, 254, .72);
-      margin-bottom: 8px;
-    }
+    .mini-stat { border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 12px; padding: 8px 9px; background: rgba(15, 23, 42, 0.34); min-width: 0; }
+    .mini-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: rgba(191, 219, 254, .65); margin-bottom: 3px; }
+    .mini-stat-value { font-size: 12px; color: #e0f2fe; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hud-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+    .hud-actions.tight3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .hud-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
+    .hud-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: rgba(191, 219, 254, .72); margin-bottom: 8px; }
 
     .hover-pill {
       display: inline-flex;
@@ -383,16 +280,8 @@
       animation: livePulse 1.05s ease-in-out infinite;
     }
 
-    .live-badge.offline {
-      color: #bbf7d0;
-      border-color: rgba(134, 239, 172, 0.35);
-      background: rgba(6, 78, 59, .35);
-    }
-
-    @keyframes livePulse {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.02); opacity: .72; }
-    }
+    .live-badge.offline { color: #bbf7d0; border-color: rgba(134, 239, 172, 0.35); background: rgba(6, 78, 59, .35); }
+    @keyframes livePulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.02); opacity: .72; } }
 
     .player-pane {
       margin-top: 0;
@@ -413,137 +302,33 @@
       background: #020617;
     }
 
-    .player-empty {
-      min-height: 128px;
-      display: grid;
-      place-items: center;
-      text-align: center;
-      padding: 14px;
-      color: #bfdbfe;
-      font-size: 13px;
-    }
+    .player-empty { min-height: 128px; display: grid; place-items: center; text-align: center; padding: 14px; color: #bfdbfe; font-size: 13px; }
 
-    textarea {
-      width: 100%;
-      min-height: 74px;
-      resize: vertical;
-    }
-
-    .videos a {
-      color: #93c5fd;
-      display: block;
-      margin-top: 4px;
-      word-break: break-word;
-    }
-
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input, textarea, button { background: #0b1220; color: #e8eefc; border: 1px solid #334161; border-radius: 8px; padding: 8px; font: inherit; }
+    button { cursor: pointer; }
+    button:hover { border-color: rgba(34, 211, 238, .55); }
+    textarea { width: 100%; min-height: 74px; resize: vertical; }
+    .videos a { color: #93c5fd; display: block; margin-top: 4px; word-break: break-word; }
     .stale { color: #fca5a5; }
-
-    .context {
-      margin-top: 8px;
-      white-space: pre-wrap;
-      color: #cfe8ff;
-    }
-
+    .context { margin-top: 8px; white-space: pre-wrap; color: #cfe8ff; }
     .muted { color: var(--muted); }
     .tiny { font-size: 12px; }
 
-
-    .fish-marker-svg {
-      overflow: visible;
-      pointer-events: auto;
-      filter: drop-shadow(0 0 8px rgba(34, 255, 102, 0.45));
-      transition: transform .14s ease, filter .14s ease, opacity .14s ease;
-      transform-origin: center;
-    }
-
-    .fish-marker-svg .fish-halo {
-      opacity: .24;
-      animation: fishHaloPulse 2.4s ease-in-out infinite;
-    }
-
-    .fish-marker-svg .fish-core {
-      animation: fishCorePulse 2s ease-in-out infinite;
-    }
-
-    .fish-marker-svg .fish-ring {
-      opacity: .58;
-      animation: fishSphereRing 2.6s ease-out infinite;
-    }
-
-    .fish-marker-svg.medium .fish-core { transform: scale(1.06); }
-    .fish-marker-svg.high .fish-core { transform: scale(1.12); }
-
-    .fish-marker-svg.hover,
-    .fish-marker-svg.active {
-      filter: drop-shadow(0 0 10px rgba(34,255,102,0.9)) drop-shadow(0 0 20px rgba(34,255,102,0.55));
-    }
-
-    .fish-marker-svg.active {
-      transform: scale(1.1);
-    }
-
-    .fish-marker-svg.active .fish-ring {
-      animation-duration: 1.8s;
-      opacity: .85;
-    }
-
-    @keyframes fishCorePulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.08); }
-    }
-
-    @keyframes fishHaloPulse {
-      0%, 100% { opacity: .2; }
-      50% { opacity: .42; }
-    }
-
-    @keyframes fishSphereRing {
-      0% { transform: scale(.78); opacity: .76; }
-      70% { transform: scale(1.28); opacity: .14; }
-      100% { transform: scale(1.36); opacity: 0; }
-    }
-
-    .meta-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 6px;
-    }
-
-    .meta-row {
-      display: grid;
-      grid-template-columns: 110px 1fr;
-      gap: 8px;
-      align-items: start;
-      font-size: 12px;
-    }
-
-    .meta-k {
-      color: rgba(191, 219, 254, .72);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      font-size: 10px;
-    }
-
-    .meta-v {
-      color: #e2e8f0;
-      word-break: break-word;
-      white-space: pre-wrap;
-    }
+    .meta-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .meta-row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: start; font-size: 12px; }
+    .meta-k { color: rgba(191, 219, 254, .72); text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
+    .meta-v { color: #e2e8f0; word-break: break-word; white-space: pre-wrap; }
 
     @media (max-width: 980px) {
       .topbar { grid-template-columns: 1fr; }
       .features { justify-content: flex-start; }
       #globe, .mapwrap { min-height: 320px; }
-      .map-tools { width: calc(100% - 20px); }
-      .hover-hud {
-        width: calc(100% - 20px);
-        right: 10px;
-        bottom: 10px;
-        max-height: 68vh;
-      }
+      .hover-hud { width: calc(100% - 20px); right: 10px; bottom: 10px; max-height: 68vh; }
       .hud-actions.tight3,
       .hud-actions,
-      .hud-subgrid { grid-template-columns: 1fr; }
+      .hud-subgrid,
+      .meta-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -580,20 +365,6 @@
       </div>
 
       <div class="overlay mono" id="health">Loading operational feed…</div>
-
-      <div class="map-tools">
-        <div class="toolbox">
-          <div class="row tiny" style="margin-bottom:8px; justify-content:space-between">
-            <span class="mono" id="mapsKeyState">Maps key status: checking…</span>
-            <button id="loadGlobeBtn" style="flex:0 0 auto">Load Globe</button>
-          </div>
-          <div class="row">
-            <button id="refreshFishBtn">Refresh Fish</button>
-            <button id="refreshHealthBtn">Refresh Health</button>
-            <button id="refreshCloudBtn">Refresh Clouds</button>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </div>
@@ -689,8 +460,6 @@
   const pinHudBtn = document.getElementById('pinHudBtn');
   const fishMeta = document.getElementById('fishMeta');
 
-  const mapsKeyState = document.getElementById('mapsKeyState');
-
   let globeEl = document.getElementById('globe');
 
   const state = {
@@ -711,6 +480,8 @@
     mapMarkers: [],
     markerStates: new Map(),
     cloudMarkers: [],
+    rainMarkers: [],
+    jetMarkers: [],
     cloudTiles: [],
     cloudFetchedAt: 0,
     wsConnected: false,
@@ -718,6 +489,7 @@
     hudPollId: null,
     mapsApiKey: '',
     maps3dLib: null,
+    markerLib: null,
     mapsScriptLoading: null,
     hudLocked: false,
     hudHover: false,
@@ -730,12 +502,25 @@
     statusLine.classList.toggle('stale', !!isStale);
   }
 
-  function setHudMessage(msg) {
-    mediaInfo.textContent = msg;
-  }
+  function setHudMessage(msg) { mediaInfo.textContent = msg; }
 
   function normalizeFeatureButton(btn, kind) {
     btn.classList.toggle('on', !!state.feature[kind]);
+  }
+
+  async function onFeatureToggle(kind) {
+    if (kind === 'markers') {
+      state.mapMarkers.forEach((m) => {
+        try { m.style.display = state.feature.markers ? '' : 'none'; } catch (_) {}
+      });
+      if (!state.feature.markers) hideHud(true);
+    }
+
+    if (kind === 'popups' && !state.feature.popups) hideHud(true);
+
+    if (['clouds', 'rain', 'jet'].includes(kind)) {
+      await renderWeatherLayers();
+    }
   }
 
   function mkFeature(kind, label) {
@@ -747,23 +532,7 @@
     btn.addEventListener('click', () => {
       state.feature[kind] = !state.feature[kind];
       normalizeFeatureButton(btn, kind);
-
-      if (kind === 'markers') {
-        state.mapMarkers.forEach((m) => {
-          try {
-            m.style.display = state.feature.markers ? '' : 'none';
-          } catch (_) {}
-        });
-        if (!state.feature.markers) hideHud(true);
-      }
-
-      if (kind === 'popups' && !state.feature.popups) {
-        hideHud(true);
-      }
-
-      if (kind === 'clouds') {
-        renderCloudLayers().catch((e) => setStatus(e.message, true));
-      }
+      onFeatureToggle(kind).catch((e) => setStatus(e.message, true));
     });
     return btn;
   }
@@ -790,10 +559,8 @@
   }
 
   function baitText(point) {
-    const bait = (point.bait && point.bait.intensity) || 'unknown';
-    const confidence = point.bait && Number.isFinite(point.bait.confidence)
-      ? ` (${point.bait.confidence}%)`
-      : '';
+    const bait = (point?.bait?.intensity) || 'unknown';
+    const confidence = Number.isFinite(point?.bait?.confidence) ? ` (${point.bait.confidence}%)` : '';
     return state.feature.bait ? `Bait: ${bait}${confidence}` : 'Bait layer disabled';
   }
 
@@ -805,286 +572,299 @@
   }
 
   function clearMapMarkers() {
-    state.mapMarkers.forEach((m) => {
-      try { m.remove(); } catch (_) {}
-    });
+    state.mapMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
     state.mapMarkers = [];
     state.markerStates = new Map();
   }
 
-  function clearCloudMarkers() {
-    state.cloudMarkers.forEach((m) => {
-      try { m.remove(); } catch (_) {}
-    });
-    state.cloudMarkers = [];
-  }
+  function clearCloudMarkers() { state.cloudMarkers.forEach((m) => { try { m.remove(); } catch (_) {} }); state.cloudMarkers = []; }
+  function clearRainMarkers() { state.rainMarkers.forEach((m) => { try { m.remove(); } catch (_) {} }); state.rainMarkers = []; }
+  function clearJetMarkers() { state.jetMarkers.forEach((m) => { try { m.remove(); } catch (_) {} }); state.jetMarkers = []; }
 
   function currentCameraRange() {
-    const val = Number(globeEl && globeEl.getAttribute('range') || 1800000);
+    const val = Number(globeEl?.getAttribute('range') || 1800000);
     return Number.isFinite(val) ? val : 1800000;
   }
 
   function cloudLodProfile() {
     const range = currentCameraRange();
-    if (range > 2300000) return { bandThreshold: 0.2, maxTiles: 780, detailBoost: 0.82, tag: 'high-alt' };
-    if (range > 1200000) return { bandThreshold: 0.15, maxTiles: 980, detailBoost: 1.0, tag: 'mid-alt' };
-    return { bandThreshold: 0.08, maxTiles: 1300, detailBoost: 1.2, tag: 'low-alt' };
+    if (range > 2400000) return { tileLimit: 120, puffs: 3, rainCap: 100, jetCap: 42, label: 'high-alt' };
+    if (range > 1400000) return { tileLimit: 220, puffs: 5, rainCap: 180, jetCap: 64, label: 'mid-alt' };
+    return { tileLimit: 360, puffs: 7, rainCap: 260, jetCap: 86, label: 'low-alt' };
   }
 
-  function bandColor(band, tile) {
-    const storm = Math.max(tile.precipitation_factor || tile.precip || 0, tile.convection_factor || tile.convection || 0);
-    if (band === 'low') return storm > 0.55 ? '#e2e8f0' : '#f8fafc';
-    if (band === 'mid') return storm > 0.55 ? '#dbeafe' : '#e0f2fe';
-    return '#eef2ff';
+  function getSunState() {
+    const now = new Date();
+    const hour = now.getUTCHours() + now.getUTCMinutes() / 60;
+    const sun = Math.max(0.12, Math.sin(((hour - 6) / 12) * Math.PI));
+    return { daylight: sun, baseShade: 1 - sun * 0.55 };
   }
 
-  function flattenCloudBands(tile, lod) {
-    const defs = [
-      { band: 'high', density: Number(tile.high_density || 0), altitude: Number(tile.altitude_high || 9000), wind: tile.wind && tile.wind.high || { u: 0, v: 0 }, baseScale: 0.95 },
-      { band: 'mid', density: Number(tile.mid_density || 0), altitude: Number(tile.altitude_mid || 4200), wind: tile.wind && tile.wind.mid || { u: 0, v: 0 }, baseScale: 1.05 },
-      { band: 'low', density: Number(tile.low_density || 0), altitude: Number(tile.altitude_low || 1200), wind: tile.wind && tile.wind.low || { u: 0, v: 0 }, baseScale: 1.15 },
-    ];
-    return defs
-      .filter((d) => d.density >= lod.bandThreshold)
-      .map((d) => ({
-        ...d,
-        tile_id: tile.tile_id,
-        lat: Number(tile.bounds && tile.bounds.lat_center || 0),
-        lon: Number(tile.bounds && tile.bounds.lon_center || 0),
-        precip: Number(tile.precipitation_factor || 0),
-        convection: Number(tile.convection_factor || 0),
-        importance: Number(tile.importance || 0),
-        updated_at: Number(tile.updated_at || Date.now()),
-      }));
-  }
-
-  function selectCloudRenderItems() {
-    const lod = cloudLodProfile();
-    const all = [];
-    state.cloudTiles.forEach((tile) => {
-      all.push(...flattenCloudBands(tile, lod));
-    });
-
-    all.sort((a, b) => {
-      const aw = a.importance * 0.7 + Math.max(a.precip, a.convection) * 0.3 + a.density * 0.2;
-      const bw = b.importance * 0.7 + Math.max(b.precip, b.convection) * 0.3 + b.density * 0.2;
-      return bw - aw;
-    });
-
-    return { lod, items: all.slice(0, lod.maxTiles) };
-  }
-
-  function advectCloudPosition(item) {
+  function advectCloudPosition(item, offsetLat = 0, offsetLon = 0) {
     const ageHours = Math.max(0, (Date.now() - Number(item.updated_at || Date.now())) / 3600000);
-    const u = Number(item.wind && item.wind.u || 0);
-    const v = Number(item.wind && item.wind.v || 0);
+    const u = Number(item.wind?.u || 0);
+    const v = Number(item.wind?.v || 0);
     const driftLat = v * ageHours * 0.035;
-    const cosLat = Math.max(0.25, Math.cos((item.lat * Math.PI) / 180));
+    const cosLat = Math.max(0.25, Math.cos((Number(item.lat) * Math.PI) / 180));
     const driftLon = (u * ageHours * 0.035) / cosLat;
-    let lat = item.lat + driftLat;
-    let lon = item.lon + driftLon;
-    if (lat > 89.8) lat = 89.8;
-    if (lat < -89.8) lat = -89.8;
+    let lat = Number(item.lat) + driftLat + offsetLat;
+    let lon = Number(item.lon) + driftLon + offsetLon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    lat = Math.max(-89.8, Math.min(89.8, lat));
     while (lon > 180) lon -= 360;
     while (lon < -180) lon += 360;
     return { lat, lon };
   }
 
-  async function renderCloudLayers() {
-    clearCloudMarkers();
-    if (!state.feature.clouds || !state.mapReady || !state.cloudTiles.length) return;
+  function normalizeTileBand(tile, band) {
+    const density = Number(tile[`${band}_density`] || 0);
+    const altitude = Number(tile[`altitude_${band}`] || (band === 'high' ? 9000 : band === 'mid' ? 4200 : 1200));
+    const wind = tile.wind?.[band] || { u: 0, v: 0 };
+    return {
+      tile_id: tile.tile_id,
+      lat: Number(tile.bounds?.lat_center || 0),
+      lon: Number(tile.bounds?.lon_center || 0),
+      density,
+      altitude,
+      wind,
+      precip: Number(tile.precipitation_factor || 0),
+      convection: Number(tile.convection_factor || 0),
+      importance: Number(tile.importance || 0),
+      updated_at: Number(tile.updated_at || Date.now()),
+      band,
+    };
+  }
 
-    const lib = await ensureMapLibrary();
-    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) return;
+  function buildCloudCluster(item, puffIndex, puffTotal, sun, markerLib, maps3dLib) {
+    const jitter = (puffIndex - (puffTotal - 1) / 2) * 0.06;
+    const pos = advectCloudPosition(item, jitter * 0.45, jitter * 0.6);
+    if (!pos) return null;
 
-    const { lod, items } = selectCloudRenderItems();
-    items.forEach((item) => {
-      const pos = advectCloudPosition(item);
-      const marker = new lib.Marker3DInteractiveElement({
-        position: { lat: pos.lat, lng: pos.lon, altitude: item.altitude },
-      });
+    const verticalSpread = (item.convection * 1800) + (item.band === 'high' ? 2200 : item.band === 'mid' ? 900 : 280);
+    const altitude = item.altitude + verticalSpread * (puffIndex / Math.max(1, puffTotal - 1));
+    if (!Number.isFinite(altitude)) return null;
 
-      const scale = (item.baseScale + item.density * 1.35 + Math.max(item.precip, item.convection) * 0.65) * lod.detailBoost;
-      const pin = new lib.PinElement({
-        glyph: '',
-        scale,
-        background: bandColor(item.band, item),
-        borderColor: '#dbeafe',
-        glyphColor: '#ffffff',
-      });
+    const storm = Math.max(item.precip, item.convection);
+    const topBright = Math.max(0.32, Math.min(0.95, sun.daylight * 0.85 + (item.band === 'high' ? 0.18 : 0.08)));
+    const darkness = Math.max(0, Math.min(0.48, storm * 0.35 + (1 - sun.daylight) * 0.18));
 
-      try {
-        pin.style.opacity = String(Math.min(0.88, 0.28 + item.density * 0.65));
-        pin.style.filter = `blur(${item.band === 'high' ? 0.4 : 0.25}px) drop-shadow(0 0 ${item.band === 'high' ? 8 : 12}px rgba(226,232,240,0.55))`;
-      } catch (_) {}
+    const c = Math.round(255 * topBright - 255 * darkness);
+    const clamped = Math.max(124, Math.min(245, c));
+    const bg = `rgb(${clamped}, ${clamped + 4}, ${Math.max(150, clamped + 10)})`;
 
-      marker.append(pin);
-      globeEl.append(marker);
-      state.cloudMarkers.push(marker);
+    const pin = new markerLib.PinElement({
+      glyph: '',
+      scale: 0.72 + item.density * 1.18 + storm * 0.36,
+      background: bg,
+      borderColor: 'rgba(235,245,255,0.72)',
+      glyphColor: '#ffffff',
     });
+    pin.element.classList.add('weather-pin');
+    pin.element.style.opacity = String(Math.max(0.16, Math.min(0.82, 0.18 + item.density * 0.72)));
 
-    setStatus(`Cloud LOD ${lod.tag}: ${items.length} active weather primitives`);
+    const marker = new maps3dLib.Marker3DInteractiveElement({
+      position: { lat: pos.lat, lng: pos.lon, altitude },
+    });
+    marker.append(pin);
+    return marker;
+  }
+
+  function buildRainShaft(item, shaftIndex, shaftTotal, markerLib, maps3dLib) {
+    const spread = (shaftIndex - (shaftTotal - 1) / 2) * 0.03;
+    const pos = advectCloudPosition(item, spread, spread * 0.6);
+    if (!pos) return null;
+
+    const precip = Math.max(item.precip, 0.01);
+    const height = 700 + precip * 5200;
+    const baseAlt = Math.max(80, item.altitude - height);
+
+    const pin = new markerLib.PinElement({
+      glyph: '',
+      scale: 0.4 + precip * 0.8,
+      background: 'rgba(56,189,248,0.48)',
+      borderColor: 'rgba(147,197,253,0.4)',
+      glyphColor: '#dbeafe',
+    });
+    pin.element.classList.add('weather-rain');
+    pin.element.style.height = `${Math.round(16 + precip * 42)}px`;
+    pin.element.style.width = `${Math.round(4 + precip * 6)}px`;
+    pin.element.style.opacity = String(Math.max(0.2, Math.min(0.9, 0.18 + precip * 0.85)));
+
+    const marker = new maps3dLib.Marker3DInteractiveElement({
+      position: { lat: pos.lat, lng: pos.lon, altitude: baseAlt },
+    });
+    marker.append(pin);
+    return marker;
+  }
+
+  function buildJetBalloon(tile, idx, markerLib, maps3dLib) {
+    const item = normalizeTileBand(tile, 'high');
+    const flow = Math.hypot(Number(item.wind?.u || 0), Number(item.wind?.v || 0));
+    if (flow < 12) return null;
+    const seedOffset = ((idx % 7) - 3) * 0.18;
+    const pos = advectCloudPosition(item, seedOffset * 0.2, seedOffset * 0.35);
+    if (!pos) return null;
+
+    const pin = new markerLib.PinElement({
+      glyph: '◉',
+      scale: 0.72 + Math.min(0.8, flow / 35),
+      background: 'rgba(129,140,248,0.82)',
+      borderColor: 'rgba(236,72,153,0.84)',
+      glyphColor: '#fdf2f8',
+    });
+    pin.element.classList.add('weather-jet');
+    pin.element.style.opacity = String(Math.max(0.6, Math.min(0.95, 0.45 + flow / 40)));
+
+    const marker = new maps3dLib.Marker3DInteractiveElement({
+      position: { lat: pos.lat, lng: pos.lon, altitude: item.altitude + 3500 + flow * 80 },
+      title: `Jet balloon proxy • flow ${flow.toFixed(1)}`,
+    });
+    marker.append(pin);
+    return marker;
+  }
+
+  async function renderCloudVolumes() {
+    clearCloudMarkers();
+    if (!state.feature.clouds || !state.mapReady || !state.cloudTiles.length || !state.maps3dLib || !state.markerLib) return;
+
+    const sun = getSunState();
+    const lod = cloudLodProfile();
+    const tiles = [...state.cloudTiles]
+      .sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0))
+      .slice(0, lod.tileLimit);
+
+    let budget = 0;
+    for (const tile of tiles) {
+      for (const band of ['low', 'mid', 'high']) {
+        const item = normalizeTileBand(tile, band);
+        if (item.density < (band === 'low' ? 0.09 : band === 'mid' ? 0.12 : 0.1)) continue;
+        const puffs = Math.max(1, Math.min(9, Math.round(lod.puffs * (0.42 + item.density + item.convection * 0.25))));
+        for (let i = 0; i < puffs; i += 1) {
+          if (budget > 1800) break;
+          const m = buildCloudCluster(item, i, puffs, sun, state.markerLib, state.maps3dLib);
+          if (!m) continue;
+          globeEl.append(m);
+          state.cloudMarkers.push(m);
+          budget += 1;
+        }
+      }
+      if (budget > 1800) break;
+    }
+  }
+
+  async function renderRainShafts() {
+    clearRainMarkers();
+    if (!state.feature.rain || !state.mapReady || !state.cloudTiles.length || !state.maps3dLib || !state.markerLib) return;
+
+    const lod = cloudLodProfile();
+    const stormTiles = state.cloudTiles
+      .filter((t) => Number(t.precipitation_factor || t.precip || 0) > 0.22)
+      .sort((a, b) => Number(b.precipitation_factor || 0) - Number(a.precipitation_factor || 0))
+      .slice(0, Math.min(lod.tileLimit, lod.rainCap));
+
+    let shaftBudget = 0;
+    for (const tile of stormTiles) {
+      const item = normalizeTileBand(tile, 'low');
+      const precip = Math.max(item.precip, 0);
+      const shafts = Math.max(1, Math.min(6, Math.round(1 + precip * 5)));
+      for (let i = 0; i < shafts; i += 1) {
+        if (shaftBudget > lod.rainCap) break;
+        const m = buildRainShaft(item, i, shafts, state.markerLib, state.maps3dLib);
+        if (!m) continue;
+        globeEl.append(m);
+        state.rainMarkers.push(m);
+        shaftBudget += 1;
+      }
+      if (shaftBudget > lod.rainCap) break;
+    }
+  }
+
+  async function renderJetBalloons() {
+    clearJetMarkers();
+    if (!state.feature.jet || !state.mapReady || !state.cloudTiles.length || !state.maps3dLib || !state.markerLib) return;
+
+    const lod = cloudLodProfile();
+    const candidates = [...state.cloudTiles]
+      .sort((a, b) => {
+        const af = Math.hypot(Number(a.wind?.high?.u || 0), Number(a.wind?.high?.v || 0));
+        const bf = Math.hypot(Number(b.wind?.high?.u || 0), Number(b.wind?.high?.v || 0));
+        return bf - af;
+      })
+      .slice(0, lod.jetCap);
+
+    candidates.forEach((tile, idx) => {
+      const m = buildJetBalloon(tile, idx, state.markerLib, state.maps3dLib);
+      if (!m) return;
+      globeEl.append(m);
+      state.jetMarkers.push(m);
+    });
+  }
+
+  async function renderWeatherLayers() {
+    await renderCloudVolumes();
+    await renderRainShafts();
+    await renderJetBalloons();
+    const lod = cloudLodProfile();
+    setStatus(`Weather ${lod.label} • clouds:${state.cloudMarkers.length} rain:${state.rainMarkers.length} jet:${state.jetMarkers.length}`);
   }
 
   async function loadClouds(force = false) {
     if (!force && Date.now() - state.cloudFetchedAt < 75000 && state.cloudTiles.length) {
-      await renderCloudLayers();
+      await renderWeatherLayers();
       return;
     }
     const payload = await json('/gfs/api/cloud_tiles');
     state.cloudTiles = payload.items || [];
     state.cloudFetchedAt = Date.now();
-    await renderCloudLayers();
+    await renderWeatherLayers();
   }
 
-  async function ensureMapLibrary() {
-    if (state.maps3dLib) return state.maps3dLib;
-    if (!window.google || !window.google.maps || !window.google.maps.importLibrary) return null;
-    try {
-      state.maps3dLib = await window.google.maps.importLibrary('maps3d');
-      return state.maps3dLib;
-    } catch (err) {
-      console.warn('[gfs] maps3d import failed', err);
-      setStatus('maps3d import failed', true);
-      return null;
-    }
+  async function ensureMapLibraries() {
+    if (!window.google || !window.google.maps || !window.google.maps.importLibrary) return;
+    if (!state.maps3dLib) state.maps3dLib = await window.google.maps.importLibrary('maps3d');
+    if (!state.markerLib) state.markerLib = await window.google.maps.importLibrary('marker');
   }
 
   function markerIntensityClass(p) {
-    const intensity = p && p.bait && p.bait.intensity;
+    const intensity = p?.bait?.intensity;
     if (intensity === 'high') return 'high';
     if (intensity === 'medium') return 'medium';
     return 'low';
   }
 
   function markerLabelText(p) {
-    if (!p) return 'Fish';
-    const source = (p.name || p.location_key || 'fish').trim();
-    return source.length > 18 ? `${source.slice(0, 18)}…` : source;
+    const source = (p?.name || p?.location_key || 'fish').trim();
+    return source.length > 20 ? `${source.slice(0, 20)}…` : source;
   }
 
-  function buildFishSphereSvg(point, markerState) {
-    const ns = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(ns, 'svg');
+  function buildFishPin(point, markerState) {
     const intensity = markerIntensityClass(point);
-    const isActive = !!(markerState && markerState.active);
-    const isHover = !!(markerState && markerState.hover);
-    const markerId = (point && (point.location_key || point.id || point.name || 'fish')).toString().replace(/[^a-zA-Z0-9_-]/g, '_');
-    const gradId = `fishGrad_${markerId}`;
-    const glowId = `fishGlow_${markerId}`;
-
-    svg.setAttribute('viewBox', '0 0 64 64');
-    svg.setAttribute('width', '42');
-    svg.setAttribute('height', '42');
-    svg.setAttribute('class', `fish-marker-svg ${intensity} ${isActive ? 'active' : ''} ${isHover ? 'hover' : ''}`.trim());
-    svg.setAttribute('aria-label', markerLabelText(point));
-    svg.setAttribute('role', 'img');
-
-    const defs = document.createElementNS(ns, 'defs');
-
-    const grad = document.createElementNS(ns, 'radialGradient');
-    grad.setAttribute('id', gradId);
-    grad.setAttribute('cx', '35%');
-    grad.setAttribute('cy', '32%');
-    grad.setAttribute('r', '70%');
-
-    const stops = [
-      ['0%', '#d8ffe7'],
-      ['35%', '#64ff9a'],
-      ['72%', '#16dc5e'],
-      ['100%', '#0a7a34'],
-    ];
-    stops.forEach(([offset, color]) => {
-      const st = document.createElementNS(ns, 'stop');
-      st.setAttribute('offset', offset);
-      st.setAttribute('stop-color', color);
-      grad.appendChild(st);
+    const pin = new state.markerLib.PinElement({
+      glyph: '',
+      scale: intensity === 'high' ? 1.25 : intensity === 'medium' ? 1.12 : 1.02,
+      background: '#22c55e',
+      borderColor: '#dcfce7',
+      glyphColor: '#ecfff1',
     });
 
-    const filter = document.createElementNS(ns, 'filter');
-    filter.setAttribute('id', glowId);
-    filter.setAttribute('x', '-60%');
-    filter.setAttribute('y', '-60%');
-    filter.setAttribute('width', '220%');
-    filter.setAttribute('height', '220%');
-
-    const blur = document.createElementNS(ns, 'feGaussianBlur');
-    blur.setAttribute('stdDeviation', intensity === 'high' ? '3.7' : '3.2');
-    blur.setAttribute('result', 'blur');
-
-    const merge = document.createElementNS(ns, 'feMerge');
-    const n1 = document.createElementNS(ns, 'feMergeNode');
-    n1.setAttribute('in', 'blur');
-    const n2 = document.createElementNS(ns, 'feMergeNode');
-    n2.setAttribute('in', 'SourceGraphic');
-    merge.appendChild(n1);
-    merge.appendChild(n2);
-
-    filter.appendChild(blur);
-    filter.appendChild(merge);
-
-    defs.appendChild(grad);
-    defs.appendChild(filter);
-    svg.appendChild(defs);
-
-    const halo = document.createElementNS(ns, 'circle');
-    halo.setAttribute('class', 'fish-halo');
-    halo.setAttribute('cx', '32');
-    halo.setAttribute('cy', '32');
-    halo.setAttribute('r', intensity === 'high' ? '20' : '18.5');
-    halo.setAttribute('fill', '#3cff84');
-    halo.setAttribute('filter', `url(#${glowId})`);
-
-    const ring = document.createElementNS(ns, 'circle');
-    ring.setAttribute('class', 'fish-ring');
-    ring.setAttribute('cx', '32');
-    ring.setAttribute('cy', '32');
-    ring.setAttribute('r', '22');
-    ring.setAttribute('fill', 'none');
-    ring.setAttribute('stroke', 'rgba(140,255,188,0.85)');
-    ring.setAttribute('stroke-width', '1.3');
-
-    const core = document.createElementNS(ns, 'circle');
-    core.setAttribute('class', 'fish-core');
-    core.setAttribute('cx', '32');
-    core.setAttribute('cy', '32');
-    core.setAttribute('r', intensity === 'high' ? '13' : '12');
-    core.setAttribute('fill', `url(#${gradId})`);
-    core.setAttribute('stroke', '#e8fff1');
-    core.setAttribute('stroke-width', '1.4');
-
-    const shine = document.createElementNS(ns, 'circle');
-    shine.setAttribute('cx', '27');
-    shine.setAttribute('cy', '27');
-    shine.setAttribute('r', '4');
-    shine.setAttribute('fill', '#ffffff');
-    shine.setAttribute('opacity', '0.34');
-
-    svg.appendChild(halo);
-    svg.appendChild(ring);
-    svg.appendChild(core);
-    svg.appendChild(shine);
-
-    return svg;
-  }
-
-  function refreshMarkerTemplate(markerState) {
-    if (!markerState || !markerState.marker || !markerState.point) return;
-    const nextSvg = buildFishSphereSvg(markerState.point, markerState);
-    markerState.marker.replaceChildren(nextSvg);
-    markerState.el = nextSvg;
+    const el = pin.element;
+    el.classList.add('fish-pin', `fish-pin-${intensity}`);
+    if (markerState?.hover) el.classList.add('hover');
+    if (markerState?.active) el.classList.add('active');
+    el.title = markerLabelText(point);
+    return pin;
   }
 
   function setMarkerVisualHover(markerState, hover) {
-    if (!markerState) return;
+    if (!markerState?.el) return;
     markerState.hover = !!hover;
-    refreshMarkerTemplate(markerState);
+    markerState.el.classList.toggle('hover', markerState.hover);
   }
 
   function setMarkerVisualActive(markerState, active) {
-    if (!markerState) return;
+    if (!markerState?.el) return;
     markerState.active = !!active;
-    refreshMarkerTemplate(markerState);
+    markerState.el.classList.toggle('active', markerState.active);
   }
 
   function scheduleHudHide() {
@@ -1124,26 +904,22 @@
 
   async function renderMapMarkers() {
     clearMapMarkers();
-    if (!state.mapReady || !state.feature.markers) return;
-
-    const lib = await ensureMapLibrary();
-    if (!lib || !lib.Marker3DInteractiveElement) {
-      setStatus('maps3d marker library unavailable', true);
-      return;
-    }
+    if (!state.mapReady || !state.feature.markers || !state.maps3dLib || !state.markerLib) return;
 
     state.fish.forEach((p) => {
-      const marker = new lib.Marker3DInteractiveElement({
-        position: {
-          lat: Number(p.lat),
-          lng: Number(p.lon),
-          altitude: 10,
-        },
+      const lat = Number(p.lat);
+      const lon = Number(p.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      const marker = new state.maps3dLib.Marker3DInteractiveElement({
+        position: { lat, lng: lon, altitude: 10 },
         title: p.name || p.location_key || 'Fish marker',
       });
 
-      const markerState = { marker, point: p, active: false, hover: false };
-      marker.append(buildFishSphereSvg(p, markerState));
+      const markerState = { marker, point: p, active: false, hover: false, el: null };
+      const pin = buildFishPin(p, markerState);
+      marker.append(pin);
+      markerState.el = pin.element;
       state.markerStates.set(p.location_key, markerState);
 
       const hoverOpen = () => {
@@ -1151,14 +927,16 @@
         setActiveMarkerByKey(p.location_key);
         openHud(p, false).catch((e) => setHudMessage(e.message));
       };
+
       const lockedOpen = () => {
         setActiveMarkerByKey(p.location_key);
         openHud(p, true).catch((e) => setHudMessage(e.message));
       };
+
       const hoverLeave = () => {
         if (!state.hudLocked) {
           setMarkerVisualHover(markerState, false);
-          setActiveMarkerByKey(state.selected && state.selected.location_key);
+          setActiveMarkerByKey(state.selected?.location_key || null);
           scheduleHudHide();
         }
       };
@@ -1208,11 +986,11 @@
 
   function mountPlayer({ live, uploads }) {
     mediaPlayerPane.innerHTML = '';
-    const safeLiveUrl = normalizeMediaUrl(live && live.stream_url || '');
+    const safeLiveUrl = normalizeMediaUrl(live?.stream_url || '');
     const firstUpload = (uploads || [])[0];
-    const uploadUrl = normalizeMediaUrl(firstUpload && firstUpload.url || '');
+    const uploadUrl = normalizeMediaUrl(firstUpload?.url || '');
 
-    if (live && live.active && safeLiveUrl) {
+    if (live?.active && safeLiveUrl) {
       if (isVideoUrl(safeLiveUrl)) {
         const v = document.createElement('video');
         v.controls = true;
@@ -1266,7 +1044,7 @@
   }
 
   function metaValue(point, key, fallback = 'n/a') {
-    const val = point && point[key];
+    const val = point?.[key];
     if (val === null || val === undefined || String(val).trim() === '') return fallback;
     return String(val);
   }
@@ -1283,18 +1061,16 @@
     rows.push(['location_key', metaValue(point, 'location_key')]);
     rows.push(['latitude', metaValue(point, 'lat')]);
     rows.push(['longitude', metaValue(point, 'lon')]);
-    rows.push(['bait_intensity', metaValue(point && point.bait, 'intensity')]);
-    rows.push(['confidence', metaValue(point && point.bait, 'confidence')]);
+    rows.push(['bait_intensity', metaValue(point.bait || {}, 'intensity')]);
+    rows.push(['confidence', metaValue(point.bait || {}, 'confidence')]);
 
     const commonFields = ['species', 'type', 'source', 'timestamp', 'zone', 'area', 'description', 'intent', 'notes'];
     commonFields.forEach((k) => {
-      const fromTop = point && point[k];
-      const fromMeta = point && point.meta && point.meta[k];
-      const value = fromTop ?? fromMeta;
+      const value = point[k] ?? point.meta?.[k];
       if (value !== undefined && value !== null && String(value).trim() !== '') rows.push([k, String(value)]);
     });
 
-    if (point && point.meta && typeof point.meta === 'object') {
+    if (point.meta && typeof point.meta === 'object') {
       Object.entries(point.meta).forEach(([k, v]) => {
         if (v === null || v === undefined || String(v).trim() === '') return;
         if (rows.some(([rk]) => rk === k)) return;
@@ -1439,13 +1215,11 @@
       const txt = String(ev.data || '').slice(0, 2800);
       setFreshness(state.lastUpdateAt);
       healthEl.textContent = txt;
-      if (state.feature.clouds) {
+      if (state.feature.clouds || state.feature.rain || state.feature.jet) {
         loadClouds().catch((e) => setStatus(e.message, true));
       }
     };
-    ws.onerror = () => {
-      setStatus('Feed error', true);
-    };
+    ws.onerror = () => { setStatus('Feed error', true); };
     ws.onclose = () => {
       state.wsConnected = false;
       setStatus('Reconnecting feed...', true);
@@ -1459,17 +1233,14 @@
     state.mapsScriptLoading = new Promise((resolve, reject) => {
       const existing = document.querySelector('script[data-gmaps3d="1"]');
       if (existing) {
-        if (window.google && window.google.maps) {
-          resolve();
-          return;
-        }
+        if (window.google && window.google.maps) { resolve(); return; }
         existing.addEventListener('load', resolve, { once: true });
         existing.addEventListener('error', reject, { once: true });
         return;
       }
 
       const s = document.createElement('script');
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.mapsApiKey)}&v=beta&libraries=maps3d`;
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.mapsApiKey)}&v=beta&libraries=maps3d,marker`;
       s.async = true;
       s.defer = true;
       s.dataset.gmaps3d = '1';
@@ -1496,7 +1267,6 @@
 
   async function loadGoogleMapScript() {
     if (!state.mapsApiKey) {
-      mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
       showGlobeFallback(true);
       setStatus('Google Maps key missing — hover HUD remains available after config', true);
       return;
@@ -1504,12 +1274,11 @@
 
     try {
       await loadMapsScript();
-
       if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
         throw new Error('Maps JS API did not initialize');
       }
 
-      await ensureMapLibrary();
+      await ensureMapLibraries();
       await customElements.whenDefined('gmp-map-3d');
 
       globeEl = document.getElementById('globe');
@@ -1517,7 +1286,6 @@
 
       state.mapReady = true;
       showGlobeFallback(false);
-      mapsKeyState.textContent = 'Maps key status: configured';
       setStatus('Photorealistic globe connected');
       await renderMapMarkers();
       await loadClouds(true);
@@ -1533,10 +1301,7 @@
     const cfg = await json('/gfs/api/config');
     state.mapsApiKey = (cfg.google_maps_api_key || '').trim();
 
-    if (cfg.maps3d_available) {
-      mapsKeyState.textContent = 'Maps key status: configured';
-    } else {
-      mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
+    if (!cfg.maps3d_available) {
       showGlobeFallback(true);
       setStatus('Maps3D unavailable until GOOGLE_MAPS_API_KEY is configured', true);
     }
@@ -1546,45 +1311,41 @@
     state.hudHover = true;
     clearTimeout(state.hudHideTimer);
   });
+
   hud.addEventListener('mouseleave', () => {
     state.hudHover = false;
     if (!state.hudLocked) scheduleHudHide();
   });
 
-  document.getElementById('loadGlobeBtn').addEventListener('click', () => {
-    loadGoogleMapScript().catch((e) => setStatus(e.message, true));
-  });
-  document.getElementById('refreshFishBtn').addEventListener('click', () => {
-    loadFish().catch((e) => setStatus(e.message, true));
-  });
-  document.getElementById('refreshHealthBtn').addEventListener('click', () => {
-    loadHealth().catch((e) => setStatus(e.message, true));
-  });
-  document.getElementById('refreshCloudBtn').addEventListener('click', () => {
-    loadClouds(true).catch((e) => setStatus(e.message, true));
-  });
   document.getElementById('saveReportBtn').addEventListener('click', () => {
     saveReport().catch((e) => setHudMessage(e.message));
   });
+
   document.getElementById('refreshContextBtn').addEventListener('click', () => {
     refreshLocationContext().catch((e) => setHudMessage(e.message));
   });
+
   document.getElementById('uploadBtn').addEventListener('click', () => {
     uploadVideo().catch((e) => setHudMessage(e.message));
   });
+
   document.getElementById('connectLiveBtn').addEventListener('click', () => {
     updateLiveUrl().catch((e) => setHudMessage(e.message));
   });
+
   document.getElementById('startLiveBtn').addEventListener('click', () => {
     startLiveSession().catch((e) => setHudMessage(e.message));
   });
+
   document.getElementById('stopLiveBtn').addEventListener('click', () => {
     stopLiveSession().catch((e) => setHudMessage(e.message));
   });
+
   document.getElementById('pinHudBtn').addEventListener('click', () => {
     setHudLocked(!state.hudLocked);
     if (!state.hudLocked) scheduleHudHide();
   });
+
   document.getElementById('closeHud').addEventListener('click', () => {
     stopHudPolling();
     hideHud(true);
@@ -1593,12 +1354,14 @@
   loadHealth().catch((e) => setStatus(e.message, true));
   loadFish().catch((e) => setStatus(e.message, true));
   loadClouds().catch((e) => setStatus(e.message, true));
+
   loadRuntimeConfig()
     .then(() => loadGoogleMapScript())
     .catch((e) => setStatus(e.message, true));
+
   setInterval(() => {
-    if (state.feature.clouds && state.mapReady && state.cloudTiles.length) {
-      renderCloudLayers().catch(() => {});
+    if ((state.feature.clouds || state.feature.rain || state.feature.jet) && state.mapReady && state.cloudTiles.length) {
+      renderWeatherLayers().catch(() => {});
     }
   }, 12000);
 
