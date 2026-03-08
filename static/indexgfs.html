@@ -8,7 +8,7 @@
     :root {
       --bg: #050b18;
       --glass: rgba(8, 20, 41, 0.66);
-      --glass-strong: rgba(6, 13, 29, 0.88);
+      --glass-strong: rgba(6, 13, 29, 0.9);
       --line: rgba(56, 189, 248, 0.38);
       --txt: #e6f4ff;
       --muted: rgba(230, 244, 255, 0.72);
@@ -19,6 +19,8 @@
       --amber: #f59e0b;
       --red: #f43f5e;
       --teal: #14b8a6;
+      --shadow: 0 18px 60px rgba(2, 8, 23, .55);
+      --cinema: linear-gradient(180deg, rgba(3, 8, 20, 0.9) 0%, rgba(5, 12, 28, 0.82) 45%, rgba(8, 20, 41, 0.72) 100%);
     }
 
     * { box-sizing: border-box; }
@@ -28,14 +30,11 @@
       height: 100%;
       color: var(--txt);
       font-family: Inter, Segoe UI, Arial, sans-serif;
-      background:
-        radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
+      background: radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
       overflow: hidden;
     }
 
-    body {
-      min-height: 100vh;
-    }
+    body { min-height: 100vh; }
 
     .layout {
       height: 100vh;
@@ -51,14 +50,12 @@
       background: var(--glass);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
-      box-shadow:
-        0 0 24px rgba(34, 211, 238, .12),
-        inset 0 0 0 1px rgba(255,255,255,.04);
+      box-shadow: 0 0 24px rgba(34, 211, 238, .12), inset 0 0 0 1px rgba(255,255,255,.04);
     }
 
     .topbar {
       display: grid;
-      grid-template-columns: 1.5fr 1fr;
+      grid-template-columns: 1.4fr 1fr;
       gap: 10px;
       padding: 12px;
       align-items: center;
@@ -85,9 +82,7 @@
       gap: 8px;
     }
 
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
     .features {
       display: flex;
@@ -138,16 +133,15 @@
     }
 
     .main {
-      display: grid;
-      grid-template-columns: 1.8fr 1fr;
-      gap: 10px;
       min-height: 0;
+      position: relative;
     }
 
     .mapwrap {
       position: relative;
       overflow: hidden;
       min-height: 460px;
+      height: 100%;
     }
 
     #globe {
@@ -156,8 +150,7 @@
       height: 100%;
       min-height: 460px;
       border-radius: 14px;
-      background:
-        radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
+      background: radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
     }
 
     .globe-fallback {
@@ -168,15 +161,12 @@
       text-align: center;
       padding: 20px;
       color: #dbeafe;
-      background:
-        radial-gradient(circle at center, rgba(30, 64, 175, .28), rgba(15, 23, 42, .92));
+      background: radial-gradient(circle at center, rgba(30, 64, 175, .28), rgba(15, 23, 42, .92));
       border-radius: 14px;
-      z-index: 1;
+      z-index: 3;
     }
 
-    .globe-fallback.show {
-      display: grid;
-    }
+    .globe-fallback.show { display: grid; }
 
     .globe-fallback .inner {
       max-width: 560px;
@@ -199,15 +189,27 @@
       max-width: min(560px, calc(100% - 20px));
       pointer-events: none;
       white-space: pre-wrap;
-      z-index: 2;
+      z-index: 4;
     }
 
-    .side {
-      padding: 10px;
+    .map-tools {
+      position: absolute;
+      right: 10px;
+      top: 10px;
       display: grid;
-      grid-template-rows: auto auto 1fr;
-      gap: 10px;
-      min-height: 0;
+      gap: 8px;
+      z-index: 4;
+      width: min(290px, calc(100% - 20px));
+    }
+
+    .toolbox {
+      padding: 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(129, 140, 248, .28);
+      background: rgba(8, 15, 29, .76);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: var(--shadow);
     }
 
     .row {
@@ -226,63 +228,139 @@
       font: inherit;
     }
 
-    button {
-      cursor: pointer;
-    }
+    button { cursor: pointer; }
+    button:hover { border-color: rgba(34, 211, 238, .55); }
 
-    button:hover {
-      border-color: rgba(34, 211, 238, .55);
-    }
+    .toolbox button { flex: 1 1 auto; }
 
-    .markers {
-      min-height: 0;
-      overflow: auto;
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-      padding-right: 2px;
-    }
-
-    .marker-content {
-      border: 1px solid #334155;
-      border-radius: 10px;
-      padding: 8px;
-      cursor: pointer;
-      background: linear-gradient(180deg, rgba(30, 58, 138, .25), rgba(15, 23, 42, .25));
-    }
-
-    .marker-content:hover {
-      border-color: var(--cyan);
-    }
-
-    .marker-name {
-      font-weight: 700;
-      font-size: 13px;
-    }
-
-    .marker-coord, .marker-bait {
-      font-size: 12px;
-      opacity: .9;
-      margin-top: 2px;
-    }
-
-    .hud {
+    .hover-hud {
       position: fixed;
-      right: 12px;
-      bottom: 12px;
-      width: min(460px, calc(100% - 24px));
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 10px;
-      background: var(--glass-strong);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      right: 14px;
+      bottom: 14px;
+      width: min(368px, calc(100% - 28px));
+      max-height: min(72vh, 760px);
+      border: 1px solid rgba(125, 211, 252, 0.22);
+      border-radius: 18px;
+      padding: 0;
+      background: var(--cinema);
+      backdrop-filter: blur(16px) saturate(1.15);
+      -webkit-backdrop-filter: blur(16px) saturate(1.15);
       z-index: 20;
       display: none;
-      box-shadow: 0 0 30px rgba(15, 23, 42, .65);
+      overflow: hidden;
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,.06);
     }
 
-    .hud.show { display: block; }
+    .hover-hud::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 76px;
+      background: linear-gradient(180deg, rgba(34, 211, 238, 0.14), rgba(129, 140, 248, 0.06), transparent);
+      pointer-events: none;
+    }
+
+    .hover-hud.show { display: block; }
+    .hover-hud.locked { border-color: rgba(132, 204, 22, .48); box-shadow: 0 20px 64px rgba(8, 18, 20, .7), 0 0 26px rgba(132, 204, 22, .14); }
+
+    .hud-scroll {
+      position: relative;
+      z-index: 1;
+      max-height: min(72vh, 760px);
+      overflow: auto;
+      padding: 12px;
+    }
+
+    .hud-hero {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+
+    .hud-heading {
+      min-width: 0;
+    }
+
+    .hud-title {
+      margin-top: 6px;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: .01em;
+      line-height: 1.15;
+    }
+
+    .hud-subgrid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0 8px;
+    }
+
+    .mini-stat {
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 12px;
+      padding: 8px 9px;
+      background: rgba(15, 23, 42, 0.34);
+      min-width: 0;
+    }
+
+    .mini-stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: rgba(191, 219, 254, .65);
+      margin-bottom: 3px;
+    }
+
+    .mini-stat-value {
+      font-size: 12px;
+      color: #e0f2fe;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hud-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .hud-actions.tight3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .hud-section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .hud-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: rgba(191, 219, 254, .72);
+      margin-bottom: 8px;
+    }
+
+    .hover-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(132, 204, 22, .35);
+      background: rgba(20, 35, 18, .45);
+      color: #dcfce7;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
 
     .live-badge {
       display: inline-flex;
@@ -317,11 +395,11 @@
     }
 
     .player-pane {
-      margin-top: 8px;
-      border: 1px solid #334155;
-      border-radius: 10px;
-      background: rgba(2, 6, 23, 0.75);
-      min-height: 185px;
+      margin-top: 0;
+      border: 1px solid rgba(51, 65, 85, 0.9);
+      border-radius: 14px;
+      background: radial-gradient(circle at top, rgba(30, 41, 59, .7), rgba(2, 6, 23, 0.92));
+      min-height: 128px;
       overflow: hidden;
       position: relative;
     }
@@ -329,14 +407,14 @@
     .player-pane iframe,
     .player-pane video {
       width: 100%;
-      min-height: 185px;
+      min-height: 128px;
       display: block;
       border: 0;
       background: #020617;
     }
 
     .player-empty {
-      min-height: 185px;
+      min-height: 128px;
       display: grid;
       place-items: center;
       text-align: center;
@@ -347,7 +425,7 @@
 
     textarea {
       width: 100%;
-      min-height: 88px;
+      min-height: 74px;
       resize: vertical;
     }
 
@@ -366,14 +444,123 @@
       color: #cfe8ff;
     }
 
-    .muted {
-      color: var(--muted);
+    .muted { color: var(--muted); }
+    .tiny { font-size: 12px; }
+
+
+    .fish-marker {
+      position: relative;
+      width: 30px;
+      height: 30px;
+      display: block;
+      pointer-events: auto;
+      transform: translateZ(0);
+    }
+
+    .fish-marker::before,
+    .fish-marker::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+    }
+
+    .fish-marker::before {
+      background: radial-gradient(circle at 35% 32%, #d9ffe7 0%, #7dff9f 18%, #1fe45c 46%, #0d8f35 74%, rgba(5, 38, 16, 0.98) 100%);
+      box-shadow:
+        0 0 0 1px rgba(220, 252, 231, 0.92),
+        0 0 14px rgba(34, 255, 102, 0.95),
+        0 0 28px rgba(34, 255, 102, 0.72),
+        0 0 42px rgba(16, 185, 129, 0.42),
+        inset 0 -3px 7px rgba(2, 20, 8, 0.72),
+        inset 0 3px 8px rgba(255, 255, 255, 0.34);
+      animation: fishSpherePulse 1.9s ease-in-out infinite;
+    }
+
+    .fish-marker::after {
+      inset: -8px;
+      border: 1px solid rgba(74, 222, 128, 0.42);
+      box-shadow: 0 0 16px rgba(74, 222, 128, 0.32);
+      animation: fishSphereRing 2.4s ease-out infinite;
+    }
+
+    .fish-marker .fish-core {
+      position: absolute;
+      inset: 7px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.98) 0%, rgba(220,252,231,0.82) 18%, rgba(134,239,172,0.28) 55%, rgba(134,239,172,0) 100%);
+      mix-blend-mode: screen;
+      opacity: .96;
+      pointer-events: none;
+    }
+
+    .fish-marker .fish-label {
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 8px);
+      transform: translateX(-50%);
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(2, 6, 23, 0.72);
+      border: 1px solid rgba(134, 239, 172, 0.22);
+      color: #dcfce7;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      white-space: nowrap;
+      box-shadow: 0 8px 18px rgba(2, 6, 23, .35);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .18s ease;
+    }
+
+    .fish-marker.high::before {
+      box-shadow:
+        0 0 0 1px rgba(220, 252, 231, 0.95),
+        0 0 18px rgba(74, 222, 128, 1),
+        0 0 38px rgba(34, 255, 102, 0.88),
+        0 0 58px rgba(16, 185, 129, 0.56),
+        inset 0 -4px 8px rgba(2, 20, 8, 0.8),
+        inset 0 4px 9px rgba(255, 255, 255, 0.38);
+    }
+
+    .fish-marker.medium { transform: scale(1.06); }
+    .fish-marker.high { transform: scale(1.16); }
+    .fish-marker.hover .fish-label,
+    .fish-marker:hover .fish-label,
+    .fish-marker.active .fish-label { opacity: 1; }
+    .fish-marker.hover::after,
+    .fish-marker.active::after,
+    .fish-marker:hover::after {
+      border-color: rgba(187, 247, 208, 0.7);
+      box-shadow: 0 0 24px rgba(74, 222, 128, 0.55);
+    }
+
+    @keyframes fishSpherePulse {
+      0%, 100% { transform: scale(1); filter: saturate(1); }
+      50% { transform: scale(1.08); filter: saturate(1.18); }
+    }
+
+    @keyframes fishSphereRing {
+      0% { transform: scale(.72); opacity: .82; }
+      70% { transform: scale(1.34); opacity: .14; }
+      100% { transform: scale(1.42); opacity: 0; }
     }
 
     @media (max-width: 980px) {
-      .topbar, .main { grid-template-columns: 1fr; }
+      .topbar { grid-template-columns: 1fr; }
       .features { justify-content: flex-start; }
       #globe, .mapwrap { min-height: 320px; }
+      .map-tools { width: calc(100% - 20px); }
+      .hover-hud {
+        width: calc(100% - 20px);
+        right: 10px;
+        bottom: 10px;
+        max-height: 68vh;
+      }
+      .hud-actions.tight3,
+      .hud-actions,
+      .hud-subgrid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -382,7 +569,7 @@
   <div class="card topbar">
     <div>
       <div class="title">LFTR v7 Marine Intelligence Globe</div>
-      <div class="subline">Google Photorealistic 3D globe • fish intelligence • bait/weather context • media HUD</div>
+      <div class="subline">Google Photorealistic 3D globe • fish intelligence • bait/weather context • live media hover HUD</div>
       <div class="statusline" id="statusLine"></div>
     </div>
     <div class="features" id="features"></div>
@@ -410,68 +597,91 @@
       </div>
 
       <div class="overlay mono" id="health">Loading operational feed…</div>
-    </div>
 
-    <div class="card side">
-      <div class="row">
-        <span class="mono" id="mapsKeyState">Maps key status: checking…</span>
-        <button id="loadGlobeBtn">Load Globe</button>
+      <div class="map-tools">
+        <div class="toolbox">
+          <div class="row tiny" style="margin-bottom:8px; justify-content:space-between">
+            <span class="mono" id="mapsKeyState">Maps key status: checking…</span>
+            <button id="loadGlobeBtn" style="flex:0 0 auto">Load Globe</button>
+          </div>
+          <div class="row">
+            <button id="refreshFishBtn">Refresh Fish</button>
+            <button id="refreshHealthBtn">Refresh Health</button>
+            <button id="refreshCloudBtn">Refresh Clouds</button>
+          </div>
+        </div>
       </div>
-      <div class="row">
-        <button id="refreshFishBtn">Refresh Fish</button>
-        <button id="refreshHealthBtn">Refresh Health</button>
-        <button id="refreshCloudBtn">Refresh Clouds</button>
-      </div>
-      <div class="markers" id="markerGrid"></div>
     </div>
   </div>
 </div>
 
-<div class="hud" id="hud">
-  <div class="row" style="justify-content:space-between">
-    <strong id="hudTitle">Location</strong>
-    <button id="closeHud">Close</button>
-  </div>
-  <div class="mono" id="hudKey"></div>
-  <div class="row" id="mediaInfo">Loading context…</div>
-  <div class="row" style="justify-content:space-between">
-    <span class="live-badge offline" id="liveBadge">Offline</span>
-    <div class="row">
-      <button id="startLiveBtn">Start Live Session</button>
+<div class="hover-hud" id="hud">
+  <div class="hud-scroll">
+    <div class="hud-hero">
+      <div class="hud-heading">
+        <div class="hover-pill" id="hudMode">Hover target</div>
+        <div class="hud-title" id="hudTitle">Location</div>
+        <div class="mono tiny muted" id="hudKey"></div>
+      </div>
+      <div class="hud-actions tight3" style="margin-top:2px">
+        <button id="pinHudBtn">Pin</button>
+        <button id="refreshContextBtn">Refresh</button>
+        <button id="closeHud">Close</button>
+      </div>
+    </div>
+
+    <div class="hud-subgrid">
+      <div class="mini-stat">
+        <div class="mini-stat-label">Context</div>
+        <div class="mini-stat-value" id="mediaInfo">Hover a green sphere to load context…</div>
+      </div>
+      <div class="mini-stat">
+        <div class="mini-stat-label">Live</div>
+        <div class="mini-stat-value"><span class="live-badge offline" id="liveBadge">Offline</span></div>
+      </div>
+    </div>
+
+    <div class="player-pane" id="mediaPlayerPane">
+      <div class="player-empty">Hover a fish marker to load live media.</div>
+    </div>
+
+    <div class="hud-actions" style="margin-top:10px">
+      <button id="startLiveBtn">Start Live</button>
       <button id="stopLiveBtn">Stop Live</button>
     </div>
-  </div>
 
-  <div class="player-pane" id="mediaPlayerPane">
-    <div class="player-empty" id="mediaPlayerEmpty">Select a fish marker to load live media.</div>
-  </div>
+    <div class="hud-section">
+      <div class="hud-section-title">Field Report</div>
+      <textarea id="reportText" placeholder="Write location report..."></textarea>
+      <div class="hud-actions">
+        <button id="saveReportBtn">Save Report</button>
+        <button id="connectLiveBtn">Update URL</button>
+      </div>
+    </div>
 
-  <label for="reportText">Report</label>
-  <textarea id="reportText" placeholder="Write location report..."></textarea>
-  <div class="row">
-    <button id="saveReportBtn">Save Report</button>
-    <button id="refreshContextBtn">Refresh Context</button>
-  </div>
+    <div class="hud-section">
+      <div class="hud-section-title">Live URL</div>
+      <input id="liveUrl" placeholder="https://..." style="width:100%">
+    </div>
 
-  <label for="liveUrl">Live stream URL</label>
-  <input id="liveUrl" placeholder="https://..." style="width:100%">
-  <div class="row">
-    <button id="connectLiveBtn">Update Live URL</button>
-  </div>
+    <div class="hud-section">
+      <div class="hud-section-title">Upload Clip</div>
+      <input id="videoFile" type="file" accept="video/*" style="width:100%">
+      <div class="hud-actions">
+        <button id="uploadBtn">Upload Video</button>
+      </div>
+    </div>
 
-  <label for="videoFile">Upload Video</label>
-  <input id="videoFile" type="file" accept="video/*">
-  <div class="row">
-    <button id="uploadBtn">Upload Video</button>
+    <div class="hud-section">
+      <div class="hud-section-title">Intel</div>
+      <div class="context mono" id="intel"></div>
+      <div class="videos" id="videoList"></div>
+    </div>
   </div>
-
-  <div class="context mono" id="intel"></div>
-  <div class="videos" id="videoList"></div>
 </div>
 
 <script>
 (() => {
-  const markerGrid = document.getElementById('markerGrid');
   const healthEl = document.getElementById('health');
   const statusLine = document.getElementById('statusLine');
   const globeFallback = document.getElementById('globeFallback');
@@ -479,6 +689,7 @@
   const hud = document.getElementById('hud');
   const hudTitle = document.getElementById('hudTitle');
   const hudKey = document.getElementById('hudKey');
+  const hudMode = document.getElementById('hudMode');
   const reportText = document.getElementById('reportText');
   const mediaInfo = document.getElementById('mediaInfo');
   const videoList = document.getElementById('videoList');
@@ -487,6 +698,7 @@
   const intel = document.getElementById('intel');
   const liveBadge = document.getElementById('liveBadge');
   const mediaPlayerPane = document.getElementById('mediaPlayerPane');
+  const pinHudBtn = document.getElementById('pinHudBtn');
 
   const mapsKeyState = document.getElementById('mapsKeyState');
 
@@ -495,6 +707,7 @@
   const state = {
     fish: [],
     selected: null,
+    hoverTarget: null,
     feature: {
       clouds: true,
       rain: true,
@@ -507,6 +720,7 @@
     },
     mapReady: false,
     mapMarkers: [],
+    markerStates: new Map(),
     cloudMarkers: [],
     cloudTiles: [],
     cloudFetchedAt: 0,
@@ -516,6 +730,10 @@
     mapsApiKey: '',
     maps3dLib: null,
     mapsScriptLoading: null,
+    hudLocked: false,
+    hudHover: false,
+    hudHideTimer: null,
+    lastHudLoadedKey: '',
   };
 
   function setStatus(msg, isStale = false) {
@@ -542,23 +760,21 @@
       normalizeFeatureButton(btn, kind);
 
       if (kind === 'markers') {
-        markerGrid.style.display = state.feature.markers ? 'grid' : 'none';
         state.mapMarkers.forEach((m) => {
           try {
             m.style.display = state.feature.markers ? '' : 'none';
           } catch (_) {}
         });
+        if (!state.feature.markers) hideHud(true);
       }
 
       if (kind === 'popups' && !state.feature.popups) {
-        hud.classList.remove('show');
+        hideHud(true);
       }
 
       if (kind === 'clouds') {
         renderCloudLayers().catch((e) => setStatus(e.message, true));
       }
-
-      renderMarkerBait();
     });
     return btn;
   }
@@ -570,7 +786,7 @@
     ['jet', 'Jet balloons'],
     ['markers', 'Fish markers'],
     ['bait', 'Bait layer'],
-    ['popups', 'Popups'],
+    ['popups', 'Hover HUD'],
     ['reports', 'Reports'],
     ['live', 'Live media'],
   ].forEach(([k, l]) => featuresEl.appendChild(mkFeature(k, l)));
@@ -592,15 +808,6 @@
     return state.feature.bait ? `Bait: ${bait}${confidence}` : 'Bait layer disabled';
   }
 
-  function renderMarkerBait() {
-    Array.from(markerGrid.querySelectorAll('.marker-card')).forEach((n) => {
-      const p = state.fish.find((x) => x.location_key === n.dataset.key);
-      if (!p) return;
-      const baitEl = n.querySelector('.marker-bait');
-      if (baitEl) baitEl.textContent = baitText(p);
-    });
-  }
-
   async function loadHealth() {
     const payload = await json('/gfs/api/health');
     healthEl.textContent = JSON.stringify(payload, null, 2);
@@ -613,6 +820,7 @@
       try { m.remove(); } catch (_) {}
     });
     state.mapMarkers = [];
+    state.markerStates = new Map();
   }
 
   function clearCloudMarkers() {
@@ -623,7 +831,7 @@
   }
 
   function currentCameraRange() {
-    const val = Number(globeEl?.getAttribute('range') || 1800000);
+    const val = Number(globeEl && globeEl.getAttribute('range') || 1800000);
     return Number.isFinite(val) ? val : 1800000;
   }
 
@@ -643,17 +851,17 @@
 
   function flattenCloudBands(tile, lod) {
     const defs = [
-      { band: 'high', density: Number(tile.high_density || 0), altitude: Number(tile.altitude_high || 9000), wind: tile.wind?.high || { u: 0, v: 0 }, baseScale: 0.95 },
-      { band: 'mid', density: Number(tile.mid_density || 0), altitude: Number(tile.altitude_mid || 4200), wind: tile.wind?.mid || { u: 0, v: 0 }, baseScale: 1.05 },
-      { band: 'low', density: Number(tile.low_density || 0), altitude: Number(tile.altitude_low || 1200), wind: tile.wind?.low || { u: 0, v: 0 }, baseScale: 1.15 },
+      { band: 'high', density: Number(tile.high_density || 0), altitude: Number(tile.altitude_high || 9000), wind: tile.wind && tile.wind.high || { u: 0, v: 0 }, baseScale: 0.95 },
+      { band: 'mid', density: Number(tile.mid_density || 0), altitude: Number(tile.altitude_mid || 4200), wind: tile.wind && tile.wind.mid || { u: 0, v: 0 }, baseScale: 1.05 },
+      { band: 'low', density: Number(tile.low_density || 0), altitude: Number(tile.altitude_low || 1200), wind: tile.wind && tile.wind.low || { u: 0, v: 0 }, baseScale: 1.15 },
     ];
     return defs
       .filter((d) => d.density >= lod.bandThreshold)
       .map((d) => ({
         ...d,
         tile_id: tile.tile_id,
-        lat: Number(tile.bounds?.lat_center || 0),
-        lon: Number(tile.bounds?.lon_center || 0),
+        lat: Number(tile.bounds && tile.bounds.lat_center || 0),
+        lon: Number(tile.bounds && tile.bounds.lon_center || 0),
         precip: Number(tile.precipitation_factor || 0),
         convection: Number(tile.convection_factor || 0),
         importance: Number(tile.importance || 0),
@@ -674,16 +882,13 @@
       return bw - aw;
     });
 
-    return {
-      lod,
-      items: all.slice(0, lod.maxTiles),
-    };
+    return { lod, items: all.slice(0, lod.maxTiles) };
   }
 
   function advectCloudPosition(item) {
     const ageHours = Math.max(0, (Date.now() - Number(item.updated_at || Date.now())) / 3600000);
-    const u = Number(item.wind?.u || 0);
-    const v = Number(item.wind?.v || 0);
+    const u = Number(item.wind && item.wind.u || 0);
+    const v = Number(item.wind && item.wind.v || 0);
     const driftLat = v * ageHours * 0.035;
     const cosLat = Math.max(0.25, Math.cos((item.lat * Math.PI) / 180));
     const driftLon = (u * ageHours * 0.035) / cosLat;
@@ -745,9 +950,7 @@
 
   async function ensureMapLibrary() {
     if (state.maps3dLib) return state.maps3dLib;
-    if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
-      return null;
-    }
+    if (!window.google || !window.google.maps || !window.google.maps.importLibrary) return null;
     try {
       state.maps3dLib = await window.google.maps.importLibrary('maps3d');
       return state.maps3dLib;
@@ -758,18 +961,88 @@
     }
   }
 
-  function pinGlyphForPoint(p) {
-    const intensity = p?.bait?.intensity;
-    if (intensity === 'high') return '⬤';
-    if (intensity === 'medium') return '●';
-    return '•';
+  function markerIntensityClass(p) {
+    const intensity = p && p.bait && p.bait.intensity;
+    if (intensity === 'high') return 'high';
+    if (intensity === 'medium') return 'medium';
+    return 'low';
   }
 
-  function pinScaleForPoint(p) {
-    const intensity = p?.bait?.intensity;
-    if (intensity === 'high') return 1.25;
-    if (intensity === 'medium') return 1.15;
-    return 1.05;
+  function markerLabelText(p) {
+    if (!p) return 'Fish';
+    const source = (p.name || p.location_key || 'fish').trim();
+    return source.length > 18 ? `${source.slice(0, 18)}…` : source;
+  }
+
+  function buildFishSphere(lib, p) {
+    const intensity = markerIntensityClass(p);
+    const pin = new lib.PinElement({
+      glyph: intensity === 'high' ? '●' : intensity === 'medium' ? '•' : '',
+      scale: intensity === 'high' ? 1.34 : intensity === 'medium' ? 1.22 : 1.12,
+      background: intensity === 'high' ? '#22ff66' : intensity === 'medium' ? '#22dd55' : '#16a34a',
+      borderColor: '#bbffcf',
+      glyphColor: '#ecfff1',
+    });
+
+    pin.dataset.intensity = intensity;
+    pin.dataset.label = markerLabelText(p);
+    pin.title = markerLabelText(p);
+    pin.style.opacity = '1';
+    pin.style.filter = intensity === 'high'
+      ? 'drop-shadow(0 0 8px rgba(34,255,102,1)) drop-shadow(0 0 18px rgba(34,255,102,.8)) drop-shadow(0 0 34px rgba(34,255,102,.55))'
+      : intensity === 'medium'
+        ? 'drop-shadow(0 0 7px rgba(34,221,85,.95)) drop-shadow(0 0 16px rgba(34,221,85,.65))'
+        : 'drop-shadow(0 0 6px rgba(34,197,94,.85)) drop-shadow(0 0 12px rgba(34,197,94,.45))';
+    pin.style.transition = 'filter .14s ease, transform .14s ease, opacity .14s ease';
+    return pin;
+  }
+
+  function setMarkerVisualActive(markerState, active) {
+    if (!markerState || !markerState.el) return;
+    const pin = markerState.el;
+    const intensity = pin.dataset.intensity || 'low';
+    pin.style.transform = active ? 'scale(1.08)' : 'scale(1)';
+    pin.style.opacity = active ? '1' : '0.98';
+    pin.style.filter = active
+      ? 'drop-shadow(0 0 10px rgba(34,255,102,1)) drop-shadow(0 0 22px rgba(34,255,102,.92)) drop-shadow(0 0 42px rgba(34,255,102,.7))'
+      : intensity === 'high'
+        ? 'drop-shadow(0 0 8px rgba(34,255,102,1)) drop-shadow(0 0 18px rgba(34,255,102,.8)) drop-shadow(0 0 34px rgba(34,255,102,.55))'
+        : intensity === 'medium'
+          ? 'drop-shadow(0 0 7px rgba(34,221,85,.95)) drop-shadow(0 0 16px rgba(34,221,85,.65))'
+          : 'drop-shadow(0 0 6px rgba(34,197,94,.85)) drop-shadow(0 0 12px rgba(34,197,94,.45))';
+  }
+
+  function scheduleHudHide() {
+    clearTimeout(state.hudHideTimer);
+    state.hudHideTimer = setTimeout(() => {
+      if (!state.hudLocked && !state.hudHover) hideHud(false);
+    }, 220);
+  }
+
+  function setHudLocked(locked) {
+    state.hudLocked = !!locked;
+    hud.classList.toggle('locked', state.hudLocked);
+    pinHudBtn.textContent = state.hudLocked ? 'Unpin' : 'Pin';
+    hudMode.textContent = state.hudLocked ? 'Pinned target' : 'Hover target';
+  }
+
+  function hideHud(force) {
+    if (!force && (state.hudLocked || state.hudHover)) return;
+    hud.classList.remove('show');
+    if (force) {
+      state.selected = null;
+      state.hoverTarget = null;
+      setHudLocked(false);
+      setActiveMarkerByKey(null);
+    } else if (!state.hudLocked) {
+      setActiveMarkerByKey(null);
+    }
+  }
+
+  function setActiveMarkerByKey(locationKey) {
+    state.markerStates.forEach((markerState, key) => {
+      setMarkerVisualActive(markerState, !!locationKey && key === locationKey);
+    });
   }
 
   async function renderMapMarkers() {
@@ -789,52 +1062,56 @@
           lng: Number(p.lon),
           altitude: 10,
         },
+        title: p.name || p.location_key || 'Fish marker',
       });
 
-      const pin = new lib.PinElement({
-        glyph: pinGlyphForPoint(p),
-        scale: pinScaleForPoint(p),
-        background: '#22c55e',
-        borderColor: '#86efac',
-        glyphColor: '#dcfce7',
+      const sphere = buildFishSphere(lib, p);
+      marker.append(sphere);
+
+      const markerState = { marker, el: sphere, point: p };
+      state.markerStates.set(p.location_key, markerState);
+
+      const hoverOpen = () => {
+        sphere.classList.add('hover');
+        setActiveMarkerByKey(p.location_key);
+        openHud(p, false).catch((e) => setHudMessage(e.message));
+      };
+      const lockedOpen = () => {
+        setActiveMarkerByKey(p.location_key);
+        openHud(p, true).catch((e) => setHudMessage(e.message));
+      };
+      const hoverLeave = () => {
+        if (!state.hudLocked) {
+          sphere.classList.remove('hover');
+          setActiveMarkerByKey(state.selected && state.selected.location_key);
+          scheduleHudHide();
+        }
+      };
+
+      marker.addEventListener('gmp-click', lockedOpen);
+      marker.addEventListener('click', lockedOpen);
+      marker.addEventListener('mouseenter', hoverOpen);
+      marker.addEventListener('mouseover', hoverOpen);
+      marker.addEventListener('pointerenter', hoverOpen);
+      marker.addEventListener('mouseleave', hoverLeave);
+      marker.addEventListener('mouseout', hoverLeave);
+      marker.addEventListener('pointerleave', hoverLeave);
+
+      sphere.addEventListener('mouseenter', hoverOpen);
+      sphere.addEventListener('mouseleave', hoverLeave);
+      sphere.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        lockedOpen();
       });
-
-      try {
-        pin.style.filter = 'drop-shadow(0 0 8px rgba(34,197,94,0.95)) drop-shadow(0 0 16px rgba(34,197,94,0.6))';
-      } catch (_) {}
-
-      marker.append(pin);
-      marker.addEventListener('gmp-click', () => openHud(p));
-      marker.addEventListener('click', () => openHud(p));
 
       globeEl.append(marker);
       state.mapMarkers.push(marker);
     });
   }
 
-  function renderMarkerCards() {
-    markerGrid.innerHTML = '';
-    state.fish.forEach((p) => {
-      const card = document.createElement('div');
-      card.className = 'marker-content marker-card';
-      card.dataset.key = p.location_key;
-      card.innerHTML = `
-        <div class="marker-name"></div>
-        <div class="marker-coord"></div>
-        <div class="marker-bait"></div>
-      `;
-      card.querySelector('.marker-name').textContent = p.name;
-      card.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
-      card.querySelector('.marker-bait').textContent = baitText(p);
-      card.addEventListener('click', () => openHud(p));
-      markerGrid.append(card);
-    });
-  }
-
   async function loadFish() {
     const payload = await json('/gfs/api/fish');
     state.fish = payload.items || [];
-    renderMarkerCards();
     await renderMapMarkers();
   }
 
@@ -863,11 +1140,11 @@
 
   function mountPlayer({ live, uploads }) {
     mediaPlayerPane.innerHTML = '';
-    const safeLiveUrl = normalizeMediaUrl(live?.stream_url || '');
+    const safeLiveUrl = normalizeMediaUrl(live && live.stream_url || '');
     const firstUpload = (uploads || [])[0];
-    const uploadUrl = normalizeMediaUrl(firstUpload?.url || '');
+    const uploadUrl = normalizeMediaUrl(firstUpload && firstUpload.url || '');
 
-    if (live?.active && safeLiveUrl) {
+    if (live && live.active && safeLiveUrl) {
       if (isVideoUrl(safeLiveUrl)) {
         const v = document.createElement('video');
         v.controls = true;
@@ -930,13 +1207,13 @@
     liveUrl.value = live.stream_url || '';
     updateLiveBadge(live);
     mountPlayer({ live, uploads: payload.uploads || [] });
-    setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : 'Live inactive');
+    setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : baitText(state.selected));
   }
 
   function startHudPolling() {
     if (state.hudPollId) clearInterval(state.hudPollId);
     state.hudPollId = setInterval(() => {
-      if (hud.classList.contains('show')) {
+      if (hud.classList.contains('show') && state.selected) {
         refreshLocationContext().catch((e) => setHudMessage(e.message));
       }
     }, 8000);
@@ -947,12 +1224,22 @@
     state.hudPollId = null;
   }
 
-  async function openHud(point) {
-    if (!state.feature.popups) return;
+  async function openHud(point, lockIt) {
+    if (!state.feature.popups || !point) return;
+    clearTimeout(state.hudHideTimer);
+    state.hoverTarget = point;
     state.selected = point;
     hudTitle.textContent = point.name;
-    hudKey.textContent = `location_key: ${point.location_key}`;
+    hudKey.textContent = `location_key: ${point.location_key} • ${point.lat}, ${point.lon}`;
     hud.classList.add('show');
+    if (lockIt) setHudLocked(true);
+    else if (!state.hudLocked) setHudLocked(false);
+    setActiveMarkerByKey(point.location_key);
+
+    const key = `${point.location_key}:${lockIt ? 'lock' : 'hover'}`;
+    if (state.lastHudLoadedKey === key && !lockIt) return;
+    state.lastHudLoadedKey = key;
+
     startHudPolling();
     await refreshLocationContext();
   }
@@ -1100,7 +1387,7 @@
     if (!state.mapsApiKey) {
       mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
       showGlobeFallback(true);
-      setStatus('Google Maps key missing — list + HUD remain active', true);
+      setStatus('Google Maps key missing — hover HUD remains available after config', true);
       return;
     }
 
@@ -1144,6 +1431,15 @@
     }
   }
 
+  hud.addEventListener('mouseenter', () => {
+    state.hudHover = true;
+    clearTimeout(state.hudHideTimer);
+  });
+  hud.addEventListener('mouseleave', () => {
+    state.hudHover = false;
+    if (!state.hudLocked) scheduleHudHide();
+  });
+
   document.getElementById('loadGlobeBtn').addEventListener('click', () => {
     loadGoogleMapScript().catch((e) => setStatus(e.message, true));
   });
@@ -1174,9 +1470,13 @@
   document.getElementById('stopLiveBtn').addEventListener('click', () => {
     stopLiveSession().catch((e) => setHudMessage(e.message));
   });
+  document.getElementById('pinHudBtn').addEventListener('click', () => {
+    setHudLocked(!state.hudLocked);
+    if (!state.hudLocked) scheduleHudHide();
+  });
   document.getElementById('closeHud').addEventListener('click', () => {
-    hud.classList.remove('show');
     stopHudPolling();
+    hideHud(true);
   });
 
   loadHealth().catch((e) => setStatus(e.message, true));
