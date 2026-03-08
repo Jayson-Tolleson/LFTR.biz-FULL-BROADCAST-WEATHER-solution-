@@ -378,6 +378,13 @@
   </div>
 </div>
 
+<script src="/static/cloud-advection.js"></script>
+<script src="/static/volumetric-clouds.js"></script>
+<script src="/static/rain-shafts.js"></script>
+<script src="/static/lightning.js"></script>
+<script src="/static/jetstream.js"></script>
+<script src="/static/ocean-swell.js"></script>
+
 <script>
 (() => {
   const FULL_GLOBE_BBOX = { west: -180, south: -90, east: 180, north: 90 };
@@ -444,6 +451,7 @@
     hudHover: false,
     hudHideTimer: null,
     lastHudLoadedKey: '',
+    flags: { enableOceanSwell: false },
   };
 
   function setStatus(msg, isStale = false) {
@@ -1298,7 +1306,7 @@
     }
   }
 
-  async function renderCloudVolumes() {
+  async function renderCloudVolumesLegacy() {
     clearCloudPolygons();
     if (!state.feature.clouds || !state.mapReady || !state.cloudTiles.length || !state.maps3dLib) return;
     const sun = getSunState();
@@ -1315,7 +1323,7 @@
     }
   }
 
-  async function renderRainShafts() {
+  async function renderRainShaftsLegacy() {
 
     clearRainMarkers();
     clearHailAndLightning();
@@ -1370,7 +1378,7 @@
       }
       if (rainCount > lod.rainCap) break;
     }
-    renderHailAndLightning(lod);
+    renderHailAndLightningLegacy(lod);
   }
 
 
@@ -1402,7 +1410,7 @@
     return poly;
   }
 
-  function renderHailAndLightning(lod) {
+  function renderHailAndLightningLegacy(lod) {
     const severe = state.cloudTiles.filter((t) => (t.regime === 'deep_convection' || Number(t.convection_factor || t.convection || 0) > 0.62) && Number(t.importance || 0) > 0.42).slice(0, Math.min(90, lod.tileLimit));
     for (const tile of severe) {
       const lat = Number(tile.bounds?.lat_center || 0);
@@ -1429,7 +1437,7 @@
     }
   }
 
-  async function renderJetBalloons() {
+  async function renderJetBalloonsLegacy() {
     clearJetMarkers();
     if (!state.feature.jet || !state.mapReady || !state.maps3dLib || !state.markerLib) return;
 
@@ -1456,6 +1464,64 @@
       state.jetMarkers.push(marker);
     }
   }
+
+
+  function makeWeatherCtx() {
+    return {
+      state,
+      globeEl,
+      setHudMessage,
+      setStatus,
+      cloudLodProfile,
+      getSunState,
+      clearCloudPolygons,
+      clearRainMarkers,
+      clearHailAndLightning,
+      clearJetMarkers,
+      wrapLon,
+      clampLat,
+      seededRange,
+      buildAltitudePath,
+      buildAltitudeInnerPaths,
+      appendPolygon3D,
+      appendSimplePolygon,
+      buildRainSpherePin,
+      buildStormRing,
+      renderHailAndLightningLegacy,
+      renderJetBalloonsLegacy,
+    };
+  }
+
+  async function renderCloudVolumes() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderCloudVolumes) {
+      await window.LFTRWeather.renderCloudVolumes(ctx);
+      return;
+    }
+    await renderCloudVolumesLegacy();
+  }
+
+  async function renderRainShafts() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderRainShafts) {
+      await window.LFTRWeather.renderRainShafts(ctx);
+      return;
+    }
+    await renderRainShaftsLegacy();
+  }
+
+  async function renderJetBalloons() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderJetLayer) {
+      await window.LFTRWeather.renderJetLayer(ctx);
+    } else {
+      await renderJetBalloonsLegacy();
+    }
+    if (window.LFTRWeather?.renderOceanSwell) {
+      try { window.LFTRWeather.renderOceanSwell(ctx); } catch (err) { console.warn('[gfs] swell layer failed', err); }
+    }
+  }
+
 
   async function renderWeatherLayers() {
     const faults = [];

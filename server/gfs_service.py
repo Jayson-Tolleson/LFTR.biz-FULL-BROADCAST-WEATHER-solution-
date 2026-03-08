@@ -606,9 +606,25 @@ def enrich_cloud_tile_geometry(tile: dict) -> dict:
         bands[b] = enrich_cloud_band_geometry(out, b, regime, appearance)
     out["bands"] = bands
     out["subcells"] = build_subcell_layout(regime, max(float(out.get("low_density") or 0), float(out.get("mid_density") or 0), float(out.get("high_density") or 0)), float(appearance.get("organization") or 0.5), f"{seed_text}:sub")
+
     out["base_altitude_m"] = round(min(bands["low"]["base_altitude_m"], bands["mid"]["base_altitude_m"], bands["high"]["base_altitude_m"]), 1)
     out["top_altitude_m"] = round(max(bands["low"]["top_altitude_m"], bands["mid"]["top_altitude_m"], bands["high"]["top_altitude_m"]), 1)
     out["vertical_depth_m"] = round(max(0.0, out["top_altitude_m"] - out["base_altitude_m"]), 1)
+
+    coverage = (float(bands["low"].get("coverage") or 0.0) * 0.42 + float(bands["mid"].get("coverage") or 0.0) * 0.36 + float(bands["high"].get("coverage") or 0.0) * 0.22)
+    density = (float(bands["low"].get("density") or 0.0) * 0.40 + float(bands["mid"].get("density") or 0.0) * 0.36 + float(bands["high"].get("density") or 0.0) * 0.24)
+    precip_factor = float(out.get("precipitation_factor") or 0.0)
+    conv_factor = float(out.get("convection_factor") or 0.0)
+    mid_wind = (out.get("wind") or {}).get("mid") or {}
+
+    out["coverage"] = round(_clamp(coverage, 0.0, 1.0), 4)
+    out["density"] = round(_clamp(density, 0.0, 1.0), 4)
+    out["precip_rate"] = round(max(0.0, precip_factor * 45.0), 3)
+    out["storm_energy"] = round(_clamp(conv_factor * 0.68 + precip_factor * 0.32, 0.0, 1.0), 4)
+    out["wind_u"] = round(float(mid_wind.get("u") or 0.0), 3)
+    out["wind_v"] = round(float(mid_wind.get("v") or 0.0), 3)
+    out["importance"] = round(_clamp(float(out.get("importance") or 0.0), 0.0, 1.0), 4)
+
     return out
 
 
