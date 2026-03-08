@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
-from quart import Quart, jsonify, request, send_from_directory, websocket
+from quart import Quart, jsonify, request, send_file, websocket
 
 from server import ai
 from server.config import Settings
 from server.gfs_service import GFSService
 from server.rtc import RTCManager
 from server.state import AppState
+
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def _normalize_ice_url(raw: str, default_scheme: str = "turn") -> str:
@@ -79,19 +83,19 @@ def build_ice_servers(settings: Settings):
 def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCManager) -> None:
     @app.get("/")
     async def index():
-        return await send_from_directory(app.static_folder, "index.html")
+        return await send_file(str(STATIC_DIR / "index.html"))
 
     @app.get("/broadcast")
     async def broadcast():
-        return await send_from_directory(app.static_folder, "broadcast.html")
+        return await send_file(str(STATIC_DIR / "broadcast.html"))
 
     @app.get("/watch")
     async def watch():
-        return await send_from_directory(app.static_folder, "watch.html")
+        return await send_file(str(STATIC_DIR / "watch.html"))
 
     @app.get("/status-dashboard")
     async def status_dashboard():
-        return await send_from_directory(app.static_folder, "status_dashboard.html")
+        return await send_file(str(STATIC_DIR / "status_dashboard.html"))
 
     @app.get("/webrtc/ice-config")
     async def webrtc_ice_config():
@@ -113,12 +117,12 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         payload = await request.get_json(force=True)
         return jsonify(await ai.handle_websearch(payload))
 
-    gfs = GFSService(app.static_folder)
+    gfs = GFSService(str(STATIC_DIR))
 
     @app.get("/gfs")
     @app.get("/gfs/")
     async def gfs_page():
-        return await send_from_directory(app.static_folder, "indexgfs.html")
+        return await send_file(str(STATIC_DIR / "indexgfs.html"))
 
     @app.get("/gfs/api/health")
     async def gfs_health():
@@ -177,7 +181,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         if not file_obj:
             return jsonify({"ok": False, "error": "missing file"}), 400
 
-        data = file_obj.read()
+        data = await file_obj.read()
         result = gfs.save_upload_video(location_key=location_key, filename=file_obj.filename or "upload.mp4", raw=data)
         status = 200 if result.get("ok") else 400
         return jsonify(result), status

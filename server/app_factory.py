@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from quart import Quart
 import socketio
@@ -12,6 +13,9 @@ from server.socket_handlers import register_socket_handlers
 from server.state import AppState
 
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+
 
 def _configure_logging(debug: bool) -> None:
     level = logging.DEBUG if debug else logging.INFO
@@ -21,12 +25,15 @@ def _configure_logging(debug: bool) -> None:
     )
 
 
-
 def create_quart_app() -> Quart:
     settings = load_settings()
     _configure_logging(settings.debug)
 
-    app = Quart(__name__, static_folder=settings.static_dir, static_url_path="/static")
+    app = Quart(
+        __name__,
+        static_folder=str(STATIC_DIR),
+        static_url_path="/static",
+    )
     state = AppState(default_room=settings.default_room)
     rtc = RTCManager(state)
 
@@ -48,7 +55,6 @@ def create_quart_app() -> Quart:
     app.sio = sio
 
     return app
-
 
 
 def create_asgi_app():
