@@ -88,6 +88,17 @@ def register_routes(app):
     async def bait():
         return jsonify(gfs.bait())
 
+
+    @app.get('/webrtc/ice-config')
+    async def webrtc_ice_config():
+        return jsonify(
+            {
+                'turnUrl': config.TURN_URL,
+                'turnUsername': config.TURN_USERNAME,
+                'turnPassword': config.TURN_PASSWORD,
+            }
+        )
+
     @app.post('/broadcast/api/start')
     async def broadcast_start():
         body = await request.get_json(force=True)
