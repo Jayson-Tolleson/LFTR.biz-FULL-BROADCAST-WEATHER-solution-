@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Broadcast</title>
+<link rel="stylesheet" href="/static/css.css">
+<script src="/static/vendor/socket.io.js"></script>
+<style>
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh;background:#0f1320;color:#e8eefc}
+.hdr{display:flex;gap:12px;padding:10px 14px;border-bottom:1px solid #263047;font-size:13px;white-space:nowrap;overflow:auto}
+.main{display:grid;grid-template-columns:1fr 360px;gap:12px;padding:12px;min-height:0}
+.videoWrap{background:#000;border:1px solid #2a3550;border-radius:12px;overflow:hidden;min-height:320px;position:relative}
+video{width:100%;height:100%;object-fit:contain}
+.badges{display:flex;gap:8px;flex-wrap:wrap}
+.badge{display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid #334161;border-radius:999px;background:#121a2c}
+.controls{display:flex;gap:8px;padding:8px;margin-top:8px;flex-wrap:wrap}
+.chat{border:1px solid #2a3550;border-radius:12px;display:flex;flex-direction:column;min-height:0;background:#121a2c}
+.chatHead{padding:10px;border-bottom:1px solid #27324a;font-size:13px;display:flex;align-items:center;justify-content:space-between}
+.chatList{flex:1;overflow:auto;padding:10px}
+.entry{padding:8px;border:1px solid #2c3958;border-radius:10px;margin-bottom:8px;background:#0d1423}
+.entry.stt{border-color:#60a5fa}
+.row{display:flex;gap:6px;padding:8px;border-top:1px solid #27324a;flex-wrap:wrap}
+.btn{padding:8px 10px;border-radius:999px;border:1px solid #334161;background:#1a2238;color:#e8efff;cursor:pointer;display:flex;align-items:center;gap:8px}
+.btn.small{padding:6px 10px}
+.input{display:flex;gap:6px;padding:8px;border-top:1px solid #27324a}
+textarea{flex:1;min-height:58px;background:#0b1220;color:#eaf1ff;border:1px solid #334161;border-radius:8px;padding:8px}
+.led{width:10px;height:10px;border-radius:999px;display:inline-block}.r{background:#ef4444}.g{background:#22c55e}.b{background:#3b82f6}.blink{animation:bl 1s linear infinite}@keyframes bl{50%{opacity:.25}}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hdr">
+    <div class="badges">
+      <span class="badge"><span id="ledSock" class="led r"></span><span class="mono">SOCKET</span> <span id="stSock">…</span></span>
+      <span class="badge"><span id="ledRtc" class="led r"></span><span class="mono">WEBRTC</span> <span id="stPc">new</span></span>
+      <span class="badge"><span id="ledIce" class="led r"></span><span class="mono">ICE</span> <span id="stIce">new</span></span>
+      <span class="badge"><span id="ledStt" class="led r"></span><span class="mono">STT</span> <span id="stStt">off</span></span>
+      <span class="badge"><span id="ledAi" class="led r"></span><span class="mono">AI</span> <span id="stAi">idle</span></span>
+      <span class="badge"><span class="mono">Bitrate</span> <span id="stBr">0 kbps</span></span>
+      <span class="badge"><span class="mono">Room</span> <span id="stRoom">default</span></span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div>
+      <div class="videoWrap">
+        <video id="preview" autoplay playsinline muted></video>
+      </div>
+
+      <div class="controls">
+        <button id="camBtn" class="btn"><span id="camLed" class="led r"></span><span id="camTxt">CAM: off</span></button>
+        <button id="screenBtn" class="btn"><span id="screenLed" class="led r"></span><span id="screenTxt">SCREEN: off</span></button>
+        <button id="ncBtn" class="btn"><span id="ncLed" class="led r"></span><span id="ncTxt">NoiseCancel: off</span></button>
+        <button id="sttBtn" class="btn"><span id="sttLed" class="led r"></span><span id="sttTxt">STT on/off</span></button>
+        <button id="aiBtn" class="btn"><span id="aiLed" class="led r"></span><span id="aiTxt">AI: idle</span></button>
+        <button id="ttsMonBtn" class="btn"><span id="ttsMonLed" class="led r"></span><span id="ttsMonTxt">Hear AI voice: off</span></button>
+        <button id="speakBtn" class="btn"><span class="led b"></span><span>Speak last AI</span></button>
+        <button id="panelBtn" class="btn"><span class="led b"></span><span>Panel</span></button>
+      </div>
+
+      <div style="padding:0 8px 8px 8px;font-size:12px;opacity:.8">
+        Tip: If AI voice leaks into STT, keep “Hear AI voice” off and/or use headphones. NoiseCancel uses browser echoCancellation/noiseSuppression.
+      </div>
+    </div>
+
+    <div class="chat">
+      <div class="chatHead">
+        <span>Side Panel</span>
+        <span id="roomStatus" style="font-size:12px;opacity:.8"></span>
+      </div>
+      <div class="row" style="border-top:0">
+        <span class="badge">chat</span>
+        <span class="badge">tools</span>
+        <span class="badge">gfs</span>
+        <span class="badge">settings</span>
+      </div>
+      <div class="entry" style="margin:8px">GFS not connected — map tools coming soon.</div>
+      <div id="chat" class="chatList"></div>
+      <div class="row">
+        <button id="attachBtn" class="btn small">Attach</button>
+        <button id="webBtn" class="btn small">WebSearch</button>
+        <input id="file" type="file" hidden>
+      </div>
+      <div class="input">
+        <textarea id="chatInput" placeholder="Message"></textarea>
+        <button id="sendBtn" class="btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+window.BROADCAST_CONFIG = {
+  socketPath: '/socket.io',
+  iceConfigUrl: '/webrtc/ice-config',
+  aiChatUrl: '/ai/chat',
+  aiTtsUrl: '/ai/tts',
+  aiWebSearchUrl: '/ai/websearch',
+  role: 'broadcast',
+  debug: true
+};
+</script>
+<script src="/static/js/broadcast.js"></script>
+</body>
+</html>
