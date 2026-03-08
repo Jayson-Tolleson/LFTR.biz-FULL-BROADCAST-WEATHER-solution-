@@ -292,7 +292,7 @@
         range="1800000"
         tilt="42"
         heading="7.5"
-        default-ui-disabled>
+        default-ui-hidden>
       </gmp-map-3d>
 
       <div class="globe-fallback" id="globeFallback">
@@ -708,6 +708,10 @@
     return (ang + 360) % 360;
   }
 
+  function createStyledPin(markerLib, opts) {
+    return new markerLib.PinElement(opts);
+  }
+
   function sampleSigmaWind(lat, lon) {
     const latR = lat * Math.PI / 180;
     const lonR = lon * Math.PI / 180;
@@ -764,30 +768,24 @@
   function buildJetBalloonPin(markerLib, balloon) {
     const color = mphSpectrumColor(balloon.mph);
     const mphGlyph = `${Math.round(balloon.mph)}`;
-    const pin = new markerLib.PinElement({
-      glyph: mphGlyph.length > 3 ? mphGlyph.slice(0, 3) : mphGlyph,
+    const pin = createStyledPin(markerLib, {
+      glyphText: mphGlyph.length > 3 ? mphGlyph.slice(0, 3) : mphGlyph,
       scale: 0.76 + Math.min(0.95, balloon.mph / 95),
       background: color,
       borderColor: 'rgba(255,255,255,0.62)',
       glyphColor: balloon.mph >= 85 ? '#fff' : '#0b1020',
     });
-    pin.element.classList.add('jet-balloon');
-    pin.element.title = `Jet balloon\n${balloon.mph.toFixed(1)} mph\nheading ${balloon.heading.toFixed(0)}°\nu ${balloon.sigma_u.toFixed(2)} v ${balloon.sigma_v.toFixed(2)}`;
     return pin;
   }
 
   function buildRainSpherePin(markerLib, rainParticle) {
     const color = rainIntensityColor(rainParticle.precip);
-    const pin = new markerLib.PinElement({
-      glyph: '',
-      scale: rainParticle.scale,
+    return createStyledPin(markerLib, {
+      scale: Math.max(0.18, rainParticle.scale * (0.8 + rainParticle.opacity * 0.4)),
       background: color,
       borderColor: 'rgba(226,232,240,0.72)',
       glyphColor: '#ffffff',
     });
-    pin.element.classList.add('rain-sphere');
-    pin.element.style.opacity = String(rainParticle.opacity);
-    return pin;
   }
 
   function cloudTileDensity(tile, band) {
@@ -833,15 +831,12 @@
   }
 
   function buildCloudPartMarker(part) {
-    const pin = new state.markerLib.PinElement({
-      glyph: '',
-      scale: part.scale,
+    const pin = createStyledPin(state.markerLib, {
+      scale: Math.max(0.2, part.scale * (0.78 + part.opacity * 0.34)),
       background: part.color,
       borderColor: 'rgba(235,245,255,0.68)',
       glyphColor: '#ffffff',
     });
-    pin.element.classList.add('cloud-pin');
-    pin.element.style.opacity = String(part.opacity);
 
     const marker = new state.maps3dLib.Marker3DInteractiveElement({
       position: { lat: part.lat, lng: part.lon, altitude: part.altitude },
@@ -1097,11 +1092,28 @@
   }
 
   async function renderWeatherLayers() {
-    await renderCloudVolumes().catch((e) => setStatus(`Cloud render error: ${e.message}`, true));
-    await renderRainShafts().catch((e) => setStatus(`Rain render error: ${e.message}`, true));
-    await renderJetBalloons().catch((e) => setStatus(`Jet render error: ${e.message}`, true));
+    const faults = [];
+    try {
+      await renderCloudVolumes();
+    } catch (e) {
+      clearCloudMarkers();
+      faults.push(`clouds:${e.message}`);
+    }
+    try {
+      await renderRainShafts();
+    } catch (e) {
+      clearRainMarkers();
+      faults.push(`rain:${e.message}`);
+    }
+    try {
+      await renderJetBalloons();
+    } catch (e) {
+      clearJetMarkers();
+      faults.push(`jet:${e.message}`);
+    }
     const lod = cloudLodProfile();
-    setStatus(`Weather ${lod.label} • clouds:${state.cloudMarkers.length} rain:${state.rainMarkers.length} jet:${state.jetMarkers.length}`);
+    const suffix = faults.length ? ` • layer warnings:${faults.length}` : '';
+    setStatus(`Weather ${lod.label} • clouds:${state.cloudMarkers.length} rain:${state.rainMarkers.length} jet:${state.jetMarkers.length}${suffix}`, faults.length > 0);
   }
 
   async function loadClouds(force = false) {
@@ -1135,32 +1147,38 @@
 
   function buildFishPin(point, markerState) {
     const intensity = markerIntensityClass(point);
-    const pin = new state.markerLib.PinElement({
-      glyph: '',
-      scale: intensity === 'high' ? 1.25 : intensity === 'medium' ? 1.12 : 1.02,
-      background: '#22c55e',
-      borderColor: '#dcfce7',
+    const baseScale = intensity === 'high' ? 1.25 : intensity === 'medium' ? 1.12 : 1.02;
+    const hoverBoost = markerState?.hover ? 0.1 : 0;
+    const activeBoost = markerState?.active ? 0.18 : 0;
+    const bright = markerState?.active ? '#4ade80' : markerState?.hover ? '#34d399' : '#22c55e';
+    return createStyledPin(state.markerLib, {
+      scale: baseScale + hoverBoost + activeBoost,
+      background: bright,
+      borderColor: markerState?.active ? '#f0fdf4' : '#dcfce7',
       glyphColor: '#ecfff1',
     });
+  }
 
-    const el = pin.element;
-    el.classList.add('fish-pin', `fish-pin-${intensity}`);
-    if (markerState?.hover) el.classList.add('hover');
-    if (markerState?.active) el.classList.add('active');
-    el.title = markerLabelText(point);
-    return pin;
+  function refreshFishPin(markerState) {
+    if (!markerState?.marker) return;
+    try {
+      if (markerState.pin) markerState.marker.removeChild(markerState.pin);
+    } catch (_) {}
+    const pin = buildFishPin(markerState.point, markerState);
+    markerState.pin = pin;
+    markerState.marker.append(pin);
   }
 
   function setMarkerVisualHover(markerState, hover) {
-    if (!markerState?.el) return;
+    if (!markerState) return;
     markerState.hover = !!hover;
-    markerState.el.classList.toggle('hover', markerState.hover);
+    refreshFishPin(markerState);
   }
 
   function setMarkerVisualActive(markerState, active) {
-    if (!markerState?.el) return;
+    if (!markerState) return;
     markerState.active = !!active;
-    markerState.el.classList.toggle('active', markerState.active);
+    refreshFishPin(markerState);
   }
 
   function scheduleHudHide() {
@@ -1212,10 +1230,10 @@
         title: p.name || p.location_key || 'Fish marker',
       });
 
-      const markerState = { marker, point: p, active: false, hover: false, el: null };
+      const markerState = { marker, point: p, active: false, hover: false, pin: null };
       const pin = buildFishPin(p, markerState);
       marker.append(pin);
-      markerState.el = pin.element;
+      markerState.pin = pin;
       state.markerStates.set(p.location_key, markerState);
 
       const hoverOpen = () => {
@@ -1327,15 +1345,30 @@
     liveBadge.classList.toggle('offline', !isLive);
   }
 
+  function feedingWindowLabel(bait) {
+    const fw = bait?.feeding_window;
+    if (typeof fw === 'string' && fw.trim()) return fw;
+    if (fw && typeof fw === 'object' && typeof fw.label === 'string' && fw.label.trim()) return fw.label;
+    return 'unknown';
+  }
+
   function renderIntel(payload) {
     const bait = payload.bait || {};
     const weather = payload.weather || {};
+    const feedWindow = feedingWindowLabel(bait);
+    const bestBait = bait?.recommendation?.best_bait || 'n/a';
+    const depthZone = Array.isArray(bait?.recommendation?.best_depth_zone_ft)
+      ? `${bait.recommendation.best_depth_zone_ft[0]}-${bait.recommendation.best_depth_zone_ft[1]} ft`
+      : 'n/a';
+    const boils = Number.isFinite(bait?.surface_boils_likelihood) ? `${Math.round(bait.surface_boils_likelihood * 100)}%` : 'n/a';
     intel.textContent = [
       `Bait signal: ${bait.intensity || 'n/a'} (confidence ${bait.confidence ?? 'n/a'}%)`,
-      `Bite window: ${bait.feeding_window || 'unknown'}`,
+      `Bite window: ${feedWindow}`,
       `School summary: ${bait.school_summary || 'n/a'}`,
       `Weather: ${weather.summary || 'n/a'}`,
       `Water context: ${weather.water_context || 'n/a'}`,
+      `Best bait: ${bestBait} • Depth: ${depthZone}`,
+      `Surface boils: ${boils}`,
     ].join('\n');
   }
 
@@ -1506,18 +1539,17 @@
       state.wsConnected = true;
       setStatus('Feed connected');
     };
-    ws.onmessage = (ev) => {
+    ws.onmessage = () => {
       state.lastUpdateAt = Date.now();
-      const txt = String(ev.data || '').slice(0, 2800);
       setFreshness(state.lastUpdateAt);
       if (state.feature.clouds || state.feature.rain || state.feature.jet) {
         loadClouds().catch((e) => setStatus(e.message, true));
       }
     };
-    ws.onerror = () => { setStatus('Feed error', true); };
+    ws.onerror = () => { setStatus('WS updates unavailable • HTTP weather active', true); };
     ws.onclose = () => {
       state.wsConnected = false;
-      setStatus('Reconnecting feed...', true);
+      setStatus('WS disconnected • retrying live updates', true);
       setTimeout(connectLiveUpdates, 1800);
     };
   }
@@ -1557,7 +1589,7 @@
     globeEl.setAttribute('range', '1800000');
     globeEl.setAttribute('tilt', '42');
     globeEl.setAttribute('heading', '7.5');
-    globeEl.setAttribute('default-ui-disabled', '');
+    globeEl.setAttribute('default-ui-hidden', '');
   }
 
   async function loadGoogleMapScript() {
