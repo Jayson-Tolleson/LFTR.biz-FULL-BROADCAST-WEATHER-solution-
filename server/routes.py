@@ -149,7 +149,18 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     @app.get("/gfs/api/clouds")
     @app.get("/gfs/api/cloud_tiles")
     async def gfs_cloud_tiles():
-        payload = gfs.cloud_tiles_payload()
+        def _q(name: str, default: float) -> float:
+            try:
+                return float(request.args.get(name, default))
+            except Exception:
+                return default
+        bbox = {
+            "west": _q("west", -180.0),
+            "south": _q("south", -80.0),
+            "east": _q("east", 180.0),
+            "north": _q("north", 80.0),
+        }
+        payload = gfs.cloud_tiles_payload(bbox)
         items = payload.get("items") or []
         regime_counts = {}
         convective_tile_count = 0

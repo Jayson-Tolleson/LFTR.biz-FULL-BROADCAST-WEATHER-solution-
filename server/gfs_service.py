@@ -14,6 +14,21 @@ from pathlib import Path
 import requests
 from typing import Any, Dict, List, Tuple
 
+try:
+    import numpy as np
+except Exception:  # pragma: no cover - fallback mode
+    np = None
+
+try:
+    import xarray as xr
+except Exception:  # pragma: no cover - fallback mode
+    xr = None
+
+try:
+    from diskcache import Cache as DiskCache
+except Exception:  # pragma: no cover - fallback mode
+    DiskCache = None
+
 from werkzeug.utils import secure_filename
 
 from server.gfs_state import GFSState
@@ -41,6 +56,164 @@ NOAA_TIDES_API = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 NOAA_COOPS_MDAPI = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi"
 DEFAULT_UA = "LFTR-GFS/1.0 (+https://lftr.biz)"
 DEFAULT_WORLD_ENV_MARKER = {"lat": 34.2, "lon": -120.0}
+
+NOMADS_FILTER_BASE = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
+DEFAULT_GFS_TIMEOUT_SECONDS = 18
+DEFAULT_GFS_RETRIES = 3
+DEFAULT_GFS_CACHE_DIR = BASE_DIR / ".cache" / "gfs_nomads"
+DEFAULT_GFS_CACHE_TTL_SECONDS = 60 * 30
+DEFAULT_GFS_CYCLE_AVAILABILITY_DELAY_MINUTES = 290
+
+SURFACE_VARIABLES = ["PRATE", "APCP", "TCDC", "CAPE", "CIN", "PRMSL", "TMP", "RH", "GUST", "UGRD", "VGRD"]
+AGL_VARIABLES = ["TMP", "RH", "UGRD", "VGRD", "TCDC"]
+ISOBARIC_VARIABLES = ["RH", "TMP", "HGT", "UGRD", "VGRD"]
+DEFAULT_REQUIRED_VARIABLES = sorted(set(SURFACE_VARIABLES + AGL_VARIABLES + ISOBARIC_VARIABLES))
+DEFAULT_REQUIRED_LEVELS = ["surface", "2_m_above_ground", "10_m_above_ground", "1000_mb", "925_mb", "850_mb", "700_mb", "500_mb", "300_mb"]
+
+PRECIP_BUCKETS_MM_HR = [0.15, 0.7, 2.5, 8.0, 18.0, 40.0]
+
+
+def utc_now() -> datetime:
+    """Return current UTC datetime."""
+    return datetime.now(timezone.utc)
+
+
+def floor_to_cycle(dt_utc: datetime) -> int:
+    """Return GFS cycle hour bucket (00/06/12/18)."""
+    h = dt_utc.hour
+    return (h // 6) * 6
+
+
+def candidate_cycles(dt_utc: datetime) -> list[tuple[str, int]]:
+    """Return cycle candidates from newest to older with availability delay."""
+    delayed = dt_utc - timedelta(minutes=DEFAULT_GFS_CYCLE_AVAILABILITY_DELAY_MINUTES)
+    cur = delayed.replace(minute=0, second=0, microsecond=0)
+    cur = cur.replace(hour=floor_to_cycle(cur))
+    out: list[tuple[str, int]] = []
+    for i in range(0, 4):
+        cdt = cur - timedelta(hours=6 * i)
+        out.append((cdt.strftime("%Y%m%d"), cdt.hour))
+    return out
+
+
+def nearest_forecast_hour(valid_dt_utc: datetime, cycle_dt_utc: datetime) -> int:
+    """Return nearest whole forecast hour from cycle to valid time."""
+    return int(round((valid_dt_utc - cycle_dt_utc).total_seconds() / 3600.0))
+
+
+def clamp_forecast_hour(fhr: int, min_hour: int = 0, max_hour: int = 384) -> int:
+    """Clamp forecast hour to legal GFS range."""
+    return max(min_hour, min(max_hour, int(fhr)))
+
+
+class FetchResult:
+    def __init__(self, ok: bool, path: Path | None = None, cycle: str = "", forecast_hour: int = 0, valid_time: str = "", error: str = "", url: str = "") -> None:
+        self.ok = ok
+        self.path = path
+        self.cycle = cycle
+        self.forecast_hour = forecast_hour
+        self.valid_time = valid_time
+        self.error = error
+        self.url = url
+
+
+class GFSNomadsClient:
+    """NOAA NOMADS GFS 0.25 subset client with on-disk cache."""
+
+    def __init__(self, cache_dir: Path, timeout_seconds: int = DEFAULT_GFS_TIMEOUT_SECONDS, retries: int = DEFAULT_GFS_RETRIES):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.timeout_seconds = timeout_seconds
+        self.retries = retries
+        self.http = requests.Session()
+        self.http.headers.update({"User-Agent": DEFAULT_UA})
+
+    def build_file_name(self, cycle_hour: int, forecast_hour: int) -> str:
+        return f"gfs.t{int(cycle_hour):02d}z.pgrb2.0p25.f{int(forecast_hour):03d}"
+
+    def build_dir(self, date_str: str, cycle_hour: int) -> str:
+        return f"/gfs.{date_str}/{int(cycle_hour):02d}/atmos"
+
+    def normalize_bbox_for_nomads(self, bbox: dict[str, float]) -> dict[str, float]:
+        west = float(bbox.get("west", -180.0))
+        east = float(bbox.get("east", 180.0))
+        south = float(bbox.get("south", -90.0))
+        north = float(bbox.get("north", 90.0))
+        south = max(-90.0, min(90.0, south))
+        north = max(-90.0, min(90.0, north))
+        if north < south:
+            south, north = north, south
+
+        def norm360(v: float) -> float:
+            vv = v
+            while vv < 0:
+                vv += 360.0
+            while vv >= 360.0:
+                vv -= 360.0
+            return vv
+
+        left = norm360(west)
+        right = norm360(east)
+        if right < left:
+            right = left + 359.75
+        return {"leftlon": round(left, 3), "rightlon": round(right, 3), "toplat": round(north, 3), "bottomlat": round(south, 3)}
+
+    def build_filter_url(self, date_str: str, cycle_hour: int, forecast_hour: int, bbox: dict[str, float], variables: list[str], levels: list[str]) -> str:
+        from urllib.parse import urlencode
+
+        file_name = self.build_file_name(cycle_hour, forecast_hour)
+        dir_name = self.build_dir(date_str, cycle_hour)
+        query: dict[str, Any] = {"file": file_name, "dir": dir_name}
+        b = self.normalize_bbox_for_nomads(bbox)
+        query.update(b)
+        for var in variables:
+            query[f"var_{var}"] = "on"
+        for lvl in levels:
+            query[f"lev_{lvl}"] = "on"
+        return f"{NOMADS_FILTER_BASE}?{urlencode(query)}"
+
+    def _cache_path(self, key: str) -> Path:
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{digest}.grib2"
+
+    def fetch_subset(self, url: str, out_path: Path) -> Path:
+        tmp = out_path.with_suffix(".tmp")
+        for attempt in range(self.retries):
+            try:
+                resp = self.http.get(url, timeout=self.timeout_seconds)
+                resp.raise_for_status()
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+                body = resp.content
+                if b"<html" in body[:200].lower() or ("text/html" in ctype):
+                    raise RuntimeError("nomads returned html page")
+                if len(body) < 2000:
+                    raise RuntimeError("nomads subset too small")
+                tmp.write_bytes(body)
+                tmp.replace(out_path)
+                return out_path
+            except Exception:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+                if attempt >= self.retries - 1:
+                    raise
+                time.sleep(0.4 * (2 ** attempt))
+        return out_path
+
+    def fetch_latest_available_subset(self, target_dt_utc: datetime, bbox: dict[str, float], variables: list[str], levels: list[str]) -> FetchResult:
+        for date_str, cycle_hour in candidate_cycles(target_dt_utc):
+            cycle_dt = datetime.strptime(f"{date_str}{cycle_hour:02d}", "%Y%m%d%H").replace(tzinfo=timezone.utc)
+            fhr = clamp_forecast_hour(nearest_forecast_hour(target_dt_utc, cycle_dt))
+            url = self.build_filter_url(date_str, cycle_hour, fhr, bbox, variables, levels)
+            cache_key = f"{date_str}:{cycle_hour}:{fhr}:{json.dumps(self.normalize_bbox_for_nomads(bbox), sort_keys=True)}:{','.join(sorted(variables))}:{','.join(sorted(levels))}"
+            path = self._cache_path(cache_key)
+            if path.exists() and (time.time() - path.stat().st_mtime) < DEFAULT_GFS_CACHE_TTL_SECONDS:
+                return FetchResult(True, path=path, cycle=f"{date_str}{cycle_hour:02d}", forecast_hour=fhr, valid_time=(cycle_dt + timedelta(hours=fhr)).isoformat(), url=url)
+            try:
+                self.fetch_subset(url, path)
+                return FetchResult(True, path=path, cycle=f"{date_str}{cycle_hour:02d}", forecast_hour=fhr, valid_time=(cycle_dt + timedelta(hours=fhr)).isoformat(), url=url)
+            except Exception as exc:
+                continue
+        return FetchResult(False, error="no available nomads subset")
 
 
 CLOUD_REGIMES = {
@@ -455,6 +628,8 @@ class GFSService:
         self.env_cache: Dict[str, Dict[str, Any]] = {}
         self.station_cache: Dict[str, Dict[str, Any]] = {}
         self.point_forecast_cache: Dict[str, Dict[str, Any]] = {}
+        self.gfs_client = GFSNomadsClient(DEFAULT_GFS_CACHE_DIR)
+        self.disk_cache = DiskCache(str(DEFAULT_GFS_CACHE_DIR / "payloads")) if DiskCache else None
 
     def _now_ms(self) -> int:
         return int(time.time() * 1000)
@@ -495,6 +670,95 @@ class GFSService:
             return self._http_json(url, params=params, timeout=timeout)
         except Exception:
             return None
+
+    def safe_data_var(self, ds: Any, names: list[str]) -> Any:
+        """Return first matching data var from dataset by candidate names."""
+        if ds is None:
+            return None
+        for name in names:
+            if getattr(ds, "data_vars", None) is not None and name in ds.data_vars:
+                return ds[name]
+        return None
+
+    def squeeze_forecast_array(self, arr: Any) -> Any:
+        """Squeeze time/step dimensions to 2D spatial array."""
+        if arr is None:
+            return None
+        a = arr
+        for dim in ["time", "step", "valid_time", "isobaricInhPa", "heightAboveGround", "surface"]:
+            if hasattr(a, "dims") and dim in a.dims and a.sizes.get(dim, 0) > 0:
+                a = a.isel({dim: 0})
+        return a
+
+    def ensure_lat_lon_2d(self, ds: Any) -> tuple[Any, Any]:
+        """Return 2D lat/lon arrays from dataset coords."""
+        if ds is None or np is None:
+            return None, None
+        lat = ds.coords.get("latitude") or ds.coords.get("lat")
+        lon = ds.coords.get("longitude") or ds.coords.get("lon")
+        if lat is None or lon is None:
+            return None, None
+        latv = np.asarray(lat.values)
+        lonv = np.asarray(lon.values)
+        if latv.ndim == 1 and lonv.ndim == 1:
+            lon2d, lat2d = np.meshgrid(lonv, latv)
+            return lat2d, lon2d
+        return latv, lonv
+
+    def flip_lat_if_needed(self, arr: Any, lat: Any) -> Any:
+        if np is None or arr is None or lat is None:
+            return arr
+        try:
+            if lat.ndim >= 1 and lat[0, 0] < lat[-1, 0]:
+                return np.flipud(arr)
+        except Exception:
+            pass
+        return arr
+
+    def to_native_float(self, value: Any) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+
+    def open_surface_dataset(self, grib_path: Path) -> Any:
+        if xr is None:
+            return None
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}, "indexpath": ""})
+
+    def open_height_agl_dataset(self, grib_path: Path) -> Any:
+        if xr is None:
+            return None
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "heightAboveGround"}, "indexpath": ""})
+
+    def open_isobaric_dataset(self, grib_path: Path) -> Any:
+        if xr is None:
+            return None
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "isobaricInhPa"}, "indexpath": ""})
+
+    def open_mean_sea_dataset(self, grib_path: Path) -> Any:
+        if xr is None:
+            return None
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}, "indexpath": ""})
+
+    def open_all_valid_groups(self, grib_path: Path) -> dict[str, Any]:
+        """Open available GRIB groups defensively."""
+        groups: dict[str, Any] = {}
+        openers = {
+            "surface": self.open_surface_dataset,
+            "heightAboveGround": self.open_height_agl_dataset,
+            "isobaricInhPa": self.open_isobaric_dataset,
+            "meanSea": self.open_mean_sea_dataset,
+        }
+        for name, fn in openers.items():
+            try:
+                ds = fn(grib_path)
+                if ds is not None:
+                    groups[name] = ds
+                    print(f"[gfs] cfgrib group opened: {name} vars={list(ds.data_vars.keys())[:8]}")
+            except Exception as exc:
+                print(f"[gfs] cfgrib group failed: {name}: {exc}")
+        return groups
 
     def _utc_now(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -1304,7 +1568,352 @@ class GFSService:
         }
         return enrich_cloud_tile_geometry(tile_item)
 
-    def cloud_tiles_payload(self) -> Dict[str, Any]:
+    def extract_precip_rate_mm_hr(self, datasets: dict[str, Any]) -> Any:
+        """Extract precip rate (mm/hr) from available GFS variables."""
+        if np is None:
+            return None
+        surf = datasets.get("surface")
+        if surf is None:
+            return None
+        prate = self.safe_data_var(surf, ["prate", "PRATE", "tp", "unknown"])
+        if prate is not None:
+            arr = np.asarray(self.squeeze_forecast_array(prate).values, dtype=float) * 3600.0
+            return np.clip(arr, 0.0, None)
+        apcp = self.safe_data_var(surf, ["apcp", "APCP"])
+        if apcp is not None:
+            arr = np.asarray(self.squeeze_forecast_array(apcp).values, dtype=float)
+            return np.clip(arr, 0.0, None)
+        return None
+
+    def classify_precip_rate_bucket(self, mm_hr: float) -> str:
+        if mm_hr < PRECIP_BUCKETS_MM_HR[0]:
+            return "white"
+        if mm_hr < PRECIP_BUCKETS_MM_HR[1]:
+            return "blue"
+        if mm_hr < PRECIP_BUCKETS_MM_HR[2]:
+            return "green"
+        if mm_hr < PRECIP_BUCKETS_MM_HR[3]:
+            return "yellow"
+        if mm_hr < PRECIP_BUCKETS_MM_HR[4]:
+            return "orange"
+        if mm_hr < PRECIP_BUCKETS_MM_HR[5]:
+            return "red"
+        return "black"
+
+    def compute_layer_rh(self, isobaric_ds: Any, top_hpa: int, bottom_hpa: int) -> Any:
+        if np is None or isobaric_ds is None:
+            return None
+        rh = self.safe_data_var(isobaric_ds, ["r", "RH"])
+        if rh is None or "isobaricInhPa" not in rh.dims:
+            return None
+        levels = np.asarray(isobaric_ds["isobaricInhPa"].values, dtype=float)
+        sel = (levels <= bottom_hpa) & (levels >= top_hpa)
+        if not np.any(sel):
+            return None
+        vals = np.asarray(self.squeeze_forecast_array(rh.sel(isobaricInhPa=levels[sel])).values, dtype=float)
+        return np.nanmean(vals, axis=0)
+
+    def estimate_cloud_base_top(self, isobaric_ds: Any, hgt_ds: Any = None) -> dict[str, Any]:
+        if np is None or isobaric_ds is None:
+            return {}
+        rh = self.safe_data_var(isobaric_ds, ["r", "RH"])
+        hgt = self.safe_data_var(isobaric_ds, ["gh", "HGT"])
+        if rh is None or hgt is None:
+            return {}
+        rhv = np.asarray(self.squeeze_forecast_array(rh).values, dtype=float)
+        hgtv = np.asarray(self.squeeze_forecast_array(hgt).values, dtype=float)
+        sat = rhv >= 80.0
+        if rhv.ndim < 3:
+            return {}
+        base_idx = np.argmax(sat, axis=0)
+        top_idx = np.maximum(base_idx, rhv.shape[0] - 1 - np.argmax(np.flip(sat, axis=0), axis=0))
+        base_m = np.take_along_axis(hgtv, np.expand_dims(base_idx, axis=0), axis=0)[0]
+        top_m = np.take_along_axis(hgtv, np.expand_dims(top_idx, axis=0), axis=0)[0]
+        return {"base_m": base_m, "top_m": top_m, "thickness_m": np.maximum(0.0, top_m - base_m)}
+
+    def derive_cloud_layers(self, surface_ds: Any, agl_ds: Any, isobaric_ds: Any) -> dict[str, Any]:
+        if np is None:
+            return {}
+        tcdc = None
+        if surface_ds is not None:
+            da = self.safe_data_var(surface_ds, ["tcc", "TCDC"])
+            if da is not None:
+                tcdc = np.asarray(self.squeeze_forecast_array(da).values, dtype=float)
+        low = self.compute_layer_rh(isobaric_ds, 850, 1000)
+        mid = self.compute_layer_rh(isobaric_ds, 600, 850)
+        high = self.compute_layer_rh(isobaric_ds, 300, 600)
+        low_occ = np.clip(((low if low is not None else 40.0) / 100.0), 0.0, 1.0)
+        mid_occ = np.clip(((mid if mid is not None else 35.0) / 100.0), 0.0, 1.0)
+        high_occ = np.clip(((high if high is not None else 30.0) / 100.0), 0.0, 1.0)
+        if tcdc is not None:
+            tcdc_n = np.clip(tcdc / 100.0, 0.0, 1.0)
+            low_occ = np.clip(low_occ * 0.7 + tcdc_n * 0.3, 0.0, 1.0)
+            mid_occ = np.clip(mid_occ * 0.75 + tcdc_n * 0.25, 0.0, 1.0)
+            high_occ = np.clip(high_occ * 0.78 + tcdc_n * 0.22, 0.0, 1.0)
+        alt = self.estimate_cloud_base_top(isobaric_ds)
+        return {"low": low_occ, "mid": mid_occ, "high": high_occ, "alt": alt}
+
+    def wind_speed_dir_from_uv(self, u: float, v: float) -> tuple[float, float]:
+        speed_mps = math.hypot(u, v)
+        heading_deg = (math.degrees(math.atan2(u, v)) + 360.0) % 360.0
+        return speed_mps, heading_deg
+
+    def select_balloon_steering_level(self, datasets: dict[str, Any], target_ft: int = 10000) -> dict[str, Any]:
+        target_hpa = 700
+        return {"type": "isobaricInhPa", "level_hpa": target_hpa, "note": "nearest representative level"}
+
+    def derive_balloon_vectors(self, datasets: dict[str, Any], target_ft: int = 10000) -> list[dict[str, Any]]:
+        if np is None:
+            return []
+        iso = datasets.get("isobaricInhPa")
+        if iso is None:
+            return []
+        u_da = self.safe_data_var(iso, ["u", "UGRD"])
+        v_da = self.safe_data_var(iso, ["v", "VGRD"])
+        if u_da is None or v_da is None or "isobaricInhPa" not in u_da.dims:
+            return []
+        levels = np.asarray(iso["isobaricInhPa"].values, dtype=float)
+        level = 700.0 if 700.0 in levels else float(levels[np.argmin(np.abs(levels - 700.0))])
+        u = np.asarray(self.squeeze_forecast_array(u_da.sel(isobaricInhPa=level)).values, dtype=float)
+        v = np.asarray(self.squeeze_forecast_array(v_da.sel(isobaricInhPa=level)).values, dtype=float)
+        lat2d, lon2d = self.ensure_lat_lon_2d(iso)
+        if lat2d is None or lon2d is None:
+            return []
+        vectors: list[dict[str, Any]] = []
+        step_y = max(1, u.shape[0] // 18)
+        step_x = max(1, u.shape[1] // 36)
+        for iy in range(0, u.shape[0], step_y):
+            for ix in range(0, u.shape[1], step_x):
+                speed_mps, heading_deg = self.wind_speed_dir_from_uv(float(u[iy, ix]), float(v[iy, ix]))
+                vectors.append({"lat": float(lat2d[iy, ix]), "lon": float(lon2d[iy, ix]), "u": float(u[iy, ix]), "v": float(v[iy, ix]), "speed_mps": round(speed_mps, 3), "heading_deg": round(heading_deg, 2), "source_level": f"{int(level)} hPa"})
+        return vectors
+
+    def derive_hail_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any]) -> Any:
+        if np is None or precip_mm_hr is None:
+            return None
+        surf = datasets.get("surface")
+        cape = None
+        if surf is not None:
+            da = self.safe_data_var(surf, ["cape", "CAPE"])
+            if da is not None:
+                cape = np.asarray(self.squeeze_forecast_array(da).values, dtype=float)
+        deep = cloud_layers.get("high") if isinstance(cloud_layers, dict) else None
+        if cape is None:
+            cape = np.zeros_like(precip_mm_hr)
+        if deep is None:
+            deep = np.zeros_like(precip_mm_hr)
+        return (cape > 900.0) & (precip_mm_hr > 3.0) & (deep > 0.55)
+
+    def derive_lightning_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any]) -> Any:
+        if np is None or precip_mm_hr is None:
+            return None
+        surf = datasets.get("surface")
+        cape = np.zeros_like(precip_mm_hr)
+        cin = np.zeros_like(precip_mm_hr)
+        if surf is not None:
+            d_cape = self.safe_data_var(surf, ["cape", "CAPE"])
+            d_cin = self.safe_data_var(surf, ["cin", "CIN"])
+            if d_cape is not None:
+                cape = np.asarray(self.squeeze_forecast_array(d_cape).values, dtype=float)
+            if d_cin is not None:
+                cin = np.asarray(self.squeeze_forecast_array(d_cin).values, dtype=float)
+        high = cloud_layers.get("high") if isinstance(cloud_layers, dict) else np.zeros_like(precip_mm_hr)
+        return (cape > 650.0) & (cin > -160.0) & (precip_mm_hr > 1.4) & (high > 0.5)
+
+    def threshold_to_mask(self, array: Any, threshold: float) -> Any:
+        if np is None or array is None:
+            return None
+        return np.asarray(array) >= threshold
+
+    def connected_components_or_simple_cell_polygons(self, mask: Any, lat2d: Any, lon2d: Any) -> list[dict[str, Any]]:
+        if np is None or mask is None or lat2d is None or lon2d is None:
+            return []
+        polys: list[dict[str, Any]] = []
+        ys, xs = np.where(mask)
+        for y, x in zip(ys.tolist(), xs.tolist()):
+            dlat = 0.12
+            dlon = 0.12
+            ring = close_ring([
+                {"lat": float(lat2d[y, x] - dlat), "lng": float(lon2d[y, x] - dlon)},
+                {"lat": float(lat2d[y, x] - dlat), "lng": float(lon2d[y, x] + dlon)},
+                {"lat": float(lat2d[y, x] + dlat), "lng": float(lon2d[y, x] + dlon)},
+                {"lat": float(lat2d[y, x] + dlat), "lng": float(lon2d[y, x] - dlon)},
+            ])
+            polys.append({"points": ring})
+            if len(polys) >= 3500:
+                break
+        return polys
+
+    def serialize_cloud_payload(self, tiles: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "source": meta.get("source", "gfs_nomads"), "heuristic": meta.get("source") != "gfs_nomads", "updated_at": self._now_ms(), "items": tiles, "summary": {"tile_count": len(tiles)}, "cycle": meta.get("cycle"), "forecast_hour": meta.get("forecast_hour"), "valid_time": meta.get("valid_time"), "bbox_used": meta.get("bbox_used")}
+
+    def serialize_rain_payload(self, rain_polygons: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"items": rain_polygons, "count": len(rain_polygons)}
+
+    def serialize_hail_payload(self, hail_polygons: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"items": hail_polygons, "count": len(hail_polygons)}
+
+    def serialize_lightning_payload(self, lightning_polygons: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"items": lightning_polygons, "count": len(lightning_polygons)}
+
+    def serialize_balloon_payload(self, vectors: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"items": vectors, "count": len(vectors)}
+
+    def bbox_cache_key(self, bbox: dict[str, float]) -> str:
+        return f"{bbox.get('west')}:{bbox.get('south')}:{bbox.get('east')}:{bbox.get('north')}"
+
+    def payload_cache_key(self, cycle: str, forecast_hour: int, bbox: dict[str, float]) -> str:
+        return f"gfs_payload:v2:{cycle}:{forecast_hour}:{self.bbox_cache_key(bbox)}"
+
+    def read_cached_payload(self, key: str) -> Any:
+        if self.disk_cache is None:
+            return None
+        return self.disk_cache.get(key)
+
+    def write_cached_payload(self, key: str, payload: Any) -> None:
+        if self.disk_cache is None:
+            return
+        self.disk_cache.set(key, payload, expire=DEFAULT_GFS_CACHE_TTL_SECONDS)
+
+    def _tile_from_real_fields(self, lat_min: float, lat_max: float, lon_min: float, lon_max: float, low: float, mid: float, high: float, precip: float, conv: float, u: float, v: float, seed_hint: str) -> dict[str, Any]:
+        hour_bucket = int(time.time() // 3600)
+        tile = self._cloud_tile_payload(lat_min, lat_max, lon_min, lon_max, hour_bucket)
+        tile["low_density"] = round(float(low), 4)
+        tile["mid_density"] = round(float(mid), 4)
+        tile["high_density"] = round(float(high), 4)
+        tile["precipitation_factor"] = round(float(precip), 4)
+        tile["convection_factor"] = round(float(conv), 4)
+        tile["seed"] = stable_hash_u32(seed_hint)
+        for b in ("low", "mid", "high"):
+            tile["bands"][b]["wind"]["u"] = round(float(u), 3)
+            tile["bands"][b]["wind"]["v"] = round(float(v), 3)
+        return enrich_cloud_tile_geometry(tile)
+
+    def generate_real_gfs_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        bbox = bbox or {"west": -180.0, "south": -80.0, "east": 180.0, "north": 80.0}
+        now = utc_now()
+        fetch = self.gfs_client.fetch_latest_available_subset(now, bbox, DEFAULT_REQUIRED_VARIABLES, DEFAULT_REQUIRED_LEVELS)
+        if not fetch.ok or not fetch.path:
+            raise RuntimeError(fetch.error or "nomads fetch failed")
+
+        print(f"[gfs] cycle={fetch.cycle} fhr={fetch.forecast_hour} url={fetch.url}")
+        groups = self.open_all_valid_groups(fetch.path)
+        if not groups:
+            raise RuntimeError("no grib groups decoded")
+        precip = self.extract_precip_rate_mm_hr(groups)
+        cloud_layers = self.derive_cloud_layers(groups.get("surface"), groups.get("heightAboveGround"), groups.get("isobaricInhPa"))
+        vectors = self.derive_balloon_vectors(groups)
+        if precip is None or not cloud_layers:
+            raise RuntimeError("missing precip/cloud arrays")
+
+        sample_ds = groups.get("surface") or groups.get("isobaricInhPa") or groups.get("heightAboveGround")
+        lat2d, lon2d = self.ensure_lat_lon_2d(sample_ds)
+        if lat2d is None or lon2d is None:
+            raise RuntimeError("missing lat lon grid")
+
+        high = cloud_layers.get("high")
+        low = cloud_layers.get("low")
+        mid = cloud_layers.get("mid")
+        conv = np.clip((precip / 30.0) * 0.6 + high * 0.4, 0.0, 1.0)
+
+        tiles: list[dict[str, Any]] = []
+        y_step = max(1, precip.shape[0] // 28)
+        x_step = max(1, precip.shape[1] // 56)
+        for y in range(0, precip.shape[0] - y_step, y_step):
+            for x in range(0, precip.shape[1] - x_step, x_step):
+                lat_min = float(np.min(lat2d[y:y+y_step, x:x+x_step]))
+                lat_max = float(np.max(lat2d[y:y+y_step, x:x+x_step]))
+                lon_min = float(np.min(lon2d[y:y+y_step, x:x+x_step]))
+                lon_max = float(np.max(lon2d[y:y+y_step, x:x+x_step]))
+                low_v = float(np.nanmean(low[y:y+y_step, x:x+x_step]))
+                mid_v = float(np.nanmean(mid[y:y+y_step, x:x+x_step]))
+                high_v = float(np.nanmean(high[y:y+y_step, x:x+x_step]))
+                precip_v = float(np.nanmean(np.clip(precip[y:y+y_step, x:x+x_step] / 45.0, 0.0, 1.0)))
+                conv_v = float(np.nanmean(conv[y:y+y_step, x:x+x_step]))
+                if max(low_v, mid_v, high_v) < 0.06:
+                    continue
+                u = vectors[0]["u"] if vectors else 0.0
+                v = vectors[0]["v"] if vectors else 0.0
+                tile = self._tile_from_real_fields(lat_min, lat_max, lon_min, lon_max, low_v, mid_v, high_v, precip_v, conv_v, u, v, f"{fetch.cycle}:{fetch.forecast_hour}:{y}:{x}")
+                tiles.append(tile)
+
+        rain_mask = self.threshold_to_mask(precip, 0.5)
+        hail_mask = self.derive_hail_mask(groups, precip, cloud_layers)
+        lightning_mask = self.derive_lightning_mask(groups, precip, cloud_layers)
+        rain_polys = self.connected_components_or_simple_cell_polygons(rain_mask, lat2d, lon2d)
+        hail_polys = self.connected_components_or_simple_cell_polygons(hail_mask, lat2d, lon2d)
+        lightning_polys = self.connected_components_or_simple_cell_polygons(lightning_mask, lat2d, lon2d)
+
+        return {
+            "source": "gfs_nomads",
+            "cycle": fetch.cycle,
+            "forecast_hour": fetch.forecast_hour,
+            "valid_time": fetch.valid_time,
+            "bbox_used": bbox,
+            "tiles": tiles,
+            "rain": self.serialize_rain_payload(rain_polys),
+            "hail": self.serialize_hail_payload(hail_polys),
+            "lightning": self.serialize_lightning_payload(lightning_polys),
+            "balloons": self.serialize_balloon_payload(vectors),
+        }
+
+    def generate_fallback_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        cloud = self._legacy_cloud_tiles_payload()
+        cloud.update({"source": "fallback_proxy", "bbox_used": bbox or {}})
+        cloud["rain"] = {"items": [], "count": 0}
+        cloud["hail"] = {"items": [], "count": 0}
+        cloud["lightning"] = {"items": [], "count": 0}
+        cloud["balloons"] = {"items": [], "count": 0}
+        return cloud
+
+    def generate_weather_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        try:
+            payload = self.generate_real_gfs_payload(bbox)
+            key = self.payload_cache_key(payload.get("cycle", "na"), int(payload.get("forecast_hour", 0)), bbox or {})
+            self.write_cached_payload(key, payload)
+            return payload
+        except Exception as exc:
+            print(f"[gfs] real nomads path failed; activating fallback: {exc}")
+            return self.generate_fallback_payload(bbox)
+
+    def debug_real_gfs_cycle(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        """Manual debug helper for cycle/hour/url/group visibility."""
+        bbox = bbox or {"west": -130, "south": 20, "east": -60, "north": 55}
+        now = utc_now()
+        fetch = self.gfs_client.fetch_latest_available_subset(now, bbox, DEFAULT_REQUIRED_VARIABLES, DEFAULT_REQUIRED_LEVELS)
+        groups = self.open_all_valid_groups(fetch.path) if fetch.ok and fetch.path else {}
+        return {
+            "ok": fetch.ok,
+            "cycle": fetch.cycle,
+            "forecast_hour": fetch.forecast_hour,
+            "url": fetch.url,
+            "groups": {k: list(v.data_vars.keys())[:20] for k, v in groups.items()},
+            "error": fetch.error,
+        }
+
+    def validate_bbox_real_fields(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        """Manual check that precip/cloud/wind products are non-empty."""
+        payload = self.generate_weather_payload(bbox)
+        return {
+            "source": payload.get("source"),
+            "has_precip": bool((payload.get("rain") or {}).get("count", 0) > 0),
+            "has_cloud": bool(len(payload.get("tiles") or payload.get("items") or []) > 0),
+            "has_wind": bool((payload.get("balloons") or {}).get("count", 0) > 0),
+        }
+
+    def compare_fallback_vs_real(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        """Manual comparison helper between fallback and real precipitation/cloud outputs."""
+        real = self.generate_weather_payload(bbox)
+        fb = self.generate_fallback_payload(bbox)
+        return {
+            "real_source": real.get("source"),
+            "real_tiles": len(real.get("tiles") or real.get("items") or []),
+            "real_rain_cells": (real.get("rain") or {}).get("count", 0),
+            "fallback_tiles": len(fb.get("items") or []),
+            "fallback_rain_cells": (fb.get("rain") or {}).get("count", 0),
+        }
+
+    def _legacy_cloud_tiles_payload(self) -> Dict[str, Any]:
         now_ms = self._now_ms()
         hour_bucket = now_ms // 3_600_000
 
@@ -1331,25 +1940,23 @@ class GFSService:
             "ok": True,
             "source": "heuristic_forecast_from_latest_state",
             "heuristic": True,
-            "note": "Cloud fields are heuristic but now include derived cloud-architecture metadata for volumetric-style front-end rendering.",
+            "note": "Fallback heuristic payload because real GFS path unavailable.",
             "updated_at": now_ms,
             "items": tiles,
             "summary": summary,
-            "bands": {
-                "low": {
-                    "altitude": 1200,
-                    "description": "Lower deck cloud shell driven by low-level humidity and wind.",
-                },
-                "mid": {
-                    "altitude": 4200,
-                    "description": "Mid cloud masses preserving fronts and weather organization.",
-                },
-                "high": {
-                    "altitude": 9000,
-                    "description": "Upper cloud sheet/cirrus band driven by upper wind.",
-                },
-            },
         }
+
+    def cloud_tiles_payload(self, bbox: dict[str, float] | None = None) -> Dict[str, Any]:
+        weather = self.generate_weather_payload(bbox or {"west": -180.0, "south": -80.0, "east": 180.0, "north": 80.0})
+        if weather.get("source") == "gfs_nomads":
+            payload = self.serialize_cloud_payload(weather.get("tiles", []), weather)
+            payload["rain"] = weather.get("rain", {"items": [], "count": 0})
+            payload["hail"] = weather.get("hail", {"items": [], "count": 0})
+            payload["lightning"] = weather.get("lightning", {"items": [], "count": 0})
+            payload["balloons"] = weather.get("balloons", {"items": [], "count": 0})
+            payload["note"] = "Primary source is NOAA NOMADS GFS 0.25 via GRIB subset decode."
+            return payload
+        return weather
 
     def _load_store(self) -> Dict[str, Any]:
         if not self.store_path.exists():
