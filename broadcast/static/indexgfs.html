@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Global Fishing Intelligence Network</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="app-shell">
+    <gmp-map-3d id="globe" mode="hybrid"></gmp-map-3d>
+    <aside id="hud" class="hud"></aside>
+  </div>
+  <button id="report-live" class="report-live">Report Live</button>
+
+  <script>
+    window.BROADCAST = {
+      mapReady: false,
+      globe: null,
+      layers: { clouds: [], rain: [], jetstream: [], swell: [], bait: [], fish: [], lightning: [] },
+      selectedLocation: null
+    };
+  </script>
+  <script type="module" src="/static/globe/globe.js"></script>
+</body>
+</html>

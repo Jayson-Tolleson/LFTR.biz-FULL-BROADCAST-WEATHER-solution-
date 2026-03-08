@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Report Live</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="broadcast-page">
+    <h1>Live Fishing Report</h1>
+    <video id="preview" autoplay muted playsinline controls></video>
+    <div>
+      <button id="start">Start Broadcast</button>
+      <button id="stop">Stop Broadcast</button>
+    </div>
+    <pre id="status"></pre>
+  </main>
+  <script type="module" src="/static/broadcast/webrtc-client.js"></script>
+</body>
+</html>

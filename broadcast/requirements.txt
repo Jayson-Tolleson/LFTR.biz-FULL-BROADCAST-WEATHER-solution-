@@ -1,0 +1,7 @@
+quart
+aiohttp
+numpy
+xarray
+netcdf4
+python-dotenv
+scikit-learn
