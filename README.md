@@ -1,207 +1,187 @@
 # LFTR Broadcast + GFS Globe Stack
 
-A real-time marine broadcast and weather intelligence platform built with:
+## Short Overview
+LFTR Broadcast + GFS Globe is a real-time marine broadcast and weather intelligence platform. The stack combines a Python Quart backend, WebRTC broadcast/watch flows, Socket.IO signaling, and a Google Maps JavaScript 3D globe experience for marine situational awareness.
 
-- Python Quart
-- WebRTC broadcasting
-- Socket.IO signaling
-- Google Maps 3D Photorealistic Globe
-- Fish location intelligence system
-- Near-real-time bait and weather context
-- Popup HUD with reports, uploads, and live media
+The system provides fish marker intelligence, bait/weather overlays, and a popup HUD with report, upload, and live media context. It is built for practical deployment with modular install scripts, nginx, systemd, TLS, and TURN.
 
-The application runs as one Quart server with nginx reverse proxy.
+## Core Capabilities
+- Live broadcast studio page for source operators.
+- Viewer/watch page for remote playback.
+- Google 3D globe weather interface (`/gfs`).
+- Fish location intelligence and marker workflows.
+- Bait activity polygons/overlays.
+- Weather context overlays (cloud/precipitation-related layers and supporting visuals).
+- Popup HUD with reports, uploads, and media/live context.
+- Deployable server stack with nginx + systemd + TLS + TURN.
 
-## Quick Install
+## Repository Layout
+```text
+.
+├── broadcast.sh
+├── README.md
+├── main.py
+├── requirements.txt
+├── deploy/
+│   ├── install.sh
+│   ├── lib/
+│   └── templates/
+│       └── app.env.template
+├── server/
+│   ├── config.py
+│   ├── routes.py
+│   └── gfs_service.py
+└── static/
+    ├── indexgfs.html
+    ├── broadcast.html
+    ├── watch.html
+    └── data/
+        └── fishloclist.csv
+```
 
-Deploy the stack on a fresh Linux server.
+## Requirements
+Recommended deployment baseline:
+- Ubuntu/Debian host.
+- Public domain name.
+- Ports `80` and `443` open.
+- Root/sudo access.
+- Google Maps JavaScript API key for the 3D globe path.
 
-Recommended environment:
-
-- Ubuntu / Debian
-- Public domain name
-- Ports 80 / 443 open
-- Root or sudo access
-
-### Installation
-
-Clone the repository and run the installer.
+## Installation
+Example install flow:
 
 ```bash
-sudo git clone https://github.com/Jayson-Tolleson/LFTR.biz-FULL-BROADCAST-WEATHER-solution-.git
-sudo mv LFTR.biz-FULL-BROADCAST-WEATHER-solution- broadcast
+git clone <your-repo-url>
+mv LFTR.biz-FULL-BROADCAST-WEATHER-solution- broadcast
 cd broadcast
 sudo bash broadcast.sh
 ```
 
-The installer will automatically:
-
-- install system dependencies
-- configure nginx
-- configure TLS certificates
-- configure TURN server for WebRTC
-- install Python runtime environment
-- install the Socket.IO client via npm
-- configure the application service
-- start the broadcast server
+The installer delegates to the modular deploy pipeline and configures:
+- System packages.
+- nginx.
+- TLS/cert provisioning flow.
+- coturn/TURN config.
+- Python virtual environment and dependencies.
+- Service files.
+- Application environment file.
+- App startup/restart.
 
 ## Installer Prompts
 
-During installation you may be prompted for:
+### Domain Name
+The installer/deploy flow uses your domain for nginx and TLS-related configuration.
 
-### Domain name
+### Google Maps JavaScript API Key
+- Required for the `/gfs` globe experience.
+- Prompted during install when not already set in the deployed environment.
+- Written into the app runtime environment file.
+- Must **not** be hardcoded in frontend source.
+- Should be restricted in Google Cloud (referrer/domain restrictions).
 
-Used for nginx configuration and TLS certificates.
+Use a key that is valid for the current globe implementation path (Maps JavaScript + maps3d usage in this repo).
 
-Example:
+## Runtime Configuration
+The deployed app environment file created by the installer stores runtime values, including:
 
-```text
-lftr.biz
+```env
+GOOGLE_MAPS_API_KEY=YOUR_KEY_HERE
 ```
 
-### Google Maps API Key
+Behavior in this stack:
+- Backend reads `GOOGLE_MAPS_API_KEY` from environment.
+- Frontend receives the key through backend config payload.
+- If the key is empty/invalid, Google 3D globe loading will fail or degrade.
 
-Used by the `/gfs` globe page to load the Google Maps JavaScript API with Photorealistic 3D Tiles.
+## Application Routes
+| Route | Purpose |
+|---|---|
+| `/` | Main index/entry page. |
+| `/broadcast` | Broadcast studio/operator page. |
+| `/watch` | Viewer/watch playback page. |
+| `/gfs` | GFS globe / marine intelligence interface. |
+| `/status-dashboard` | Runtime/status dashboard page. |
 
-Enable:
+## Broadcast Workflow
+- `/broadcast`: operator-facing page for live capture/broadcast workflows.
+- `/watch`: viewer-facing page for playback/consumption.
 
-- Maps JavaScript API
+The flow uses WebRTC transport and backend signaling/services to connect broadcaster and viewers.
 
-Example prompt:
+## GFS Globe / Marine Intelligence Page
+The `/gfs` page is the Google Maps 3D globe interface for marine context:
+- Fish marker intelligence.
+- Bait and weather overlays.
+- Popup HUD interactions.
+- Report, upload, and media/live context tools.
 
-```text
-Enter Google Maps JavaScript API key:
-```
+A valid Google Maps API configuration is required for full globe functionality.
 
-The key will be stored in the app environment file.
-
-## After Installation
-
-The following URLs will be available:
-
-| URL | Description |
-| --- | --- |
-| `/` | viewer page |
-| `/broadcast` | broadcast studio |
-| `/watch` | viewer player |
-| `/gfs` | marine intelligence globe |
-| `/status-dashboard` | server diagnostics |
-
-Example:
-
-```text
-https://lftr.biz
-```
-
-## Core Features
-
-### Broadcast Studio
-
-- WebRTC live streaming
-- AI chat tools
-- speech-to-text controls
-- media uploads
-
-### GFS Marine Intelligence Globe
-
-Powered by Google Maps 3D Photorealistic Tiles.
-
-Features:
-
-- interactive globe
-- fish marker intelligence
-- bait activity indicators
-- weather overlays
-- popup HUD system
-- report submission
-- video uploads
-- live stream links by location
-
-### Popup HUD
-
-Each fish marker supports a location intelligence panel:
-
-- report history
-- uploaded videos
-- live media links
-- bait summary
-- weather context
-
-## Data Sources
-
-The system loads fish locations from:
+## Fish Location Data
+Fish locations are sourced from:
 
 ```text
 static/data/fishloclist.csv
 ```
 
-Uploaded videos are stored in:
+Marker and popup/HUD detail behavior depends on this data and supporting backend route logic.
 
-```text
-static/fishvid/
-```
+## 3D Globe Implementation Notes
+For developers working on `static/indexgfs.html` and related map logic:
+- `Polygon3DElement` altitude modes must be set using the Google Maps 3D API enums/constants in code.
+- Do **not** reintroduce raw string polygon altitude assignments such as:
+  - `altitudeMode: 'absolute'`
+  - `setAttribute('altitude-mode', 'absolute')`
+- Bait/surface polygons should align with ground/surface behavior.
+- Polygon rendering must stay defensive so one malformed layer does not crash overall globe initialization.
 
 ## Service Management
-
-The broadcast server runs as a systemd service.
-
-Check status:
+Common operations:
 
 ```bash
-sudo systemctl status broadcast
+systemctl status <app-service-name>
+systemctl restart <app-service-name>
+nginx -t
+systemctl reload nginx
 ```
 
-Restart server:
+## Updating the Deployment
+Typical update workflow:
 
 ```bash
-sudo systemctl restart broadcast
-```
-
-## Nginx Configuration
-
-The installer configures nginx automatically.
-
-Test configuration:
-
-```bash
-sudo nginx -t
-```
-
-Reload nginx:
-
-```bash
-sudo systemctl reload nginx
-```
-
-## Updating the Application
-
-To update from GitHub:
-
-```bash
-cd ~/broadcast
-sudo git pull
+cd /path/to/broadcast
+git pull
 sudo bash broadcast.sh
 ```
 
-The installer will safely update the deployment.
+Re-running `broadcast.sh` is the safest way to refresh deployment scripts/templates/config in place when needed.
 
-## Project Architecture
+## Troubleshooting
 
-```text
-Quart Application
-│
-├── broadcast UI
-├── watch UI
-├── GFS globe page
-│
-├── /gfs/api/*
-├── /gfs/ws/*
-│
-├── WebRTC signaling
-├── AI services
-└── fish intelligence system
-```
+### Google 3D globe not loading
+- Verify backend config route returns a non-empty map key.
+- Check browser console for Maps JS load/import errors.
 
-## License
+### Missing/invalid Google Maps API key
+- Confirm `GOOGLE_MAPS_API_KEY` is present in deployed app env.
+- Restart app service after env changes.
 
+### API restrictions/referrer issues
+- Confirm the key allows your deployed domain/referrer pattern.
+- Confirm the key is enabled for the APIs used by this globe path.
+
+### Altitude mode errors on polygons
+If you see errors like `InvalidValueError` related to `gmp-polygon-3d` `altitudeMode`, polygon altitude handling was likely changed incorrectly in frontend code. Revert to enum-based altitude mode handling for `Polygon3DElement`.
+
+### nginx/service restart checks
+- Validate nginx config with `nginx -t`.
+- Check app service status/logs via systemd and restart as needed.
+
+## Development Notes
+- Backend: Quart app and route/service modules under `server/`.
+- Frontend: static pages under `static/` (`broadcast`, `watch`, `gfs`, etc.).
+- Deployment: modular shell scripts and templates under `deploy/`.
+- Google Maps 3D frontend depends on backend-delivered runtime config.
+
+## License / Maintainer
 Project maintained by Jayson Tolleson.
