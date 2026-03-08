@@ -5,7 +5,7 @@ from quart import Quart
 from . import config
 from .routes import register_routes
 
-app = Quart(__name__, static_folder='../static')
+app = Quart(__name__, static_folder='../static', static_url_path='/static')
 register_routes(app)
 
 if __name__ == '__main__':

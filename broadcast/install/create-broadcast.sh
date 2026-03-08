@@ -1,32 +1,51 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+APP_USER="${SUDO_USER:-$USER}"
+APP_HOME="/home/$APP_USER"
+APP_DIR="$APP_HOME/broadcast"
 
-mkdir -p \
-  "$ROOT_DIR/install" \
-  "$ROOT_DIR/server" \
-  "$ROOT_DIR/static" \
-  "$ROOT_DIR/data" \
-  "$ROOT_DIR/uploads/video" \
-  "$ROOT_DIR/templates"
-
-if [[ ! -f "$ROOT_DIR/requirements.txt" ]]; then
-  echo "requirements.txt not found in $ROOT_DIR"
-  exit 1
+if [[ ! -d "$APP_HOME" ]]; then
+  APP_HOME="$HOME"
+  APP_DIR="$APP_HOME/broadcast"
 fi
 
-python3 -m venv "$ROOT_DIR/.venv"
-source "$ROOT_DIR/.venv/bin/activate"
+echo "Installing Broadcast Weather System"
+
+echo "Installing system dependencies"
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git nginx rsync
+
+echo "Creating runtime directories"
+mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR/logs"
+mkdir -p "$APP_DIR/uploads"
+mkdir -p "$APP_DIR/uploads/video/locations"
+mkdir -p "$APP_DIR/data"
+
+echo "Copying application files"
+rsync -av --delete \
+  --exclude '.git' \
+  --exclude '.venv' \
+  --exclude '__pycache__' \
+  "$REPO_ROOT/broadcast/" "$APP_DIR/"
+
+cd "$APP_DIR"
+
+echo "Creating python environment"
+python3 -m venv .venv
+source .venv/bin/activate
+
 pip install --upgrade pip
-pip install -r "$ROOT_DIR/requirements.txt"
+pip install -r requirements.txt
 
-read -p "Enter Google Maps API Key: " GMAPS_KEY
+echo "Setting permissions"
+sudo chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
-cat > "$ROOT_DIR/.env" <<ENV
-GOOGLE_MAPS_API_KEY=$GMAPS_KEY
-PORT=8000
-ENV
-
-echo "Starting Quart server on 0.0.0.0:8000"
-PYTHONPATH="$ROOT_DIR" python3 -m server.app
+echo "Installation successful"
+echo "Run server with:"
+echo "source $APP_DIR/.venv/bin/activate && python server/app.py"
+echo "Open:"
+echo "http://SERVER_IP/static/indexgfs.html"
+echo "http://SERVER_IP/static/broadcast.html"

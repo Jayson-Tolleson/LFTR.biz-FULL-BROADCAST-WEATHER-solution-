@@ -44,6 +44,10 @@ def register_routes(app):
     async def index():
         return await send_from_directory(app.static_folder, 'indexgfs.html')
 
+    @app.get('/indexgfs')
+    async def indexgfs():
+        return await send_from_directory(app.static_folder, 'indexgfs.html')
+
     @app.get('/broadcast')
     async def broadcast_page():
         return await send_from_directory(app.static_folder, 'broadcast.html')
@@ -61,6 +65,12 @@ def register_routes(app):
         if compact:
             items = compact_tiles(items)
         return jsonify({'items': items, 'generated_at': payload['generated_at'], 'compact': compact})
+
+
+    @app.get('/api/gfs')
+    async def api_gfs():
+        payload = gfs.cloud_tiles()
+        return jsonify({'items': payload['items'][:200], 'generated_at': payload['generated_at']})
 
     @app.get('/gfs/api/jetstream')
     async def jetstream():
