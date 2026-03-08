@@ -1,0 +1,1198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GFS v7 Marine Intelligence Globe</title>
+  <style>
+    :root {
+      --bg: #050b18;
+      --glass: rgba(8, 20, 41, 0.66);
+      --glass-strong: rgba(6, 13, 29, 0.88);
+      --line: rgba(56, 189, 248, 0.38);
+      --txt: #e6f4ff;
+      --muted: rgba(230, 244, 255, 0.72);
+      --cyan: #22d3ee;
+      --indigo: #818cf8;
+      --pink: #f472b6;
+      --lime: #84cc16;
+      --amber: #f59e0b;
+      --red: #f43f5e;
+      --teal: #14b8a6;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      color: var(--txt);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background:
+        radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
+      overflow: hidden;
+    }
+
+    body {
+      min-height: 100vh;
+    }
+
+    .layout {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow:
+        0 0 24px rgba(34, 211, 238, .12),
+        inset 0 0 0 1px rgba(255,255,255,.04);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 10px;
+      padding: 12px;
+      align-items: center;
+    }
+
+    .title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+
+    .subline {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .statusline {
+      margin-top: 8px;
+      font-size: 12px;
+      opacity: .94;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .feature {
+      border: 1px solid #334155;
+      background: rgba(15, 23, 42, 0.72);
+      color: #dbeafe;
+      border-radius: 999px;
+      padding: 6px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+
+    .feature:hover {
+      transform: translateY(-1px);
+      border-color: rgba(148, 163, 184, .6);
+    }
+
+    .light {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #334155;
+      flex: 0 0 10px;
+    }
+
+    .feature.on .light { animation: blink 1.15s linear infinite; }
+    .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+    .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
+    .feature[data-kind="jet"].on .light { background: var(--pink); box-shadow: 0 0 10px var(--pink); }
+    .feature[data-kind="markers"].on .light { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
+    .feature[data-kind="bait"].on .light { background: var(--teal); box-shadow: 0 0 10px var(--teal); }
+    .feature[data-kind="popups"].on .light { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+    .feature[data-kind="reports"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
+    .feature[data-kind="live"].on .light { background: var(--red); box-shadow: 0 0 10px var(--red); }
+
+    @keyframes blink {
+      0%,100% { opacity: 1; }
+      50% { opacity: .28; }
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: 1.8fr 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .mapwrap {
+      position: relative;
+      overflow: hidden;
+      min-height: 460px;
+    }
+
+    #globe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 460px;
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
+    }
+
+    .globe-fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      text-align: center;
+      padding: 20px;
+      color: #dbeafe;
+      background:
+        radial-gradient(circle at center, rgba(30, 64, 175, .28), rgba(15, 23, 42, .92));
+      border-radius: 14px;
+      z-index: 1;
+    }
+
+    .globe-fallback.show {
+      display: grid;
+    }
+
+    .globe-fallback .inner {
+      max-width: 560px;
+      border: 1px solid rgba(129, 140, 248, .38);
+      background: rgba(10, 14, 29, 0.78);
+      padding: 16px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+    }
+
+    .overlay {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      border: 1px solid rgba(129, 140, 248, .45);
+      border-radius: 10px;
+      padding: 8px;
+      font-size: 12px;
+      background: rgba(10, 14, 29, 0.74);
+      max-width: min(560px, calc(100% - 20px));
+      pointer-events: none;
+      white-space: pre-wrap;
+      z-index: 2;
+    }
+
+    .side {
+      padding: 10px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input, textarea, button {
+      background: #0b1220;
+      color: #e8eefc;
+      border: 1px solid #334161;
+      border-radius: 8px;
+      padding: 8px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: rgba(34, 211, 238, .55);
+    }
+
+    .markers {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      padding-right: 2px;
+    }
+
+    .marker-content {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 8px;
+      cursor: pointer;
+      background: linear-gradient(180deg, rgba(30, 58, 138, .25), rgba(15, 23, 42, .25));
+    }
+
+    .marker-content:hover {
+      border-color: var(--cyan);
+    }
+
+    .marker-name {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .marker-coord, .marker-bait {
+      font-size: 12px;
+      opacity: .9;
+      margin-top: 2px;
+    }
+
+    .hud {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: min(460px, calc(100% - 24px));
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 10px;
+      background: var(--glass-strong);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 20;
+      display: none;
+      box-shadow: 0 0 30px rgba(15, 23, 42, .65);
+    }
+
+    .hud.show { display: block; }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+
+    .live-badge.live {
+      color: #fecaca;
+      border-color: rgba(248, 113, 113, 0.7);
+      background: rgba(127, 29, 29, .4);
+      box-shadow: 0 0 14px rgba(244, 63, 94, 0.4);
+      animation: livePulse 1.05s ease-in-out infinite;
+    }
+
+    .live-badge.offline {
+      color: #bbf7d0;
+      border-color: rgba(134, 239, 172, 0.35);
+      background: rgba(6, 78, 59, .35);
+    }
+
+    @keyframes livePulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.02); opacity: .72; }
+    }
+
+    .player-pane {
+      margin-top: 8px;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: rgba(2, 6, 23, 0.75);
+      min-height: 185px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .player-pane iframe,
+    .player-pane video {
+      width: 100%;
+      min-height: 185px;
+      display: block;
+      border: 0;
+      background: #020617;
+    }
+
+    .player-empty {
+      min-height: 185px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 14px;
+      color: #bfdbfe;
+      font-size: 13px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      resize: vertical;
+    }
+
+    .videos a {
+      color: #93c5fd;
+      display: block;
+      margin-top: 4px;
+      word-break: break-word;
+    }
+
+    .stale { color: #fca5a5; }
+
+    .context {
+      margin-top: 8px;
+      white-space: pre-wrap;
+      color: #cfe8ff;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      .topbar, .main { grid-template-columns: 1fr; }
+      .features { justify-content: flex-start; }
+      #globe, .mapwrap { min-height: 320px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <div class="card topbar">
+    <div>
+      <div class="title">LFTR v7 Marine Intelligence Globe</div>
+      <div class="subline">Google Photorealistic 3D globe • fish intelligence • bait/weather context • media HUD</div>
+      <div class="statusline" id="statusLine"></div>
+    </div>
+    <div class="features" id="features"></div>
+  </div>
+
+  <div class="main">
+    <div class="card mapwrap">
+      <gmp-map-3d id="globe"
+        mode="hybrid"
+        center="34.2000,-120.0000,120"
+        range="1800000"
+        tilt="42"
+        heading="7.5"
+        default-ui-disabled>
+      </gmp-map-3d>
+
+      <div class="globe-fallback" id="globeFallback">
+        <div class="inner">
+          <strong>3D globe unavailable</strong>
+          <div class="muted" style="margin-top:8px">
+            Configure <span class="mono">GOOGLE_MAPS_API_KEY</span> and ensure the Maps JavaScript API with
+            <span class="mono">maps3d</span> support is enabled.
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay mono" id="health">Loading operational feed…</div>
+    </div>
+
+    <div class="card side">
+      <div class="row">
+        <span class="mono" id="mapsKeyState">Maps key status: checking…</span>
+        <button id="loadGlobeBtn">Load Globe</button>
+      </div>
+      <div class="row">
+        <button id="refreshFishBtn">Refresh Fish</button>
+        <button id="refreshHealthBtn">Refresh Health</button>
+        <button id="refreshCloudBtn">Refresh Clouds</button>
+      </div>
+      <div class="markers" id="markerGrid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="hud" id="hud">
+  <div class="row" style="justify-content:space-between">
+    <strong id="hudTitle">Location</strong>
+    <button id="closeHud">Close</button>
+  </div>
+  <div class="mono" id="hudKey"></div>
+  <div class="row" id="mediaInfo">Loading context…</div>
+  <div class="row" style="justify-content:space-between">
+    <span class="live-badge offline" id="liveBadge">Offline</span>
+    <div class="row">
+      <button id="startLiveBtn">Start Live Session</button>
+      <button id="stopLiveBtn">Stop Live</button>
+    </div>
+  </div>
+
+  <div class="player-pane" id="mediaPlayerPane">
+    <div class="player-empty" id="mediaPlayerEmpty">Select a fish marker to load live media.</div>
+  </div>
+
+  <label for="reportText">Report</label>
+  <textarea id="reportText" placeholder="Write location report..."></textarea>
+  <div class="row">
+    <button id="saveReportBtn">Save Report</button>
+    <button id="refreshContextBtn">Refresh Context</button>
+  </div>
+
+  <label for="liveUrl">Live stream URL</label>
+  <input id="liveUrl" placeholder="https://..." style="width:100%">
+  <div class="row">
+    <button id="connectLiveBtn">Update Live URL</button>
+  </div>
+
+  <label for="videoFile">Upload Video</label>
+  <input id="videoFile" type="file" accept="video/*">
+  <div class="row">
+    <button id="uploadBtn">Upload Video</button>
+  </div>
+
+  <div class="context mono" id="intel"></div>
+  <div class="videos" id="videoList"></div>
+</div>
+
+<script>
+(() => {
+  const markerGrid = document.getElementById('markerGrid');
+  const healthEl = document.getElementById('health');
+  const statusLine = document.getElementById('statusLine');
+  const globeFallback = document.getElementById('globeFallback');
+
+  const hud = document.getElementById('hud');
+  const hudTitle = document.getElementById('hudTitle');
+  const hudKey = document.getElementById('hudKey');
+  const reportText = document.getElementById('reportText');
+  const mediaInfo = document.getElementById('mediaInfo');
+  const videoList = document.getElementById('videoList');
+  const liveUrl = document.getElementById('liveUrl');
+  const videoFile = document.getElementById('videoFile');
+  const intel = document.getElementById('intel');
+  const liveBadge = document.getElementById('liveBadge');
+  const mediaPlayerPane = document.getElementById('mediaPlayerPane');
+
+  const mapsKeyState = document.getElementById('mapsKeyState');
+
+  let globeEl = document.getElementById('globe');
+
+  const state = {
+    fish: [],
+    selected: null,
+    feature: {
+      clouds: true,
+      rain: true,
+      jet: true,
+      markers: true,
+      bait: true,
+      popups: true,
+      reports: true,
+      live: true,
+    },
+    mapReady: false,
+    mapMarkers: [],
+    cloudMarkers: [],
+    cloudTiles: [],
+    cloudFetchedAt: 0,
+    wsConnected: false,
+    lastUpdateAt: 0,
+    hudPollId: null,
+    mapsApiKey: '',
+    maps3dLib: null,
+    mapsScriptLoading: null,
+  };
+
+  function setStatus(msg, isStale = false) {
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last update: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • ${msg}`;
+    statusLine.classList.toggle('stale', !!isStale);
+  }
+
+  function setHudMessage(msg) {
+    mediaInfo.textContent = msg;
+  }
+
+  function normalizeFeatureButton(btn, kind) {
+    btn.classList.toggle('on', !!state.feature[kind]);
+  }
+
+  function mkFeature(kind, label) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'feature on';
+    btn.dataset.kind = kind;
+    btn.innerHTML = `<span class="light"></span><span>${label}</span>`;
+    btn.addEventListener('click', () => {
+      state.feature[kind] = !state.feature[kind];
+      normalizeFeatureButton(btn, kind);
+
+      if (kind === 'markers') {
+        markerGrid.style.display = state.feature.markers ? 'grid' : 'none';
+        state.mapMarkers.forEach((m) => {
+          try {
+            m.style.display = state.feature.markers ? '' : 'none';
+          } catch (_) {}
+        });
+      }
+
+      if (kind === 'popups' && !state.feature.popups) {
+        hud.classList.remove('show');
+      }
+
+      if (kind === 'clouds') {
+        renderCloudLayers().catch((e) => setStatus(e.message, true));
+      }
+
+      renderMarkerBait();
+    });
+    return btn;
+  }
+
+  const featuresEl = document.getElementById('features');
+  [
+    ['clouds', 'Clouds'],
+    ['rain', 'Rain'],
+    ['jet', 'Jet balloons'],
+    ['markers', 'Fish markers'],
+    ['bait', 'Bait layer'],
+    ['popups', 'Popups'],
+    ['reports', 'Reports'],
+    ['live', 'Live media'],
+  ].forEach(([k, l]) => featuresEl.appendChild(mkFeature(k, l)));
+
+  async function json(url, opts) {
+    const res = await fetch(url, opts);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) {
+      throw new Error(body.error || `request failed (${res.status})`);
+    }
+    return body;
+  }
+
+  function baitText(point) {
+    const bait = (point.bait && point.bait.intensity) || 'unknown';
+    const confidence = point.bait && Number.isFinite(point.bait.confidence)
+      ? ` (${point.bait.confidence}%)`
+      : '';
+    return state.feature.bait ? `Bait: ${bait}${confidence}` : 'Bait layer disabled';
+  }
+
+  function renderMarkerBait() {
+    Array.from(markerGrid.querySelectorAll('.marker-card')).forEach((n) => {
+      const p = state.fish.find((x) => x.location_key === n.dataset.key);
+      if (!p) return;
+      const baitEl = n.querySelector('.marker-bait');
+      if (baitEl) baitEl.textContent = baitText(p);
+    });
+  }
+
+  async function loadHealth() {
+    const payload = await json('/gfs/api/health');
+    healthEl.textContent = JSON.stringify(payload, null, 2);
+    state.lastUpdateAt = Date.now();
+    setStatus('Operational feed nominal');
+  }
+
+  function clearMapMarkers() {
+    state.mapMarkers.forEach((m) => {
+      try { m.remove(); } catch (_) {}
+    });
+    state.mapMarkers = [];
+  }
+
+  function clearCloudMarkers() {
+    state.cloudMarkers.forEach((m) => {
+      try { m.remove(); } catch (_) {}
+    });
+    state.cloudMarkers = [];
+  }
+
+  function currentCameraRange() {
+    const val = Number(globeEl?.getAttribute('range') || 1800000);
+    return Number.isFinite(val) ? val : 1800000;
+  }
+
+  function cloudLodProfile() {
+    const range = currentCameraRange();
+    if (range > 2300000) return { bandThreshold: 0.2, maxTiles: 780, detailBoost: 0.82, tag: 'high-alt' };
+    if (range > 1200000) return { bandThreshold: 0.15, maxTiles: 980, detailBoost: 1.0, tag: 'mid-alt' };
+    return { bandThreshold: 0.08, maxTiles: 1300, detailBoost: 1.2, tag: 'low-alt' };
+  }
+
+  function bandColor(band, tile) {
+    const storm = Math.max(tile.precipitation_factor || tile.precip || 0, tile.convection_factor || tile.convection || 0);
+    if (band === 'low') return storm > 0.55 ? '#e2e8f0' : '#f8fafc';
+    if (band === 'mid') return storm > 0.55 ? '#dbeafe' : '#e0f2fe';
+    return '#eef2ff';
+  }
+
+  function flattenCloudBands(tile, lod) {
+    const defs = [
+      { band: 'high', density: Number(tile.high_density || 0), altitude: Number(tile.altitude_high || 9000), wind: tile.wind?.high || { u: 0, v: 0 }, baseScale: 0.95 },
+      { band: 'mid', density: Number(tile.mid_density || 0), altitude: Number(tile.altitude_mid || 4200), wind: tile.wind?.mid || { u: 0, v: 0 }, baseScale: 1.05 },
+      { band: 'low', density: Number(tile.low_density || 0), altitude: Number(tile.altitude_low || 1200), wind: tile.wind?.low || { u: 0, v: 0 }, baseScale: 1.15 },
+    ];
+    return defs
+      .filter((d) => d.density >= lod.bandThreshold)
+      .map((d) => ({
+        ...d,
+        tile_id: tile.tile_id,
+        lat: Number(tile.bounds?.lat_center || 0),
+        lon: Number(tile.bounds?.lon_center || 0),
+        precip: Number(tile.precipitation_factor || 0),
+        convection: Number(tile.convection_factor || 0),
+        importance: Number(tile.importance || 0),
+        updated_at: Number(tile.updated_at || Date.now()),
+      }));
+  }
+
+  function selectCloudRenderItems() {
+    const lod = cloudLodProfile();
+    const all = [];
+    state.cloudTiles.forEach((tile) => {
+      all.push(...flattenCloudBands(tile, lod));
+    });
+
+    all.sort((a, b) => {
+      const aw = a.importance * 0.7 + Math.max(a.precip, a.convection) * 0.3 + a.density * 0.2;
+      const bw = b.importance * 0.7 + Math.max(b.precip, b.convection) * 0.3 + b.density * 0.2;
+      return bw - aw;
+    });
+
+    return {
+      lod,
+      items: all.slice(0, lod.maxTiles),
+    };
+  }
+
+  function advectCloudPosition(item) {
+    const ageHours = Math.max(0, (Date.now() - Number(item.updated_at || Date.now())) / 3600000);
+    const u = Number(item.wind?.u || 0);
+    const v = Number(item.wind?.v || 0);
+    const driftLat = v * ageHours * 0.035;
+    const cosLat = Math.max(0.25, Math.cos((item.lat * Math.PI) / 180));
+    const driftLon = (u * ageHours * 0.035) / cosLat;
+    let lat = item.lat + driftLat;
+    let lon = item.lon + driftLon;
+    if (lat > 89.8) lat = 89.8;
+    if (lat < -89.8) lat = -89.8;
+    while (lon > 180) lon -= 360;
+    while (lon < -180) lon += 360;
+    return { lat, lon };
+  }
+
+  async function renderCloudLayers() {
+    clearCloudMarkers();
+    if (!state.feature.clouds || !state.mapReady || !state.cloudTiles.length) return;
+
+    const lib = await ensureMapLibrary();
+    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) return;
+
+    const { lod, items } = selectCloudRenderItems();
+    items.forEach((item) => {
+      const pos = advectCloudPosition(item);
+      const marker = new lib.Marker3DInteractiveElement({
+        position: { lat: pos.lat, lng: pos.lon, altitude: item.altitude },
+      });
+
+      const scale = (item.baseScale + item.density * 1.35 + Math.max(item.precip, item.convection) * 0.65) * lod.detailBoost;
+      const pin = new lib.PinElement({
+        glyph: '',
+        scale,
+        background: bandColor(item.band, item),
+        borderColor: '#dbeafe',
+        glyphColor: '#ffffff',
+      });
+
+      try {
+        pin.style.opacity = String(Math.min(0.88, 0.28 + item.density * 0.65));
+        pin.style.filter = `blur(${item.band === 'high' ? 0.4 : 0.25}px) drop-shadow(0 0 ${item.band === 'high' ? 8 : 12}px rgba(226,232,240,0.55))`;
+      } catch (_) {}
+
+      marker.append(pin);
+      globeEl.append(marker);
+      state.cloudMarkers.push(marker);
+    });
+
+    setStatus(`Cloud LOD ${lod.tag}: ${items.length} active weather primitives`);
+  }
+
+  async function loadClouds(force = false) {
+    if (!force && Date.now() - state.cloudFetchedAt < 75000 && state.cloudTiles.length) {
+      await renderCloudLayers();
+      return;
+    }
+    const payload = await json('/gfs/api/cloud_tiles');
+    state.cloudTiles = payload.items || [];
+    state.cloudFetchedAt = Date.now();
+    await renderCloudLayers();
+  }
+
+  async function ensureMapLibrary() {
+    if (state.maps3dLib) return state.maps3dLib;
+    if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
+      return null;
+    }
+    try {
+      state.maps3dLib = await window.google.maps.importLibrary('maps3d');
+      return state.maps3dLib;
+    } catch (err) {
+      console.warn('[gfs] maps3d import failed', err);
+      setStatus('maps3d import failed', true);
+      return null;
+    }
+  }
+
+  function pinGlyphForPoint(p) {
+    const intensity = p?.bait?.intensity;
+    if (intensity === 'high') return '⬤';
+    if (intensity === 'medium') return '●';
+    return '•';
+  }
+
+  function pinScaleForPoint(p) {
+    const intensity = p?.bait?.intensity;
+    if (intensity === 'high') return 1.25;
+    if (intensity === 'medium') return 1.15;
+    return 1.05;
+  }
+
+  async function renderMapMarkers() {
+    clearMapMarkers();
+    if (!state.mapReady || !state.feature.markers) return;
+
+    const lib = await ensureMapLibrary();
+    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) {
+      setStatus('maps3d marker library unavailable', true);
+      return;
+    }
+
+    state.fish.forEach((p) => {
+      const marker = new lib.Marker3DInteractiveElement({
+        position: {
+          lat: Number(p.lat),
+          lng: Number(p.lon),
+          altitude: 10,
+        },
+      });
+
+      const pin = new lib.PinElement({
+        glyph: pinGlyphForPoint(p),
+        scale: pinScaleForPoint(p),
+        background: '#22c55e',
+        borderColor: '#86efac',
+        glyphColor: '#dcfce7',
+      });
+
+      try {
+        pin.style.filter = 'drop-shadow(0 0 8px rgba(34,197,94,0.95)) drop-shadow(0 0 16px rgba(34,197,94,0.6))';
+      } catch (_) {}
+
+      marker.append(pin);
+      marker.addEventListener('gmp-click', () => openHud(p));
+      marker.addEventListener('click', () => openHud(p));
+
+      globeEl.append(marker);
+      state.mapMarkers.push(marker);
+    });
+  }
+
+  function renderMarkerCards() {
+    markerGrid.innerHTML = '';
+    state.fish.forEach((p) => {
+      const card = document.createElement('div');
+      card.className = 'marker-content marker-card';
+      card.dataset.key = p.location_key;
+      card.innerHTML = `
+        <div class="marker-name"></div>
+        <div class="marker-coord"></div>
+        <div class="marker-bait"></div>
+      `;
+      card.querySelector('.marker-name').textContent = p.name;
+      card.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
+      card.querySelector('.marker-bait').textContent = baitText(p);
+      card.addEventListener('click', () => openHud(p));
+      markerGrid.append(card);
+    });
+  }
+
+  async function loadFish() {
+    const payload = await json('/gfs/api/fish');
+    state.fish = payload.items || [];
+    renderMarkerCards();
+    await renderMapMarkers();
+  }
+
+  function renderVideos(uploads) {
+    videoList.innerHTML = '';
+    (uploads || []).forEach((u) => {
+      const a = document.createElement('a');
+      a.href = u.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `${u.filename || 'video'} (${new Date(u.uploaded_at || Date.now()).toLocaleString()})`;
+      videoList.append(a);
+    });
+  }
+
+  function normalizeMediaUrl(url) {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    if (url.startsWith('/')) return `${location.origin}${url}`;
+    return `${location.origin}/${url.replace(/^\/+/, '')}`;
+  }
+
+  function isVideoUrl(url) {
+    return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url || '');
+  }
+
+  function mountPlayer({ live, uploads }) {
+    mediaPlayerPane.innerHTML = '';
+    const safeLiveUrl = normalizeMediaUrl(live?.stream_url || '');
+    const firstUpload = (uploads || [])[0];
+    const uploadUrl = normalizeMediaUrl(firstUpload?.url || '');
+
+    if (live?.active && safeLiveUrl) {
+      if (isVideoUrl(safeLiveUrl)) {
+        const v = document.createElement('video');
+        v.controls = true;
+        v.autoplay = true;
+        v.muted = true;
+        v.playsInline = true;
+        v.src = safeLiveUrl;
+        mediaPlayerPane.append(v);
+      } else {
+        const frame = document.createElement('iframe');
+        frame.src = safeLiveUrl;
+        frame.allow = 'autoplay; camera; microphone; fullscreen; clipboard-write';
+        frame.loading = 'lazy';
+        mediaPlayerPane.append(frame);
+      }
+      return;
+    }
+
+    if (uploadUrl) {
+      const v = document.createElement('video');
+      v.controls = true;
+      v.src = uploadUrl;
+      v.playsInline = true;
+      mediaPlayerPane.append(v);
+      return;
+    }
+
+    const empty = document.createElement('div');
+    empty.className = 'player-empty';
+    empty.textContent = 'No media yet for this location. Start a live session or upload a video.';
+    mediaPlayerPane.append(empty);
+  }
+
+  function updateLiveBadge(live) {
+    const isLive = !!(live && live.active && live.stream_url);
+    liveBadge.textContent = isLive ? 'Live now' : 'Offline';
+    liveBadge.classList.toggle('live', isLive);
+    liveBadge.classList.toggle('offline', !isLive);
+  }
+
+  function renderIntel(payload) {
+    const bait = payload.bait || {};
+    const weather = payload.weather || {};
+    intel.textContent = [
+      `Bait signal: ${bait.intensity || 'n/a'} (confidence ${bait.confidence ?? 'n/a'}%)`,
+      `Bite window: ${bait.feeding_window || 'unknown'}`,
+      `School summary: ${bait.school_summary || 'n/a'}`,
+      `Weather: ${weather.summary || 'n/a'}`,
+      `Water context: ${weather.water_context || 'n/a'}`,
+    ].join('\n');
+  }
+
+  async function refreshLocationContext() {
+    if (!state.selected) return;
+    const payload = await json(`/gfs/api/location_media?location_key=${encodeURIComponent(state.selected.location_key)}`);
+    reportText.value = payload.report_text || '';
+    renderVideos(payload.uploads || []);
+    renderIntel(payload);
+    const live = payload.live || { active: false, stream_url: '' };
+    liveUrl.value = live.stream_url || '';
+    updateLiveBadge(live);
+    mountPlayer({ live, uploads: payload.uploads || [] });
+    setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : 'Live inactive');
+  }
+
+  function startHudPolling() {
+    if (state.hudPollId) clearInterval(state.hudPollId);
+    state.hudPollId = setInterval(() => {
+      if (hud.classList.contains('show')) {
+        refreshLocationContext().catch((e) => setHudMessage(e.message));
+      }
+    }, 8000);
+  }
+
+  function stopHudPolling() {
+    if (state.hudPollId) clearInterval(state.hudPollId);
+    state.hudPollId = null;
+  }
+
+  async function openHud(point) {
+    if (!state.feature.popups) return;
+    state.selected = point;
+    hudTitle.textContent = point.name;
+    hudKey.textContent = `location_key: ${point.location_key}`;
+    hud.classList.add('show');
+    startHudPolling();
+    await refreshLocationContext();
+  }
+
+  async function saveReport() {
+    if (!state.selected || !state.feature.reports) return;
+    await json('/gfs/api/report/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location_key: state.selected.location_key,
+        report_text: reportText.value || '',
+      }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Report saved.');
+  }
+
+  async function uploadVideo() {
+    if (!state.selected) return;
+    const file = videoFile.files && videoFile.files[0];
+    if (!file) {
+      setHudMessage('Select a video file first.');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('location_key', state.selected.location_key);
+    fd.append('file', file);
+    await json('/gfs/api/upload_video', { method: 'POST', body: fd });
+    videoFile.value = '';
+    await refreshLocationContext();
+    setHudMessage('Video uploaded.');
+  }
+
+  async function updateLiveUrl() {
+    if (!state.selected || !state.feature.live) return;
+    await json('/gfs/api/live/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location_key: state.selected.location_key,
+        active: true,
+        stream_url: (liveUrl.value || '').trim(),
+      }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Live URL updated.');
+  }
+
+  async function startLiveSession() {
+    if (!state.selected || !state.feature.live) return;
+    await json('/gfs/api/live/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key }),
+    });
+    await refreshLocationContext();
+    setHudMessage(`Live session started for ${state.selected.location_key}.`);
+  }
+
+  async function stopLiveSession() {
+    if (!state.selected || !state.feature.live) return;
+    await json('/gfs/api/live/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Live session stopped.');
+  }
+
+  function setFreshness(nowTs) {
+    const stale = Date.now() - nowTs > 18000;
+    setStatus(stale ? 'Feed stale' : 'Feed fresh', stale);
+  }
+
+  function connectLiveUpdates() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(`${proto}${location.host}/gfs/ws/updates`);
+    ws.onopen = () => {
+      state.wsConnected = true;
+      setStatus('Feed connected');
+    };
+    ws.onmessage = (ev) => {
+      state.lastUpdateAt = Date.now();
+      const txt = String(ev.data || '').slice(0, 2800);
+      setFreshness(state.lastUpdateAt);
+      healthEl.textContent = txt;
+      if (state.feature.clouds) {
+        loadClouds().catch((e) => setStatus(e.message, true));
+      }
+    };
+    ws.onerror = () => {
+      setStatus('Feed error', true);
+    };
+    ws.onclose = () => {
+      state.wsConnected = false;
+      setStatus('Reconnecting feed...', true);
+      setTimeout(connectLiveUpdates, 1800);
+    };
+  }
+
+  async function loadMapsScript() {
+    if (state.mapsScriptLoading) return state.mapsScriptLoading;
+
+    state.mapsScriptLoading = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-gmaps3d="1"]');
+      if (existing) {
+        if (window.google && window.google.maps) {
+          resolve();
+          return;
+        }
+        existing.addEventListener('load', resolve, { once: true });
+        existing.addEventListener('error', reject, { once: true });
+        return;
+      }
+
+      const s = document.createElement('script');
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.mapsApiKey)}&v=beta&libraries=maps3d`;
+      s.async = true;
+      s.defer = true;
+      s.dataset.gmaps3d = '1';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+
+    return state.mapsScriptLoading;
+  }
+
+  function showGlobeFallback(show) {
+    globeFallback.classList.toggle('show', !!show);
+  }
+
+  function applyGlobeAttributes() {
+    globeEl.setAttribute('mode', 'hybrid');
+    globeEl.setAttribute('center', '34.2000,-120.0000,120');
+    globeEl.setAttribute('range', '1800000');
+    globeEl.setAttribute('tilt', '42');
+    globeEl.setAttribute('heading', '7.5');
+    globeEl.setAttribute('default-ui-disabled', '');
+  }
+
+  async function loadGoogleMapScript() {
+    if (!state.mapsApiKey) {
+      mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
+      showGlobeFallback(true);
+      setStatus('Google Maps key missing — list + HUD remain active', true);
+      return;
+    }
+
+    try {
+      await loadMapsScript();
+
+      if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
+        throw new Error('Maps JS API did not initialize');
+      }
+
+      await ensureMapLibrary();
+      await customElements.whenDefined('gmp-map-3d');
+
+      globeEl = document.getElementById('globe');
+      applyGlobeAttributes();
+
+      state.mapReady = true;
+      showGlobeFallback(false);
+      mapsKeyState.textContent = 'Maps key status: configured';
+      setStatus('Photorealistic globe connected');
+      await renderMapMarkers();
+      await loadClouds(true);
+    } catch (err) {
+      console.error('[gfs] unable to load Google 3D globe', err);
+      state.mapReady = false;
+      showGlobeFallback(true);
+      setStatus('Unable to load Maps API script', true);
+    }
+  }
+
+  async function loadRuntimeConfig() {
+    const cfg = await json('/gfs/api/config');
+    state.mapsApiKey = (cfg.google_maps_api_key || '').trim();
+
+    if (cfg.maps3d_available) {
+      mapsKeyState.textContent = 'Maps key status: configured';
+    } else {
+      mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
+      showGlobeFallback(true);
+      setStatus('Maps3D unavailable until GOOGLE_MAPS_API_KEY is configured', true);
+    }
+  }
+
+  document.getElementById('loadGlobeBtn').addEventListener('click', () => {
+    loadGoogleMapScript().catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('refreshFishBtn').addEventListener('click', () => {
+    loadFish().catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('refreshHealthBtn').addEventListener('click', () => {
+    loadHealth().catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('refreshCloudBtn').addEventListener('click', () => {
+    loadClouds(true).catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('saveReportBtn').addEventListener('click', () => {
+    saveReport().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('refreshContextBtn').addEventListener('click', () => {
+    refreshLocationContext().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('uploadBtn').addEventListener('click', () => {
+    uploadVideo().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('connectLiveBtn').addEventListener('click', () => {
+    updateLiveUrl().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('startLiveBtn').addEventListener('click', () => {
+    startLiveSession().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('stopLiveBtn').addEventListener('click', () => {
+    stopLiveSession().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('closeHud').addEventListener('click', () => {
+    hud.classList.remove('show');
+    stopHudPolling();
+  });
+
+  loadHealth().catch((e) => setStatus(e.message, true));
+  loadFish().catch((e) => setStatus(e.message, true));
+  loadClouds().catch((e) => setStatus(e.message, true));
+  loadRuntimeConfig()
+    .then(() => loadGoogleMapScript())
+    .catch((e) => setStatus(e.message, true));
+  setInterval(() => {
+    if (state.feature.clouds && state.mapReady && state.cloudTiles.length) {
+      renderCloudLayers().catch(() => {});
+    }
+  }, 12000);
+
+  connectLiveUpdates();
+})();
+</script>
+</body>
+</html>
