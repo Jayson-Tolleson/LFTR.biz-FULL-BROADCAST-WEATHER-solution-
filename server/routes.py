@@ -155,14 +155,48 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
                 return float(request.args.get(name, default))
             except Exception:
                 return default
+
+        def _qi(name: str, default: int = 0) -> int:
+            try:
+                return int(request.args.get(name, default))
+            except Exception:
+                return default
+
+        def _compact_tile(tile: dict) -> dict:
+            out = dict(tile)
+            out.pop("subcells", None)
+            bands = out.get("bands") if isinstance(out.get("bands"), dict) else {}
+            compact_bands = {}
+            for band_name in ("low", "mid", "high"):
+                band = bands.get(band_name) if isinstance(bands.get(band_name), dict) else {}
+                compact_bands[band_name] = {
+                    "density": band.get("density"),
+                    "coverage": band.get("coverage"),
+                    "base_altitude_m": band.get("base_altitude_m"),
+                    "top_altitude_m": band.get("top_altitude_m"),
+                    "thickness_m": band.get("thickness_m"),
+                    "lateral_scale_km": band.get("lateral_scale_km"),
+                    "wind": band.get("wind") or {"u": 0, "v": 0},
+                }
+            out["bands"] = compact_bands
+            return out
+
         bbox = {
             "west": _q("west", -180.0),
             "south": _q("south", -80.0),
             "east": _q("east", 180.0),
             "north": _q("north", 80.0),
         }
+        limit = max(0, _qi("limit", 0))
+        compact = (request.args.get("compact", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
+
         payload = gfs.cloud_tiles_payload(bbox)
         items = payload.get("items") or []
+        if limit > 0 and isinstance(items, list):
+            items = sorted(items, key=lambda t: float((t or {}).get("importance", 0.0)), reverse=True)[:limit]
+        if compact and isinstance(items, list):
+            items = [_compact_tile(t) for t in items]
+        payload["items"] = items
         regime_counts = {}
         convective_tile_count = 0
         deck_tile_count = 0

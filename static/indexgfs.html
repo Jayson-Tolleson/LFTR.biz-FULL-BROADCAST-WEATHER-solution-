@@ -1287,7 +1287,6 @@
     } else {
       state.cloudPolygons.push(poly);
     }
-    globeEl.append(poly);
     return poly;
   }
 
@@ -1490,9 +1489,13 @@
       await renderWeatherLayers();
       return;
     }
-    const payload = await json('/gfs/api/cloud_tiles');
+    const lod = cloudLodProfile();
+    const started = performance.now();
+    const payload = await json(`/gfs/api/cloud_tiles?limit=${encodeURIComponent(lod.tileLimit)}&compact=1`);
     state.cloudTiles = payload.items || [];
     state.cloudFetchedAt = Date.now();
+    const fetchMs = Math.round(performance.now() - started);
+    setStatus(`Cloud feed ${state.cloudTiles.length} tiles • ${fetchMs}ms`);
     await renderWeatherLayers();
   }
 
@@ -1994,6 +1997,26 @@
     globeEl.setAttribute('default-ui-hidden', '');
   }
 
+
+  async function waitForGlobeSteadyState(timeoutMs = 4000) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (reason) => {
+        if (done) return;
+        done = true;
+        clearTimeout(tid);
+        globeEl.removeEventListener('gmp-steadystate', onSteady);
+        resolve(reason);
+      };
+      const onSteady = (ev) => {
+        if (ev?.isSteady === false) return;
+        finish('steady');
+      };
+      const tid = setTimeout(() => finish('timeout'), timeoutMs);
+      globeEl.addEventListener('gmp-steadystate', onSteady);
+    });
+  }
+
   async function loadGoogleMapScript() {
     if (!state.mapsApiKey) {
       showGlobeFallback(true);
@@ -2013,9 +2036,11 @@
       globeEl = document.getElementById('globe');
       applyGlobeAttributes();
 
-      state.mapReady = true;
       showGlobeFallback(false);
       setStatus('Photorealistic globe connected');
+      const readyReason = await waitForGlobeSteadyState(4200);
+      console.info('[gfs] globe steady state', readyReason);
+      state.mapReady = true;
       try { await renderMapMarkers(); } catch (err) { console.error('[gfs] renderMapMarkers failed', err); }
       try { await loadClouds(true); } catch (err) { console.error('[gfs] weather bootstrap failed', err); }
     } catch (err) {
