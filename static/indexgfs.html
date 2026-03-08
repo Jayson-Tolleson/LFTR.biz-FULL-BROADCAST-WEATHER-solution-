@@ -830,11 +830,18 @@
     };
   }
 
+  function colorWithAlpha(rgb, alpha) {
+    const m = String(rgb || '').match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+    if (!m) return rgb;
+    const a = Math.max(0.04, Math.min(1, Number(alpha) || 1));
+    return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${a})`;
+  }
+
   function buildCloudPartMarker(part) {
     const pin = createStyledPin(state.markerLib, {
-      scale: Math.max(0.2, part.scale * (0.78 + part.opacity * 0.34)),
-      background: part.color,
-      borderColor: 'rgba(235,245,255,0.68)',
+      scale: Math.max(0.2, part.scale),
+      background: colorWithAlpha(part.color, part.opacity),
+      borderColor: colorWithAlpha('rgb(235,245,255)', 0.24 + part.opacity * 0.66),
       glyphColor: '#ffffff',
     });
 
@@ -905,19 +912,28 @@
     const regime = item.regime;
     const parts = [];
     const subcells = item.subcells.length ? item.subcells : [{ id: 'sc-0', dx: 0, dy: 0, weight: 0.8, role: 'core' }];
+    const lateralScale = Math.max(42, Number(item.lateral_scale_km || 95));
+    const lateralDeg = Math.min(1.45, lateralScale / 260);
+    const softness = Math.max(0.2, Math.min(1, Number(item.fringe_softness || 0.6)));
+    const organization = Math.max(0.1, Math.min(1, Number(item.organization || 0.5)));
+    const windShear = Math.max(0, Math.min(1, Number(item.wind_shear || 0)));
+    const spreadMul = 0.35 + (1 - organization) * 0.9 + softness * 0.35;
+    const compactMul = 0.55 + organization * 0.75;
 
     subcells.forEach((sub, idx) => {
       const role = sub.role || (idx < 2 ? 'core' : 'fringe');
       const style = cloudRoleStyle(tile, band, role, item.density, sun);
-      const latOff = (Number(sub.dy) || 0) * 0.52 + seededRange(`${keyBase}:${idx}:lat`, -0.08, 0.08);
-      const lonOff = (Number(sub.dx) || 0) * 0.52 + seededRange(`${keyBase}:${idx}:lon`, -0.08, 0.08);
+      const baseLatSpread = (0.06 + lateralDeg * 0.12) * (role === 'core' || role === 'tower' ? compactMul : spreadMul);
+      const baseLonSpread = (0.07 + lateralDeg * 0.18 + windShear * 0.06) * (role === 'core' || role === 'tower' ? compactMul : spreadMul);
+      const latOff = (Number(sub.dy) || 0) * baseLatSpread + seededRange(`${keyBase}:${idx}:lat`, -baseLatSpread, baseLatSpread);
+      const lonOff = (Number(sub.dx) || 0) * baseLonSpread + seededRange(`${keyBase}:${idx}:lon`, -baseLonSpread, baseLonSpread);
       const pos = advectCloudPosition(item, latOff, lonOff);
       if (!pos) return;
 
       const lift = seededRange(`${keyBase}:${idx}:alt`, 0.05, 0.92);
       const roleLift = role === 'deck' ? 0.18 : role === 'wispy' ? 0.76 : role === 'tower' ? 0.62 : 0.45;
       const altitude = item.base_altitude_m + item.thickness_m * Math.min(1.12, lift * 0.6 + roleLift);
-      const scaleBase = 0.48 + item.density * 0.9 + item.coverage * 0.2;
+      const scaleBase = 0.48 + item.density * 0.9 + item.coverage * 0.2 + lateralDeg * 0.18;
       parts.push({
         lat: pos.lat,
         lon: pos.lon,
@@ -950,9 +966,11 @@
       }
     } else if (regime === 'marine_stratocumulus' || regime === 'frontal_shield') {
       const extra = Math.max(2, lod.deckParts - 1);
+      const deckLat = regime === 'marine_stratocumulus' ? 0.2 + lateralDeg * 0.25 : 0.18 + lateralDeg * 0.2;
+      const deckLon = regime === 'marine_stratocumulus' ? 0.34 + lateralDeg * 0.42 : 0.28 + lateralDeg * 0.48;
       for (let i = 0; i < extra; i += 1) {
         const style = cloudRoleStyle(tile, band, 'deck', item.density, sun);
-        const pos = advectCloudPosition(item, seededRange(`${keyBase}:deck:${i}:lat`, -0.16, 0.16), seededRange(`${keyBase}:deck:${i}:lon`, -0.24, 0.24));
+        const pos = advectCloudPosition(item, seededRange(`${keyBase}:deck:${i}:lat`, -deckLat, deckLat), seededRange(`${keyBase}:deck:${i}:lon`, -deckLon, deckLon));
         if (!pos) continue;
         parts.push({
           lat: pos.lat,
@@ -966,9 +984,11 @@
         });
       }
     } else if (regime === 'cirrus_sheet') {
+      const smearLat = 0.22 + lateralDeg * 0.22 + windShear * 0.16;
+      const smearLon = 0.3 + lateralDeg * 0.34 + windShear * 0.28;
       for (let i = 0; i < Math.max(2, lod.anvilParts - 1); i += 1) {
         const style = cloudRoleStyle(tile, band, 'wispy', item.density, sun);
-        const pos = advectCloudPosition(item, seededRange(`${keyBase}:wispy:${i}:lat`, -0.22, 0.22), seededRange(`${keyBase}:wispy:${i}:lon`, -0.3, 0.3));
+        const pos = advectCloudPosition(item, seededRange(`${keyBase}:wispy:${i}:lat`, -smearLat, smearLat), seededRange(`${keyBase}:wispy:${i}:lon`, -smearLon, smearLon));
         if (!pos) continue;
         parts.push({
           lat: pos.lat,
@@ -1029,15 +1049,23 @@
     let rainCount = 0;
     for (const tile of stormTiles) {
       const precip = Number(tile.precipitation_factor || tile.precip || 0);
-      const topAlt = Math.max(Number(tile.altitude_high || 8500), Number(tile.altitude_mid || 4500));
+      const bandHighTop = Number(tile.bands?.high?.top_altitude_m ?? NaN);
+      const bandMidTop = Number(tile.bands?.mid?.top_altitude_m ?? NaN);
+      const topAlt = Math.max(
+        Number.isFinite(bandHighTop) ? bandHighTop : 0,
+        Number.isFinite(bandMidTop) ? bandMidTop : 0,
+        Number(tile.altitude_high || 8500),
+        Number(tile.altitude_mid || 4500),
+      );
       const baseLat = Number(tile.bounds?.lat_center || 0);
       const baseLon = Number(tile.bounds?.lon_center || 0);
       if (!Number.isFinite(baseLat) || !Number.isFinite(baseLon)) continue;
 
       const columns = Math.max(1, Math.min(8, Math.round(1 + precip * 7)));
       for (let c = 0; c < columns; c += 1) {
-        const colLat = baseLat + (Math.random() - 0.5) * 0.18;
-        const colLon = baseLon + (Math.random() - 0.5) * 0.18;
+        const key = `${tile.tile_id || 'tile'}:rain:${c}:${tile.seed || 0}`;
+        const colLat = baseLat + seededRange(`${key}:lat`, -0.18, 0.18);
+        const colLon = baseLon + seededRange(`${key}:lon`, -0.18, 0.18);
         const particles = Math.max(4, Math.min(14, Math.round(5 + precip * 10)));
 
         for (let p = 0; p < particles; p += 1) {
