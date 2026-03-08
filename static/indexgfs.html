@@ -450,23 +450,24 @@
 
     .fish-marker {
       position: relative;
-      width: 30px;
-      height: 30px;
+      width: 34px;
+      height: 34px;
       display: block;
       pointer-events: auto;
       transform: translateZ(0);
     }
 
-    .fish-marker::before,
-    .fish-marker::after {
-      content: '';
+    .fish-marker-halo,
+    .fish-marker-pulse,
+    .fish-marker-core {
       position: absolute;
       inset: 0;
       border-radius: 999px;
+      pointer-events: none;
     }
 
-    .fish-marker::before {
-      background: radial-gradient(circle at 35% 32%, #d9ffe7 0%, #7dff9f 18%, #1fe45c 46%, #0d8f35 74%, rgba(5, 38, 16, 0.98) 100%);
+    .fish-marker-core {
+      background: radial-gradient(circle at 35% 32%, #ddffe9 0%, #8bffaf 18%, #27ea63 44%, #0c8a33 74%, rgba(4, 38, 16, 0.98) 100%);
       box-shadow:
         0 0 0 1px rgba(220, 252, 231, 0.92),
         0 0 14px rgba(34, 255, 102, 0.95),
@@ -474,27 +475,24 @@
         0 0 42px rgba(16, 185, 129, 0.42),
         inset 0 -3px 7px rgba(2, 20, 8, 0.72),
         inset 0 3px 8px rgba(255, 255, 255, 0.34);
-      animation: fishSpherePulse 1.9s ease-in-out infinite;
+      animation: fishSpherePulse 2s ease-in-out infinite;
     }
 
-    .fish-marker::after {
-      inset: -8px;
+    .fish-marker-halo {
+      inset: -7px;
       border: 1px solid rgba(74, 222, 128, 0.42);
-      box-shadow: 0 0 16px rgba(74, 222, 128, 0.32);
-      animation: fishSphereRing 2.4s ease-out infinite;
+      box-shadow: 0 0 18px rgba(74, 222, 128, 0.3);
+      opacity: .9;
     }
 
-    .fish-marker .fish-core {
-      position: absolute;
-      inset: 7px;
-      border-radius: 999px;
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.98) 0%, rgba(220,252,231,0.82) 18%, rgba(134,239,172,0.28) 55%, rgba(134,239,172,0) 100%);
-      mix-blend-mode: screen;
-      opacity: .96;
-      pointer-events: none;
+    .fish-marker-pulse {
+      inset: -8px;
+      border: 1px solid rgba(110, 255, 170, 0.35);
+      animation: fishSphereRing 2.5s ease-out infinite;
+      opacity: .75;
     }
 
-    .fish-marker .fish-label {
+    .fish-marker-label {
       position: absolute;
       left: 50%;
       top: calc(100% + 8px);
@@ -514,7 +512,9 @@
       transition: opacity .18s ease;
     }
 
-    .fish-marker.high::before {
+    .fish-marker.medium .fish-marker-core { transform: scale(1.06); }
+    .fish-marker.high .fish-marker-core {
+      transform: scale(1.12);
       box-shadow:
         0 0 0 1px rgba(220, 252, 231, 0.95),
         0 0 18px rgba(74, 222, 128, 1),
@@ -524,16 +524,25 @@
         inset 0 4px 9px rgba(255, 255, 255, 0.38);
     }
 
-    .fish-marker.medium { transform: scale(1.06); }
-    .fish-marker.high { transform: scale(1.16); }
-    .fish-marker.hover .fish-label,
-    .fish-marker:hover .fish-label,
-    .fish-marker.active .fish-label { opacity: 1; }
-    .fish-marker.hover::after,
-    .fish-marker.active::after,
-    .fish-marker:hover::after {
-      border-color: rgba(187, 247, 208, 0.7);
-      box-shadow: 0 0 24px rgba(74, 222, 128, 0.55);
+    .fish-marker.hover .fish-marker-label,
+    .fish-marker:hover .fish-marker-label,
+    .fish-marker.active .fish-marker-label { opacity: 1; }
+
+    .fish-marker.hover .fish-marker-halo,
+    .fish-marker.active .fish-marker-halo,
+    .fish-marker:hover .fish-marker-halo {
+      border-color: rgba(187, 247, 208, 0.75);
+      box-shadow: 0 0 26px rgba(74, 222, 128, 0.58);
+    }
+
+    .fish-marker.active .fish-marker-core {
+      filter: saturate(1.2) brightness(1.08);
+      transform: scale(1.16);
+    }
+
+    .fish-marker.active .fish-marker-pulse {
+      opacity: 1;
+      animation-duration: 1.8s;
     }
 
     @keyframes fishSpherePulse {
@@ -545,6 +554,33 @@
       0% { transform: scale(.72); opacity: .82; }
       70% { transform: scale(1.34); opacity: .14; }
       100% { transform: scale(1.42); opacity: 0; }
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+
+    .meta-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 8px;
+      align-items: start;
+      font-size: 12px;
+    }
+
+    .meta-k {
+      color: rgba(191, 219, 254, .72);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-size: 10px;
+    }
+
+    .meta-v {
+      color: #e2e8f0;
+      word-break: break-word;
+      white-space: pre-wrap;
     }
 
     @media (max-width: 980px) {
@@ -673,6 +709,11 @@
     </div>
 
     <div class="hud-section">
+      <div class="hud-section-title">Location Metadata</div>
+      <div class="meta-grid" id="fishMeta"></div>
+    </div>
+
+    <div class="hud-section">
       <div class="hud-section-title">Intel</div>
       <div class="context mono" id="intel"></div>
       <div class="videos" id="videoList"></div>
@@ -699,6 +740,7 @@
   const liveBadge = document.getElementById('liveBadge');
   const mediaPlayerPane = document.getElementById('mediaPlayerPane');
   const pinHudBtn = document.getElementById('pinHudBtn');
+  const fishMeta = document.getElementById('fishMeta');
 
   const mapsKeyState = document.getElementById('mapsKeyState');
 
@@ -974,42 +1016,38 @@
     return source.length > 18 ? `${source.slice(0, 18)}…` : source;
   }
 
-  function buildFishSphere(lib, p) {
-    const intensity = markerIntensityClass(p);
-    const pin = new lib.PinElement({
-      glyph: intensity === 'high' ? '●' : intensity === 'medium' ? '•' : '',
-      scale: intensity === 'high' ? 1.34 : intensity === 'medium' ? 1.22 : 1.12,
-      background: intensity === 'high' ? '#22ff66' : intensity === 'medium' ? '#22dd55' : '#16a34a',
-      borderColor: '#bbffcf',
-      glyphColor: '#ecfff1',
-    });
+  function buildFishSphereTemplate(point, markerState) {
+    const intensity = markerIntensityClass(point);
+    const isActive = !!(markerState && markerState.active);
+    const isHover = !!(markerState && markerState.hover);
+    const template = document.createElement('template');
+    template.innerHTML = `
+      <div class="fish-marker ${intensity} ${isActive ? 'active' : ''} ${isHover ? 'hover' : ''}" data-location-key="${point.location_key}">
+        <div class="fish-marker-halo"></div>
+        <div class="fish-marker-pulse"></div>
+        <div class="fish-marker-core"></div>
+        <div class="fish-marker-label">${markerLabelText(point)}</div>
+      </div>
+    `.trim();
+    return template;
+  }
 
-    pin.dataset.intensity = intensity;
-    pin.dataset.label = markerLabelText(p);
-    pin.title = markerLabelText(p);
-    pin.style.opacity = '1';
-    pin.style.filter = intensity === 'high'
-      ? 'drop-shadow(0 0 8px rgba(34,255,102,1)) drop-shadow(0 0 18px rgba(34,255,102,.8)) drop-shadow(0 0 34px rgba(34,255,102,.55))'
-      : intensity === 'medium'
-        ? 'drop-shadow(0 0 7px rgba(34,221,85,.95)) drop-shadow(0 0 16px rgba(34,221,85,.65))'
-        : 'drop-shadow(0 0 6px rgba(34,197,94,.85)) drop-shadow(0 0 12px rgba(34,197,94,.45))';
-    pin.style.transition = 'filter .14s ease, transform .14s ease, opacity .14s ease';
-    return pin;
+  function refreshMarkerTemplate(markerState) {
+    if (!markerState || !markerState.marker || !markerState.point) return;
+    const nextTemplate = buildFishSphereTemplate(markerState.point, markerState);
+    markerState.marker.replaceChildren(nextTemplate);
+  }
+
+  function setMarkerVisualHover(markerState, hover) {
+    if (!markerState) return;
+    markerState.hover = !!hover;
+    refreshMarkerTemplate(markerState);
   }
 
   function setMarkerVisualActive(markerState, active) {
-    if (!markerState || !markerState.el) return;
-    const pin = markerState.el;
-    const intensity = pin.dataset.intensity || 'low';
-    pin.style.transform = active ? 'scale(1.08)' : 'scale(1)';
-    pin.style.opacity = active ? '1' : '0.98';
-    pin.style.filter = active
-      ? 'drop-shadow(0 0 10px rgba(34,255,102,1)) drop-shadow(0 0 22px rgba(34,255,102,.92)) drop-shadow(0 0 42px rgba(34,255,102,.7))'
-      : intensity === 'high'
-        ? 'drop-shadow(0 0 8px rgba(34,255,102,1)) drop-shadow(0 0 18px rgba(34,255,102,.8)) drop-shadow(0 0 34px rgba(34,255,102,.55))'
-        : intensity === 'medium'
-          ? 'drop-shadow(0 0 7px rgba(34,221,85,.95)) drop-shadow(0 0 16px rgba(34,221,85,.65))'
-          : 'drop-shadow(0 0 6px rgba(34,197,94,.85)) drop-shadow(0 0 12px rgba(34,197,94,.45))';
+    if (!markerState) return;
+    markerState.active = !!active;
+    refreshMarkerTemplate(markerState);
   }
 
   function scheduleHudHide() {
@@ -1034,8 +1072,10 @@
       state.hoverTarget = null;
       setHudLocked(false);
       setActiveMarkerByKey(null);
+      renderFishMetadata(null);
     } else if (!state.hudLocked) {
       setActiveMarkerByKey(null);
+      renderFishMetadata(null);
     }
   }
 
@@ -1050,7 +1090,7 @@
     if (!state.mapReady || !state.feature.markers) return;
 
     const lib = await ensureMapLibrary();
-    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) {
+    if (!lib || !lib.Marker3DInteractiveElement) {
       setStatus('maps3d marker library unavailable', true);
       return;
     }
@@ -1065,14 +1105,12 @@
         title: p.name || p.location_key || 'Fish marker',
       });
 
-      const sphere = buildFishSphere(lib, p);
-      marker.append(sphere);
-
-      const markerState = { marker, el: sphere, point: p };
+      const markerState = { marker, point: p, active: false, hover: false };
+      marker.append(buildFishSphereTemplate(p, markerState));
       state.markerStates.set(p.location_key, markerState);
 
       const hoverOpen = () => {
-        sphere.classList.add('hover');
+        setMarkerVisualHover(markerState, true);
         setActiveMarkerByKey(p.location_key);
         openHud(p, false).catch((e) => setHudMessage(e.message));
       };
@@ -1082,7 +1120,7 @@
       };
       const hoverLeave = () => {
         if (!state.hudLocked) {
-          sphere.classList.remove('hover');
+          setMarkerVisualHover(markerState, false);
           setActiveMarkerByKey(state.selected && state.selected.location_key);
           scheduleHudHide();
         }
@@ -1096,13 +1134,6 @@
       marker.addEventListener('mouseleave', hoverLeave);
       marker.addEventListener('mouseout', hoverLeave);
       marker.addEventListener('pointerleave', hoverLeave);
-
-      sphere.addEventListener('mouseenter', hoverOpen);
-      sphere.addEventListener('mouseleave', hoverLeave);
-      sphere.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        lockedOpen();
-      });
 
       globeEl.append(marker);
       state.mapMarkers.push(marker);
@@ -1197,10 +1228,53 @@
     ].join('\n');
   }
 
+  function metaValue(point, key, fallback = 'n/a') {
+    const val = point && point[key];
+    if (val === null || val === undefined || String(val).trim() === '') return fallback;
+    return String(val);
+  }
+
+  function renderFishMetadata(point) {
+    if (!fishMeta) return;
+    if (!point) {
+      fishMeta.innerHTML = '<div class="meta-row"><div class="meta-k">status</div><div class="meta-v">No fish marker selected.</div></div>';
+      return;
+    }
+
+    const rows = [];
+    rows.push(['name', metaValue(point, 'name')]);
+    rows.push(['location_key', metaValue(point, 'location_key')]);
+    rows.push(['latitude', metaValue(point, 'lat')]);
+    rows.push(['longitude', metaValue(point, 'lon')]);
+    rows.push(['bait_intensity', metaValue(point && point.bait, 'intensity')]);
+    rows.push(['confidence', metaValue(point && point.bait, 'confidence')]);
+
+    const commonFields = ['species', 'type', 'source', 'timestamp', 'zone', 'area', 'description', 'intent', 'notes'];
+    commonFields.forEach((k) => {
+      const fromTop = point && point[k];
+      const fromMeta = point && point.meta && point.meta[k];
+      const value = fromTop ?? fromMeta;
+      if (value !== undefined && value !== null && String(value).trim() !== '') rows.push([k, String(value)]);
+    });
+
+    if (point && point.meta && typeof point.meta === 'object') {
+      Object.entries(point.meta).forEach(([k, v]) => {
+        if (v === null || v === undefined || String(v).trim() === '') return;
+        if (rows.some(([rk]) => rk === k)) return;
+        rows.push([k, String(v)]);
+      });
+    }
+
+    fishMeta.innerHTML = rows
+      .map(([k, v]) => `<div class="meta-row"><div class="meta-k">${k}</div><div class="meta-v">${v}</div></div>`)
+      .join('');
+  }
+
   async function refreshLocationContext() {
     if (!state.selected) return;
     const payload = await json(`/gfs/api/location_media?location_key=${encodeURIComponent(state.selected.location_key)}`);
     reportText.value = payload.report_text || '';
+    renderFishMetadata(state.selected);
     renderVideos(payload.uploads || []);
     renderIntel(payload);
     const live = payload.live || { active: false, stream_url: '' };
