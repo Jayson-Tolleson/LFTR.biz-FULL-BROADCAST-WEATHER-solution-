@@ -448,112 +448,59 @@
     .tiny { font-size: 12px; }
 
 
-    .fish-marker {
-      position: relative;
-      width: 34px;
-      height: 34px;
-      display: block;
+    .fish-marker-svg {
+      overflow: visible;
       pointer-events: auto;
-      transform: translateZ(0);
+      filter: drop-shadow(0 0 8px rgba(34, 255, 102, 0.45));
+      transition: transform .14s ease, filter .14s ease, opacity .14s ease;
+      transform-origin: center;
     }
 
-    .fish-marker-halo,
-    .fish-marker-pulse,
-    .fish-marker-core {
-      position: absolute;
-      inset: 0;
-      border-radius: 999px;
-      pointer-events: none;
+    .fish-marker-svg .fish-halo {
+      opacity: .24;
+      animation: fishHaloPulse 2.4s ease-in-out infinite;
     }
 
-    .fish-marker-core {
-      background: radial-gradient(circle at 35% 32%, #ddffe9 0%, #8bffaf 18%, #27ea63 44%, #0c8a33 74%, rgba(4, 38, 16, 0.98) 100%);
-      box-shadow:
-        0 0 0 1px rgba(220, 252, 231, 0.92),
-        0 0 14px rgba(34, 255, 102, 0.95),
-        0 0 28px rgba(34, 255, 102, 0.72),
-        0 0 42px rgba(16, 185, 129, 0.42),
-        inset 0 -3px 7px rgba(2, 20, 8, 0.72),
-        inset 0 3px 8px rgba(255, 255, 255, 0.34);
-      animation: fishSpherePulse 2s ease-in-out infinite;
+    .fish-marker-svg .fish-core {
+      animation: fishCorePulse 2s ease-in-out infinite;
     }
 
-    .fish-marker-halo {
-      inset: -7px;
-      border: 1px solid rgba(74, 222, 128, 0.42);
-      box-shadow: 0 0 18px rgba(74, 222, 128, 0.3);
-      opacity: .9;
+    .fish-marker-svg .fish-ring {
+      opacity: .58;
+      animation: fishSphereRing 2.6s ease-out infinite;
     }
 
-    .fish-marker-pulse {
-      inset: -8px;
-      border: 1px solid rgba(110, 255, 170, 0.35);
-      animation: fishSphereRing 2.5s ease-out infinite;
-      opacity: .75;
+    .fish-marker-svg.medium .fish-core { transform: scale(1.06); }
+    .fish-marker-svg.high .fish-core { transform: scale(1.12); }
+
+    .fish-marker-svg.hover,
+    .fish-marker-svg.active {
+      filter: drop-shadow(0 0 10px rgba(34,255,102,0.9)) drop-shadow(0 0 20px rgba(34,255,102,0.55));
     }
 
-    .fish-marker-label {
-      position: absolute;
-      left: 50%;
-      top: calc(100% + 8px);
-      transform: translateX(-50%);
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: rgba(2, 6, 23, 0.72);
-      border: 1px solid rgba(134, 239, 172, 0.22);
-      color: #dcfce7;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .04em;
-      white-space: nowrap;
-      box-shadow: 0 8px 18px rgba(2, 6, 23, .35);
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity .18s ease;
+    .fish-marker-svg.active {
+      transform: scale(1.1);
     }
 
-    .fish-marker.medium .fish-marker-core { transform: scale(1.06); }
-    .fish-marker.high .fish-marker-core {
-      transform: scale(1.12);
-      box-shadow:
-        0 0 0 1px rgba(220, 252, 231, 0.95),
-        0 0 18px rgba(74, 222, 128, 1),
-        0 0 38px rgba(34, 255, 102, 0.88),
-        0 0 58px rgba(16, 185, 129, 0.56),
-        inset 0 -4px 8px rgba(2, 20, 8, 0.8),
-        inset 0 4px 9px rgba(255, 255, 255, 0.38);
-    }
-
-    .fish-marker.hover .fish-marker-label,
-    .fish-marker:hover .fish-marker-label,
-    .fish-marker.active .fish-marker-label { opacity: 1; }
-
-    .fish-marker.hover .fish-marker-halo,
-    .fish-marker.active .fish-marker-halo,
-    .fish-marker:hover .fish-marker-halo {
-      border-color: rgba(187, 247, 208, 0.75);
-      box-shadow: 0 0 26px rgba(74, 222, 128, 0.58);
-    }
-
-    .fish-marker.active .fish-marker-core {
-      filter: saturate(1.2) brightness(1.08);
-      transform: scale(1.16);
-    }
-
-    .fish-marker.active .fish-marker-pulse {
-      opacity: 1;
+    .fish-marker-svg.active .fish-ring {
       animation-duration: 1.8s;
+      opacity: .85;
     }
 
-    @keyframes fishSpherePulse {
-      0%, 100% { transform: scale(1); filter: saturate(1); }
-      50% { transform: scale(1.08); filter: saturate(1.18); }
+    @keyframes fishCorePulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+
+    @keyframes fishHaloPulse {
+      0%, 100% { opacity: .2; }
+      50% { opacity: .42; }
     }
 
     @keyframes fishSphereRing {
-      0% { transform: scale(.72); opacity: .82; }
-      70% { transform: scale(1.34); opacity: .14; }
-      100% { transform: scale(1.42); opacity: 0; }
+      0% { transform: scale(.78); opacity: .76; }
+      70% { transform: scale(1.28); opacity: .14; }
+      100% { transform: scale(1.36); opacity: 0; }
     }
 
     .meta-grid {
@@ -1016,26 +963,116 @@
     return source.length > 18 ? `${source.slice(0, 18)}…` : source;
   }
 
-  function buildFishSphereTemplate(point, markerState) {
+  function buildFishSphereSvg(point, markerState) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
     const intensity = markerIntensityClass(point);
     const isActive = !!(markerState && markerState.active);
     const isHover = !!(markerState && markerState.hover);
-    const template = document.createElement('template');
-    template.innerHTML = `
-      <div class="fish-marker ${intensity} ${isActive ? 'active' : ''} ${isHover ? 'hover' : ''}" data-location-key="${point.location_key}">
-        <div class="fish-marker-halo"></div>
-        <div class="fish-marker-pulse"></div>
-        <div class="fish-marker-core"></div>
-        <div class="fish-marker-label">${markerLabelText(point)}</div>
-      </div>
-    `.trim();
-    return template;
+    const markerId = (point && (point.location_key || point.id || point.name || 'fish')).toString().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const gradId = `fishGrad_${markerId}`;
+    const glowId = `fishGlow_${markerId}`;
+
+    svg.setAttribute('viewBox', '0 0 64 64');
+    svg.setAttribute('width', '42');
+    svg.setAttribute('height', '42');
+    svg.setAttribute('class', `fish-marker-svg ${intensity} ${isActive ? 'active' : ''} ${isHover ? 'hover' : ''}`.trim());
+    svg.setAttribute('aria-label', markerLabelText(point));
+    svg.setAttribute('role', 'img');
+
+    const defs = document.createElementNS(ns, 'defs');
+
+    const grad = document.createElementNS(ns, 'radialGradient');
+    grad.setAttribute('id', gradId);
+    grad.setAttribute('cx', '35%');
+    grad.setAttribute('cy', '32%');
+    grad.setAttribute('r', '70%');
+
+    const stops = [
+      ['0%', '#d8ffe7'],
+      ['35%', '#64ff9a'],
+      ['72%', '#16dc5e'],
+      ['100%', '#0a7a34'],
+    ];
+    stops.forEach(([offset, color]) => {
+      const st = document.createElementNS(ns, 'stop');
+      st.setAttribute('offset', offset);
+      st.setAttribute('stop-color', color);
+      grad.appendChild(st);
+    });
+
+    const filter = document.createElementNS(ns, 'filter');
+    filter.setAttribute('id', glowId);
+    filter.setAttribute('x', '-60%');
+    filter.setAttribute('y', '-60%');
+    filter.setAttribute('width', '220%');
+    filter.setAttribute('height', '220%');
+
+    const blur = document.createElementNS(ns, 'feGaussianBlur');
+    blur.setAttribute('stdDeviation', intensity === 'high' ? '3.7' : '3.2');
+    blur.setAttribute('result', 'blur');
+
+    const merge = document.createElementNS(ns, 'feMerge');
+    const n1 = document.createElementNS(ns, 'feMergeNode');
+    n1.setAttribute('in', 'blur');
+    const n2 = document.createElementNS(ns, 'feMergeNode');
+    n2.setAttribute('in', 'SourceGraphic');
+    merge.appendChild(n1);
+    merge.appendChild(n2);
+
+    filter.appendChild(blur);
+    filter.appendChild(merge);
+
+    defs.appendChild(grad);
+    defs.appendChild(filter);
+    svg.appendChild(defs);
+
+    const halo = document.createElementNS(ns, 'circle');
+    halo.setAttribute('class', 'fish-halo');
+    halo.setAttribute('cx', '32');
+    halo.setAttribute('cy', '32');
+    halo.setAttribute('r', intensity === 'high' ? '20' : '18.5');
+    halo.setAttribute('fill', '#3cff84');
+    halo.setAttribute('filter', `url(#${glowId})`);
+
+    const ring = document.createElementNS(ns, 'circle');
+    ring.setAttribute('class', 'fish-ring');
+    ring.setAttribute('cx', '32');
+    ring.setAttribute('cy', '32');
+    ring.setAttribute('r', '22');
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke', 'rgba(140,255,188,0.85)');
+    ring.setAttribute('stroke-width', '1.3');
+
+    const core = document.createElementNS(ns, 'circle');
+    core.setAttribute('class', 'fish-core');
+    core.setAttribute('cx', '32');
+    core.setAttribute('cy', '32');
+    core.setAttribute('r', intensity === 'high' ? '13' : '12');
+    core.setAttribute('fill', `url(#${gradId})`);
+    core.setAttribute('stroke', '#e8fff1');
+    core.setAttribute('stroke-width', '1.4');
+
+    const shine = document.createElementNS(ns, 'circle');
+    shine.setAttribute('cx', '27');
+    shine.setAttribute('cy', '27');
+    shine.setAttribute('r', '4');
+    shine.setAttribute('fill', '#ffffff');
+    shine.setAttribute('opacity', '0.34');
+
+    svg.appendChild(halo);
+    svg.appendChild(ring);
+    svg.appendChild(core);
+    svg.appendChild(shine);
+
+    return svg;
   }
 
   function refreshMarkerTemplate(markerState) {
     if (!markerState || !markerState.marker || !markerState.point) return;
-    const nextTemplate = buildFishSphereTemplate(markerState.point, markerState);
-    markerState.marker.replaceChildren(nextTemplate);
+    const nextSvg = buildFishSphereSvg(markerState.point, markerState);
+    markerState.marker.replaceChildren(nextSvg);
+    markerState.el = nextSvg;
   }
 
   function setMarkerVisualHover(markerState, hover) {
@@ -1106,7 +1143,7 @@
       });
 
       const markerState = { marker, point: p, active: false, hover: false };
-      marker.append(buildFishSphereTemplate(p, markerState));
+      marker.append(buildFishSphereSvg(p, markerState));
       state.markerStates.set(p.location_key, markerState);
 
       const hoverOpen = () => {
