@@ -202,13 +202,11 @@
 </div>
 
 <template id="markerTemplate">
-  <marker-3d-interactive-element class="marker-host">
-    <div class="marker-content">
-      <div class="marker-name"></div>
-      <div class="marker-coord"></div>
-      <div class="marker-bait"></div>
-    </div>
-  </marker-3d-interactive-element>
+  <div class="marker-content">
+    <div class="marker-name"></div>
+    <div class="marker-coord"></div>
+    <div class="marker-bait"></div>
+  </div>
 </template>
 
 <div class="hud" id="hud">
@@ -245,7 +243,6 @@
 <script>
 (() => {
   const markerGrid = document.getElementById('markerGrid');
-  const markerTemplate = document.getElementById('markerTemplate');
   const healthEl = document.getElementById('health');
   const statusLine = document.getElementById('statusLine');
 
@@ -379,27 +376,29 @@
     if (!state.mapReady || !state.feature.markers) return;
 
     const lib = await ensureMapLibrary();
-    if (!lib || !lib.Marker3DInteractiveElement) return;
+    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) return;
 
     state.fish.forEach((p) => {
-      const markerNode = markerTemplate.content.firstElementChild.cloneNode(true);
-      const body = markerNode.querySelector('.marker-content');
-      markerNode.querySelector('.marker-name').textContent = p.name;
-      markerNode.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
-      markerNode.querySelector('.marker-bait').textContent = baitText(p);
-
       const marker = new lib.Marker3DInteractiveElement({
         position: { lat: p.lat, lng: p.lon, altitude: 10 },
       });
-      marker.append(markerNode);
+
+      const pin = new lib.PinElement({
+        glyph: '🐟',
+        background: '#0f172a',
+        borderColor: '#22d3ee',
+        glyphColor: '#e6f4ff',
+        scale: 1.1,
+      });
+
+      marker.append(pin);
       marker.addEventListener('gmp-click', () => openHud(p));
       marker.addEventListener('click', () => openHud(p));
       globeEl.append(marker);
       state.mapMarkers.push(marker);
-
-      body.addEventListener('click', () => openHud(p));
     });
   }
+
 
   function renderMarkerCards() {
     markerGrid.innerHTML = '';
