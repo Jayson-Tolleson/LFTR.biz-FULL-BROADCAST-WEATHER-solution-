@@ -150,6 +150,38 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     @app.get("/gfs/api/cloud_tiles")
     async def gfs_cloud_tiles():
         payload = gfs.cloud_tiles_payload()
+        items = payload.get("items") or []
+        regime_counts = {}
+        convective_tile_count = 0
+        deck_tile_count = 0
+        cirrus_tile_count = 0
+        for item in items:
+            regime = (item.get("regime") or "unknown").strip() or "unknown"
+            regime_counts[regime] = regime_counts.get(regime, 0) + 1
+            if regime == "deep_convection":
+                convective_tile_count += 1
+            if regime in {"marine_stratocumulus", "frontal_shield"}:
+                deck_tile_count += 1
+            if regime == "cirrus_sheet":
+                cirrus_tile_count += 1
+
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            summary.update(
+                {
+                    "regime_counts": regime_counts,
+                    "convective_tile_count": convective_tile_count,
+                    "deck_tile_count": deck_tile_count,
+                    "cirrus_tile_count": cirrus_tile_count,
+                }
+            )
+        else:
+            payload["summary"] = {
+                "regime_counts": regime_counts,
+                "convective_tile_count": convective_tile_count,
+                "deck_tile_count": deck_tile_count,
+                "cirrus_tile_count": cirrus_tile_count,
+            }
         return jsonify(payload)
 
     @app.get("/gfs/api/location_media")
