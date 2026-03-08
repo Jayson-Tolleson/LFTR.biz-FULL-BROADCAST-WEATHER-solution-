@@ -8,22 +8,35 @@
     :root {
       --bg: #050b18;
       --glass: rgba(8, 20, 41, 0.66);
+      --glass-strong: rgba(6, 13, 29, 0.88);
       --line: rgba(56, 189, 248, 0.38);
       --txt: #e6f4ff;
+      --muted: rgba(230, 244, 255, 0.72);
       --cyan: #22d3ee;
       --indigo: #818cf8;
       --pink: #f472b6;
       --lime: #84cc16;
       --amber: #f59e0b;
       --red: #f43f5e;
+      --teal: #14b8a6;
     }
+
     * { box-sizing: border-box; }
-    body {
+
+    html, body {
       margin: 0;
+      height: 100%;
       color: var(--txt);
       font-family: Inter, Segoe UI, Arial, sans-serif;
-      background: radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
+      background:
+        radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
+      overflow: hidden;
     }
+
+    body {
+      min-height: 100vh;
+    }
+
     .layout {
       height: 100vh;
       display: grid;
@@ -31,28 +44,61 @@
       gap: 10px;
       padding: 10px;
     }
+
     .card {
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 14px;
       background: var(--glass);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      box-shadow: 0 0 24px rgba(34, 211, 238, .12);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow:
+        0 0 24px rgba(34, 211, 238, .12),
+        inset 0 0 0 1px rgba(255,255,255,.04);
     }
+
     .topbar {
       display: grid;
       grid-template-columns: 1.5fr 1fr;
       gap: 10px;
-      padding: 10px;
+      padding: 12px;
       align-items: center;
     }
-    .statusline { font-size: 12px; opacity: .9; display: flex; flex-wrap: wrap; gap: 8px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-    .features { display: flex; flex-wrap: wrap; gap: 8px; }
+    .title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+
+    .subline {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .statusline {
+      margin-top: 8px;
+      font-size: 12px;
+      opacity: .94;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
     .feature {
       border: 1px solid #334155;
-      background: rgba(15, 23, 42, 0.7);
+      background: rgba(15, 23, 42, 0.72);
       color: #dbeafe;
       border-radius: 999px;
       padding: 6px 10px;
@@ -60,23 +106,36 @@
       align-items: center;
       gap: 7px;
       cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
     }
+
+    .feature:hover {
+      transform: translateY(-1px);
+      border-color: rgba(148, 163, 184, .6);
+    }
+
     .light {
       width: 10px;
       height: 10px;
       border-radius: 999px;
       background: #334155;
+      flex: 0 0 10px;
     }
+
     .feature.on .light { animation: blink 1.15s linear infinite; }
     .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
     .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
     .feature[data-kind="jet"].on .light { background: var(--pink); box-shadow: 0 0 10px var(--pink); }
     .feature[data-kind="markers"].on .light { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
-    .feature[data-kind="bait"].on .light { background: #14b8a6; box-shadow: 0 0 10px #14b8a6; }
+    .feature[data-kind="bait"].on .light { background: var(--teal); box-shadow: 0 0 10px var(--teal); }
     .feature[data-kind="popups"].on .light { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
     .feature[data-kind="reports"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
     .feature[data-kind="live"].on .light { background: var(--red); box-shadow: 0 0 10px var(--red); }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.28} }
+
+    @keyframes blink {
+      0%,100% { opacity: 1; }
+      50% { opacity: .28; }
+    }
 
     .main {
       display: grid;
@@ -84,15 +143,50 @@
       gap: 10px;
       min-height: 0;
     }
-    .mapwrap { position: relative; overflow: hidden; }
+
+    .mapwrap {
+      position: relative;
+      overflow: hidden;
+      min-height: 460px;
+    }
+
     #globe {
       display: block;
       width: 100%;
       height: 100%;
       min-height: 460px;
-      border-radius: 12px;
-      background: radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
     }
+
+    .globe-fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      text-align: center;
+      padding: 20px;
+      color: #dbeafe;
+      background:
+        radial-gradient(circle at center, rgba(30, 64, 175, .28), rgba(15, 23, 42, .92));
+      border-radius: 14px;
+      z-index: 1;
+    }
+
+    .globe-fallback.show {
+      display: grid;
+    }
+
+    .globe-fallback .inner {
+      max-width: 560px;
+      border: 1px solid rgba(129, 140, 248, .38);
+      background: rgba(10, 14, 29, 0.78);
+      padding: 16px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+    }
+
     .overlay {
       position: absolute;
       left: 10px;
@@ -105,6 +199,7 @@
       max-width: min(560px, calc(100% - 20px));
       pointer-events: none;
       white-space: pre-wrap;
+      z-index: 2;
     }
 
     .side {
@@ -114,15 +209,30 @@
       gap: 10px;
       min-height: 0;
     }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
     input, textarea, button {
       background: #0b1220;
       color: #e8eefc;
       border: 1px solid #334161;
       border-radius: 8px;
-      padding: 7px;
+      padding: 8px;
+      font: inherit;
     }
-    button { cursor: pointer; }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: rgba(34, 211, 238, .55);
+    }
 
     .markers {
       min-height: 0;
@@ -130,7 +240,9 @@
       display: grid;
       grid-template-columns: 1fr;
       gap: 8px;
+      padding-right: 2px;
     }
+
     .marker-content {
       border: 1px solid #334155;
       border-radius: 10px;
@@ -138,9 +250,21 @@
       cursor: pointer;
       background: linear-gradient(180deg, rgba(30, 58, 138, .25), rgba(15, 23, 42, .25));
     }
-    .marker-content:hover { border-color: var(--cyan); }
-    .marker-name { font-weight: 700; font-size: 13px; }
-    .marker-coord, .marker-bait { font-size: 12px; opacity: .9; }
+
+    .marker-content:hover {
+      border-color: var(--cyan);
+    }
+
+    .marker-name {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .marker-coord, .marker-bait {
+      font-size: 12px;
+      opacity: .9;
+      margin-top: 2px;
+    }
 
     .hud {
       position: fixed;
@@ -150,19 +274,45 @@
       border: 1px solid #334155;
       border-radius: 12px;
       padding: 10px;
-      background: rgba(6, 13, 29, .9);
+      background: var(--glass-strong);
       backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       z-index: 20;
       display: none;
+      box-shadow: 0 0 30px rgba(15, 23, 42, .65);
     }
+
     .hud.show { display: block; }
-    textarea { width: 100%; min-height: 88px; }
-    .videos a { color: #93c5fd; display: block; margin-top: 4px; }
+
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      resize: vertical;
+    }
+
+    .videos a {
+      color: #93c5fd;
+      display: block;
+      margin-top: 4px;
+      word-break: break-word;
+    }
+
     .stale { color: #fca5a5; }
+
+    .context {
+      margin-top: 8px;
+      white-space: pre-wrap;
+      color: #cfe8ff;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
 
     @media (max-width: 980px) {
       .topbar, .main { grid-template-columns: 1fr; }
-      #globe { min-height: 320px; }
+      .features { justify-content: flex-start; }
+      #globe, .mapwrap { min-height: 320px; }
     }
   </style>
 </head>
@@ -170,7 +320,8 @@
 <div class="layout">
   <div class="card topbar">
     <div>
-      <strong>LFTR v7 Marine Intelligence Globe</strong>
+      <div class="title">LFTR v7 Marine Intelligence Globe</div>
+      <div class="subline">Google Photorealistic 3D globe • fish intelligence • bait/weather context • media HUD</div>
       <div class="statusline" id="statusLine"></div>
     </div>
     <div class="features" id="features"></div>
@@ -179,11 +330,24 @@
   <div class="main">
     <div class="card mapwrap">
       <gmp-map-3d id="globe"
+        mode="hybrid"
         center="27.9506,-82.4572,120"
         range="1800000"
         tilt="42"
-        heading="18">
+        heading="18"
+        default-ui-disabled>
       </gmp-map-3d>
+
+      <div class="globe-fallback" id="globeFallback">
+        <div class="inner">
+          <strong>3D globe unavailable</strong>
+          <div class="muted" style="margin-top:8px">
+            Configure <span class="mono">GOOGLE_MAPS_API_KEY</span> and ensure the Maps JavaScript API with
+            <span class="mono">maps3d</span> support is enabled.
+          </div>
+        </div>
+      </div>
+
       <div class="overlay mono" id="health">Loading operational feed…</div>
     </div>
 
@@ -200,14 +364,6 @@
     </div>
   </div>
 </div>
-
-<template id="markerTemplate">
-  <div class="marker-content">
-    <div class="marker-name"></div>
-    <div class="marker-coord"></div>
-    <div class="marker-bait"></div>
-  </div>
-</template>
 
 <div class="hud" id="hud">
   <div class="row" style="justify-content:space-between">
@@ -231,7 +387,7 @@
   </div>
 
   <label for="videoFile">Upload Video</label>
-  <input id="videoFile" type="file" accept="video/*" />
+  <input id="videoFile" type="file" accept="video/*">
   <div class="row">
     <button id="uploadBtn">Upload Video</button>
   </div>
@@ -245,6 +401,7 @@
   const markerGrid = document.getElementById('markerGrid');
   const healthEl = document.getElementById('health');
   const statusLine = document.getElementById('statusLine');
+  const globeFallback = document.getElementById('globeFallback');
 
   const hud = document.getElementById('hud');
   const hudTitle = document.getElementById('hudTitle');
@@ -257,7 +414,8 @@
   const intel = document.getElementById('intel');
 
   const mapsKeyState = document.getElementById('mapsKeyState');
-  const globeEl = document.getElementById('globe');
+
+  let globeEl = document.getElementById('globe');
 
   const state = {
     fish: [],
@@ -278,6 +436,8 @@
     lastUpdateAt: 0,
     hudPollId: null,
     mapsApiKey: '',
+    maps3dLib: null,
+    mapsScriptLoading: null,
   };
 
   function setStatus(msg, isStale = false) {
@@ -285,7 +445,9 @@
     statusLine.classList.toggle('stale', !!isStale);
   }
 
-  function setHudMessage(msg) { mediaInfo.textContent = msg; }
+  function setHudMessage(msg) {
+    mediaInfo.textContent = msg;
+  }
 
   function normalizeFeatureButton(btn, kind) {
     btn.classList.toggle('on', !!state.feature[kind]);
@@ -293,19 +455,27 @@
 
   function mkFeature(kind, label) {
     const btn = document.createElement('button');
+    btn.type = 'button';
     btn.className = 'feature on';
     btn.dataset.kind = kind;
     btn.innerHTML = `<span class="light"></span><span>${label}</span>`;
     btn.addEventListener('click', () => {
       state.feature[kind] = !state.feature[kind];
       normalizeFeatureButton(btn, kind);
+
       if (kind === 'markers') {
         markerGrid.style.display = state.feature.markers ? 'grid' : 'none';
-        state.mapMarkers.forEach((m) => { m.style.display = state.feature.markers ? '' : 'none'; });
+        state.mapMarkers.forEach((m) => {
+          try {
+            m.style.display = state.feature.markers ? '' : 'none';
+          } catch (_) {}
+        });
       }
+
       if (kind === 'popups' && !state.feature.popups) {
         hud.classList.remove('show');
       }
+
       renderMarkerBait();
     });
     return btn;
@@ -334,7 +504,9 @@
 
   function baitText(point) {
     const bait = (point.bait && point.bait.intensity) || 'unknown';
-    const confidence = point.bait && Number.isFinite(point.bait.confidence) ? ` (${point.bait.confidence}%)` : '';
+    const confidence = point.bait && Number.isFinite(point.bait.confidence)
+      ? ` (${point.bait.confidence}%)`
+      : '';
     return state.feature.bait ? `Bait: ${bait}${confidence}` : 'Bait layer disabled';
   }
 
@@ -355,20 +527,32 @@
   }
 
   function clearMapMarkers() {
-    state.mapMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.mapMarkers.forEach((m) => {
+      try { m.remove(); } catch (_) {}
+    });
     state.mapMarkers = [];
   }
 
   async function ensureMapLibrary() {
+    if (state.maps3dLib) return state.maps3dLib;
     if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
       return null;
     }
     try {
-      return await window.google.maps.importLibrary('maps3d');
+      state.maps3dLib = await window.google.maps.importLibrary('maps3d');
+      return state.maps3dLib;
     } catch (err) {
       console.warn('[gfs] maps3d import failed', err);
+      setStatus('maps3d import failed', true);
       return null;
     }
+  }
+
+  function pinGlyphForPoint(p) {
+    const intensity = p?.bait?.intensity;
+    if (intensity === 'high') return '🔥';
+    if (intensity === 'medium') return '🐟';
+    return '🎣';
   }
 
   async function renderMapMarkers() {
@@ -376,29 +560,33 @@
     if (!state.mapReady || !state.feature.markers) return;
 
     const lib = await ensureMapLibrary();
-    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) return;
+    if (!lib || !lib.Marker3DInteractiveElement || !lib.PinElement) {
+      setStatus('maps3d marker library unavailable', true);
+      return;
+    }
 
     state.fish.forEach((p) => {
       const marker = new lib.Marker3DInteractiveElement({
-        position: { lat: p.lat, lng: p.lon, altitude: 10 },
+        position: {
+          lat: Number(p.lat),
+          lng: Number(p.lon),
+          altitude: 10,
+        },
       });
 
       const pin = new lib.PinElement({
-        glyph: '🐟',
-        background: '#0f172a',
-        borderColor: '#22d3ee',
-        glyphColor: '#e6f4ff',
-        scale: 1.1,
+        glyph: pinGlyphForPoint(p),
+        scale: 1.08,
       });
 
       marker.append(pin);
       marker.addEventListener('gmp-click', () => openHud(p));
       marker.addEventListener('click', () => openHud(p));
+
       globeEl.append(marker);
       state.mapMarkers.push(marker);
     });
   }
-
 
   function renderMarkerCards() {
     markerGrid.innerHTML = '';
@@ -406,7 +594,11 @@
       const card = document.createElement('div');
       card.className = 'marker-content marker-card';
       card.dataset.key = p.location_key;
-      card.innerHTML = `<div class="marker-name"></div><div class="marker-coord"></div><div class="marker-bait"></div>`;
+      card.innerHTML = `
+        <div class="marker-name"></div>
+        <div class="marker-coord"></div>
+        <div class="marker-bait"></div>
+      `;
       card.querySelector('.marker-name').textContent = p.name;
       card.querySelector('.marker-coord').textContent = `${p.lat}, ${p.lon}`;
       card.querySelector('.marker-bait').textContent = baitText(p);
@@ -486,7 +678,10 @@
     await json('/gfs/api/report/upsert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ location_key: state.selected.location_key, report_text: reportText.value || '' }),
+      body: JSON.stringify({
+        location_key: state.selected.location_key,
+        report_text: reportText.value || '',
+      }),
     });
     await refreshLocationContext();
     setHudMessage('Report saved.');
@@ -531,14 +726,19 @@
   function connectLiveUpdates() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
     const ws = new WebSocket(`${proto}${location.host}/gfs/ws/updates`);
-    ws.onopen = () => { state.wsConnected = true; setStatus('Feed connected'); };
+    ws.onopen = () => {
+      state.wsConnected = true;
+      setStatus('Feed connected');
+    };
     ws.onmessage = (ev) => {
       state.lastUpdateAt = Date.now();
       const txt = String(ev.data || '').slice(0, 2800);
       setFreshness(state.lastUpdateAt);
       healthEl.textContent = txt;
     };
-    ws.onerror = () => { setStatus('Feed error', true); };
+    ws.onerror = () => {
+      setStatus('Feed error', true);
+    };
     ws.onclose = () => {
       state.wsConnected = false;
       setStatus('Reconnecting feed...', true);
@@ -546,61 +746,119 @@
     };
   }
 
-  async function loadGoogleMapScript() {
-    if (!state.mapsApiKey) {
-      mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
-      setStatus('Google Maps key missing — list + HUD remain active', true);
-      return;
-    }
+  async function loadMapsScript() {
+    if (state.mapsScriptLoading) return state.mapsScriptLoading;
 
-    if (window.google && window.google.maps) {
-      state.mapReady = true;
-      mapsKeyState.textContent = 'Maps key status: configured';
-      await renderMapMarkers();
-      return;
-    }
+    state.mapsScriptLoading = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-gmaps3d="1"]');
+      if (existing) {
+        if (window.google && window.google.maps) {
+          resolve();
+          return;
+        }
+        existing.addEventListener('load', resolve, { once: true });
+        existing.addEventListener('error', reject, { once: true });
+        return;
+      }
 
-    await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.mapsApiKey)}&v=beta&libraries=maps3d`;
       s.async = true;
       s.defer = true;
+      s.dataset.gmaps3d = '1';
       s.onload = resolve;
       s.onerror = reject;
-      document.head.append(s);
-    }).catch(() => {
-      setStatus('Unable to load Maps API script', true);
+      document.head.appendChild(s);
     });
 
-    state.mapReady = !!(window.google && window.google.maps);
-    if (state.mapReady) {
+    return state.mapsScriptLoading;
+  }
+
+  function showGlobeFallback(show) {
+    globeFallback.classList.toggle('show', !!show);
+  }
+
+  function applyGlobeAttributes() {
+    globeEl.setAttribute('mode', 'hybrid');
+    globeEl.setAttribute('center', '27.9506,-82.4572,120');
+    globeEl.setAttribute('range', '1800000');
+    globeEl.setAttribute('tilt', '42');
+    globeEl.setAttribute('heading', '18');
+    globeEl.setAttribute('default-ui-disabled', '');
+  }
+
+  async function loadGoogleMapScript() {
+    if (!state.mapsApiKey) {
+      mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
+      showGlobeFallback(true);
+      setStatus('Google Maps key missing — list + HUD remain active', true);
+      return;
+    }
+
+    try {
+      await loadMapsScript();
+
+      if (!window.google || !window.google.maps || !window.google.maps.importLibrary) {
+        throw new Error('Maps JS API did not initialize');
+      }
+
+      await ensureMapLibrary();
+      await customElements.whenDefined('gmp-map-3d');
+
+      globeEl = document.getElementById('globe');
+      applyGlobeAttributes();
+
+      state.mapReady = true;
+      showGlobeFallback(false);
       mapsKeyState.textContent = 'Maps key status: configured';
       setStatus('Photorealistic globe connected');
       await renderMapMarkers();
+    } catch (err) {
+      console.error('[gfs] unable to load Google 3D globe', err);
+      state.mapReady = false;
+      showGlobeFallback(true);
+      setStatus('Unable to load Maps API script', true);
     }
   }
 
   async function loadRuntimeConfig() {
     const cfg = await json('/gfs/api/config');
     state.mapsApiKey = (cfg.google_maps_api_key || '').trim();
+
     if (cfg.maps3d_available) {
       mapsKeyState.textContent = 'Maps key status: configured';
     } else {
       mapsKeyState.textContent = 'Maps key status: missing (set GOOGLE_MAPS_API_KEY in app env)';
+      showGlobeFallback(true);
       setStatus('Maps3D unavailable until GOOGLE_MAPS_API_KEY is configured', true);
     }
   }
 
-
-  document.getElementById('loadGlobeBtn').addEventListener('click', () => loadGoogleMapScript().catch((e) => setStatus(e.message, true)));
-  document.getElementById('refreshFishBtn').addEventListener('click', () => loadFish().catch((e) => setStatus(e.message, true)));
-  document.getElementById('refreshHealthBtn').addEventListener('click', () => loadHealth().catch((e) => setStatus(e.message, true)));
-  document.getElementById('saveReportBtn').addEventListener('click', () => saveReport().catch((e) => setHudMessage(e.message)));
-  document.getElementById('refreshContextBtn').addEventListener('click', () => refreshLocationContext().catch((e) => setHudMessage(e.message)));
-  document.getElementById('uploadBtn').addEventListener('click', () => uploadVideo().catch((e) => setHudMessage(e.message)));
-  document.getElementById('connectLiveBtn').addEventListener('click', () => updateLiveUrl().catch((e) => setHudMessage(e.message)));
-  document.getElementById('closeHud').addEventListener('click', () => { hud.classList.remove('show'); stopHudPolling(); });
-
+  document.getElementById('loadGlobeBtn').addEventListener('click', () => {
+    loadGoogleMapScript().catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('refreshFishBtn').addEventListener('click', () => {
+    loadFish().catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('refreshHealthBtn').addEventListener('click', () => {
+    loadHealth().catch((e) => setStatus(e.message, true));
+  });
+  document.getElementById('saveReportBtn').addEventListener('click', () => {
+    saveReport().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('refreshContextBtn').addEventListener('click', () => {
+    refreshLocationContext().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('uploadBtn').addEventListener('click', () => {
+    uploadVideo().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('connectLiveBtn').addEventListener('click', () => {
+    updateLiveUrl().catch((e) => setHudMessage(e.message));
+  });
+  document.getElementById('closeHud').addEventListener('click', () => {
+    hud.classList.remove('show');
+    stopHudPolling();
+  });
 
   loadHealth().catch((e) => setStatus(e.message, true));
   loadFish().catch((e) => setStatus(e.message, true));
