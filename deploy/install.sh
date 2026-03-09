@@ -150,27 +150,71 @@ phase5_tls() {
 phase6_nginx() {
   echo "===== PHASE 6 — NGINX SETUP ====="
   apt-get install -y nginx
+  mkdir -p /var/www/certbot
+
   cat > /etc/nginx/sites-available/broadcast <<'EOF'
+# HTTP redirect
 server {
 
     listen 80;
     server_name DOMAIN_PLACEHOLDER;
 
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
+}
+
+# HTTPS server
+server {
+
+    listen 443 ssl http2;
+    server_name DOMAIN_PLACEHOLDER;
+
+    ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+
     client_max_body_size 200M;
 
-    # static assets
+    # static globe assets
     location /static/ {
+
         alias /home/jayson_tolleson/broadcast/static/;
-        access_log off;
+
         expires 7d;
+        access_log off;
+
     }
 
-    # uploaded media
+    # uploaded videos
     location /uploads/ {
+
         alias /home/jayson_tolleson/broadcast/uploads/;
+
     }
 
-    # WebSocket + API routes
+    # SSE weather stream
+    location /gfs/stream {
+
+        proxy_pass http://127.0.0.1:8000;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;
+        proxy_cache off;
+
+        proxy_read_timeout 3600;
+
+    }
+
+    # FastAPI / WebSocket routes
     location / {
 
         proxy_pass http://127.0.0.1:8000;
@@ -188,22 +232,7 @@ server {
 
         proxy_read_timeout 3600;
         proxy_send_timeout 3600;
-    }
 
-    # SSE weather stream
-    location /gfs/stream {
-
-        proxy_pass http://127.0.0.1:8000;
-
-        proxy_http_version 1.1;
-
-        proxy_set_header Host $host;
-        proxy_set_header Connection '';
-
-        proxy_buffering off;
-        proxy_cache off;
-
-        proxy_read_timeout 3600;
     }
 
 }
@@ -230,10 +259,10 @@ Description=Broadcast Weather Server
 After=network.target
 
 [Service]
-User=${INSTALL_USER}
-WorkingDirectory=${APP_DIR}
+User=jayson_tolleson
+WorkingDirectory=/home/jayson_tolleson/broadcast
 Environment=GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION}
-ExecStart=${APP_DIR}/venv/bin/hypercorn main:app --bind 127.0.0.1:8000
+ExecStart=/home/jayson_tolleson/broadcast/venv/bin/hypercorn main:app --bind 127.0.0.1:8000 --workers 2
 Restart=always
 
 [Install]
@@ -246,8 +275,8 @@ Description=GFS Backend Service
 After=network.target
 
 [Service]
-User=${INSTALL_USER}
-WorkingDirectory=${APP_DIR}
+User=jayson_tolleson
+WorkingDirectory=/home/jayson_tolleson/broadcast
 Environment=GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION}
 ExecStart=${APP_DIR}/venv/bin/python gfs.py
 Restart=always
