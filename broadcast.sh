@@ -91,10 +91,8 @@ PYMAPS
 echo "[INFO] Injected Google Maps API key into HTML files"
 
 if [[ "$DOMAIN" == "$DEFAULT_IP" ]]; then
-  echo "[WARN] Domain matches public IP; SSL request will be skipped in this wrapper phase."
+  echo "[WARN] Domain matches public IP; SSL request will be skipped by installer."
   export SKIP_SSL=1
-else
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" || true
 fi
 
 echo "===== INSTALL CONFIGURATION ====="

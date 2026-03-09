@@ -7,7 +7,7 @@ INSTALL_USER="${INSTALL_USER:-jayson_tolleson}"
 APP_DIR="${APP_DIR:-/home/${INSTALL_USER}/broadcast}"
 VENV_DIR="${APP_DIR}/venv"
 GOOGLE_PROJECT_ID="${GOOGLE_PROJECT_ID:-}"
-GCP_KEY="/etc/broadcast/gcp-key.json"
+GCP_KEY="${GCP_KEY:-/etc/broadcast/gcp-key.json}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-admin@${DOMAIN}}"
 GOOGLE_CLOUD_REGION="global"
 
@@ -77,7 +77,9 @@ phase2_python_runtime() {
   pip install --upgrade pip
   pip install -r "$APP_DIR/requirements.txt"
   pip install cfgrib eccodes
-  chmod -R 755 "$APP_DIR"
+  find "$APP_DIR" -type d -exec chmod 755 {} \;
+  find "$APP_DIR" -type f -exec chmod 644 {} \;
+  find "$APP_DIR" -type f \( -name "*.sh" -o -path "*/venv/bin/*" \) -exec chmod 755 {} \;
   chmod o+x "/home/${INSTALL_USER}"
 }
 
@@ -150,6 +152,18 @@ EOF
 phase5_tls() {
   echo "===== PHASE 5 — TLS CERTIFICATE ====="
   apt-get install -y certbot python3-certbot-nginx nginx
+  if [[ "${SKIP_SSL:-0}" == "1" ]]; then
+    echo "[INFO] SKIP_SSL=1, skipping certificate issuance"
+    return 0
+  fi
+  if [[ -z "${DOMAIN:-}" ]]; then
+    echo "[WARN] DOMAIN empty, skipping certificate issuance"
+    return 0
+  fi
+  if [[ "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "[WARN] DOMAIN looks like an IP, skipping certificate issuance"
+    return 0
+  fi
   systemctl stop nginx || true
   certbot certonly \
     --standalone \
@@ -185,31 +199,14 @@ phase6_nginx() {
 phase7_services() {
   echo "===== PHASE 7 — SYSTEMD SERVICES ====="
   cp "$ROOT_DIR/deploy/systemd/broadcast.service" /etc/systemd/system/broadcast.service
-  sed -i "s|\${APP_USER}|jayson_tolleson|g" /etc/systemd/system/broadcast.service
-  sed -i "s|\${APP_GROUP}|jayson_tolleson|g" /etc/systemd/system/broadcast.service
+  sed -i "s|\${APP_USER}|$INSTALL_USER|g" /etc/systemd/system/broadcast.service
+  sed -i "s|\${APP_GROUP}|$INSTALL_USER|g" /etc/systemd/system/broadcast.service
   sed -i "s|\${CFG_DIR}|/etc/broadcast|g" /etc/systemd/system/broadcast.service
 
-  cat > /etc/systemd/system/gfs.service <<EOF
-[Unit]
-Description=GFS Backend Service
-After=network.target
-
-[Service]
-User=jayson_tolleson
-WorkingDirectory=/home/jayson_tolleson/broadcast
-Environment=GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION}
-ExecStart=${APP_DIR}/venv/bin/python gfs.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
 
   systemctl daemon-reload
   systemctl enable broadcast
   systemctl restart broadcast
-  systemctl enable gfs
-  systemctl restart gfs
 }
 
 phase8_health() {
@@ -224,8 +221,10 @@ phase8_health() {
       fail "broadcast health endpoint check failed"
     fi
   done
-  curl -fsS http://127.0.0.1:8000/gfs >/dev/null || fail "gfs endpoint check failed"
-  curl -kfsS "https://$DOMAIN" >/dev/null || fail "public TLS endpoint check failed"
+  curl -fsS http://127.0.0.1:8000/gfs/api/health >/dev/null || fail "gfs api health check failed"
+  if [[ "${SKIP_SSL:-0}" != "1" ]]; then
+    curl -kfsS "https://$DOMAIN" >/dev/null || fail "public TLS endpoint check failed"
+  fi
   if [ ! -f "$APP_DIR/static/indexgfs.html" ]; then
     echo "[installer] static assets missing"
     exit 1

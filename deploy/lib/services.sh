@@ -2,6 +2,7 @@
 set -euo pipefail
 
 create_systemd_services_impl() {
+  local PYTHON_BIN="${PYTHON_BIN:-python3}"
   local unit="/etc/systemd/system/broadcast.service"
   cat > "$unit" <<EOF
 [Unit]
@@ -15,7 +16,7 @@ Group=${APP_GROUP}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${APP_DIR}/config/google.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=${APP_DIR}/venv/bin/python -m hypercorn --factory server.app_factory:create_app --bind ${APP_BIND_HOST}:${APP_BIND_PORT} --workers ${APP_WORKERS}
+ExecStart=${APP_DIR}/venv/bin/${PYTHON_BIN} -m hypercorn --factory server.app_factory:create_app --bind ${APP_BIND_HOST}:${APP_BIND_PORT} --workers ${APP_WORKERS}
 Restart=always
 RestartSec=3
 

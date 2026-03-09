@@ -1,7 +1,7 @@
 # LFTR Broadcast + GFS Globe Stack
 
 ## Short Overview
-LFTR Broadcast + GFS Globe is a real-time marine broadcast and weather intelligence platform. The stack combines a Python Quart backend, WebRTC broadcast/watch flows, Socket.IO signaling, and a Google Maps JavaScript 3D globe experience for marine situational awareness.
+LFTR Broadcast + GFS Globe is a real-time marine broadcast and weather intelligence platform. The stack combines a Python Quart backend, WebRTC broadcast/watch flows, native WebSocket signaling, and a Google Maps JavaScript 3D globe experience for marine situational awareness.
 
 The system provides fish marker intelligence, bait/weather overlays, and a popup HUD with report, upload, and live media context. It is built for practical deployment with modular install scripts, nginx, systemd, TLS, and TURN.
 
@@ -53,7 +53,7 @@ Fresh VM one-pass installer (Debian 12 bookworm / Debian 13 trixie / Ubuntu 22+ 
 ```bash
 git clone <your-repo-url>
 cd LFTR.biz-FULL-BROADCAST-WEATHER-solution-
-sudo ./install.sh
+sudo ./broadcast.sh
 ```
 
 Deterministic installer phases:
@@ -76,15 +76,14 @@ export DOMAIN=lftr.biz
 export GOOGLE_PROJECT_ID=<your-project-id>
 export GOOGLE_APPLICATION_CREDENTIALS_SRC=/path/to/gcp-key.json
 export CERTBOT_EMAIL=admin@lftr.biz
-sudo ./install.sh
+sudo ./broadcast.sh
 ```
 
 Installed paths:
-- App root: `/opt/broadcast`
-- App code: `/opt/broadcast/app`
+- App root: `/home/${INSTALL_USER}/broadcast`
 - Runtime config: `/etc/broadcast`
-- Services: `broadcast.service`, `gfs.service`
-- nginx site: `/etc/nginx/sites-available/broadcast.conf`
+- Services: `broadcast.service`
+- nginx site: `/etc/nginx/sites-available/broadcast`
 
 ## Installer Prompts
 

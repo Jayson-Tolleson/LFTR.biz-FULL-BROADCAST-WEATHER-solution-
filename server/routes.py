@@ -111,6 +111,11 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     async def webrtc_ice_config():
         return jsonify({"iceServers": build_ice_servers(settings)})
 
+    @app.get("/ai_status")
+    async def ai_status():
+        ai_available = bool(settings.ai_enabled)
+        return jsonify({"ai_available": ai_available, "ai_enabled": settings.ai_enabled, "tts_available": "stub"})
+
     @app.post("/ai/chat")
     async def ai_chat():
         payload = await request.get_json(force=True)
