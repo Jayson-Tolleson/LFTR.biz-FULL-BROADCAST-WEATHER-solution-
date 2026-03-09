@@ -150,39 +150,78 @@ phase5_tls() {
 phase6_nginx() {
   echo "===== PHASE 6 — NGINX SETUP ====="
   apt-get install -y nginx
-  cat > /etc/nginx/sites-available/broadcast <<EOF
+  cat > /etc/nginx/sites-available/broadcast <<'EOF'
 server {
+
     listen 80;
-    server_name $DOMAIN;
-    return 301 https://\$host\$request_uri;
-}
+    server_name DOMAIN_PLACEHOLDER;
 
-server {
-    listen 443 ssl;
-    server_name $DOMAIN;
+    client_max_body_size 200M;
 
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    # static assets
+    location /static/ {
+        alias /home/jayson_tolleson/broadcast/static/;
+        access_log off;
+        expires 7d;
+    }
 
+    # uploaded media
+    location /uploads/ {
+        alias /home/jayson_tolleson/broadcast/uploads/;
+    }
+
+    # WebSocket + API routes
     location / {
+
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 3600;
+        proxy_send_timeout 3600;
     }
 
-    location /gfs {
-        proxy_pass http://127.0.0.1:8001;
+    # SSE weather stream
+    location /gfs/stream {
+
+        proxy_pass http://127.0.0.1:8000;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header Connection '';
+
+        proxy_buffering off;
+        proxy_cache off;
+
+        proxy_read_timeout 3600;
     }
+
 }
 EOF
+
+  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /etc/nginx/sites-available/broadcast
+
   ln -sf /etc/nginx/sites-available/broadcast /etc/nginx/sites-enabled/broadcast
-  rm -f /etc/nginx/sites-enabled/default || true
-  nginx -t
+  rm -f /etc/nginx/sites-enabled/default
+
+  if ! nginx -t; then
+    echo "[ERROR] nginx configuration validation failed"
+    exit 1
+  fi
+
   systemctl restart nginx
   systemctl enable nginx
 }
-
 phase7_services() {
   echo "===== PHASE 7 — SYSTEMD SERVICES ====="
   cat > /etc/systemd/system/broadcast.service <<EOF
