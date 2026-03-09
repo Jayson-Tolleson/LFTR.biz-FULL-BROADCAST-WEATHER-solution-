@@ -76,6 +76,9 @@ phase2_python_runtime() {
   source "$VENV_DIR/bin/activate"
   pip install --upgrade pip
   pip install -r "$APP_DIR/requirements.txt"
+  pip install cfgrib eccodes
+  chmod -R 755 "$APP_DIR"
+  chmod o+x "/home/${INSTALL_USER}"
 }
 
 phase3_firewall() {
@@ -262,7 +265,7 @@ After=network.target
 User=jayson_tolleson
 WorkingDirectory=/home/jayson_tolleson/broadcast
 Environment=GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION}
-ExecStart=/home/jayson_tolleson/broadcast/venv/bin/hypercorn main:app --bind 127.0.0.1:8000 --workers 2
+ExecStart=/home/jayson_tolleson/broadcast/venv/bin/hypercorn server.gfs_service:app --bind 127.0.0.1:8000
 Restart=always
 
 [Install]
@@ -294,7 +297,16 @@ EOF
 
 phase8_health() {
   echo "===== PHASE 8 — HEALTH CHECKS ====="
-  curl -fsS http://127.0.0.1:8000/ >/dev/null || fail "broadcast endpoint check failed"
+  for i in {1..20}; do
+    if curl -s http://127.0.0.1:8000/health >/dev/null; then
+      echo "[installer] backend ready"
+      break
+    fi
+    sleep 2
+    if [[ "$i" -eq 20 ]]; then
+      fail "broadcast health endpoint check failed"
+    fi
+  done
   curl -fsS http://127.0.0.1:8000/gfs >/dev/null || fail "gfs endpoint check failed"
   curl -kfsS "https://$DOMAIN" >/dev/null || fail "public TLS endpoint check failed"
   echo "[OK] Installer completed successfully"

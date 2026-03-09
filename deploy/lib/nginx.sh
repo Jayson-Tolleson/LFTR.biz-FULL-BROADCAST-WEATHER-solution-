@@ -25,8 +25,8 @@ server {
     }
 }
 EOF
-  ln -sf "$conf" /etc/nginx/sites-enabled/broadcast.conf
   rm -f /etc/nginx/sites-enabled/default || true
+  ln -sf "$conf" /etc/nginx/sites-enabled/broadcast.conf
   nginx -t
   systemctl restart nginx
   systemctl enable nginx

@@ -6,10 +6,10 @@ After=network.target
 Type=simple
 User=${APP_USER}
 Group=${APP_GROUP}
-WorkingDirectory=${APP_DIR}
+WorkingDirectory=/home/jayson_tolleson/broadcast
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=${CFG_DIR}/google.env
-ExecStart=${VENV_DIR}/bin/hypercorn broadcast_server:app --bind 127.0.0.1:8000
+ExecStart=/home/jayson_tolleson/broadcast/venv/bin/hypercorn server.gfs_service:app --bind 127.0.0.1:8000
 Restart=always
 RestartSec=3
 

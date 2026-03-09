@@ -48,8 +48,8 @@ class GFSFetcher:
             ("subregion", ""),
             ("leftlon", "-180"),
             ("rightlon", "180"),
-            ("toplat", "90"),
-            ("bottomlat", "-90"),
+            ("toplat", "80"),
+            ("bottomlat", "-80"),
         ]
         for v in vars_needed:
             q.append((f"var_{v}", "on"))
