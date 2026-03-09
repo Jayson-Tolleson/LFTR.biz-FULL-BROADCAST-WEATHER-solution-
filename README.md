@@ -48,7 +48,7 @@ Recommended deployment baseline:
 - Google Maps JavaScript API key for the 3D globe path.
 
 ## Installation
-Fresh VM one-pass installer (Debian 12 / Ubuntu 22+ / Ubuntu 24+):
+Fresh VM one-pass installer (Debian 12 bookworm / Debian 13 trixie / Ubuntu 22+ / Ubuntu 24+):
 
 ```bash
 git clone <your-repo-url>

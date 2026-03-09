@@ -14,37 +14,82 @@ GCP_KEY_DST="${GOOGLE_APPLICATION_CREDENTIALS:-${CFG_DIR}/gcp-key.json}"
 GOOGLE_PROJECT_ID="${GOOGLE_PROJECT_ID:-}"
 GOOGLE_APPLICATION_CREDENTIALS_SRC="${GOOGLE_APPLICATION_CREDENTIALS_SRC:-}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-admin@${DOMAIN}}"
+DISTRO=""
 
 log() { printf '[%s] %s\n' "$1" "$2"; }
 fail() { printf '[ERROR] %s\n' "$1" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
-
 phase() { printf '\n===== %s =====\n' "$1"; }
+
+detect_os() {
+
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+    else
+        echo "Cannot detect OS"
+        exit 1
+    fi
+
+    case "$ID:$VERSION_CODENAME" in
+        debian:bookworm|debian:trixie)
+            DISTRO="debian"
+            ;;
+        ubuntu:jammy|ubuntu:noble)
+            DISTRO="ubuntu"
+            ;;
+        *)
+            echo "Unsupported OS: $ID $VERSION_CODENAME"
+            exit 1
+            ;;
+    esac
+
+    echo "Detected supported system: $ID $VERSION_CODENAME"
+}
 
 PHASE_1_SYSTEM_PREP() {
   phase "PHASE 1 — SYSTEM PREP"
   [[ "${EUID:-$(id -u)}" -eq 0 ]] || fail "Run as root (sudo ./install.sh)"
   need_cmd apt-get
-  local os_id os_ver
-  os_id="$(. /etc/os-release; echo "$ID")"
-  os_ver="$(. /etc/os-release; echo "$VERSION_ID")"
-  case "$os_id:$os_ver" in
-    debian:12*|ubuntu:22*|ubuntu:24*) ;;
-    *) fail "Unsupported OS ${os_id} ${os_ver}. Supported: Debian 12, Ubuntu 22+, Ubuntu 24+" ;;
-  esac
+  detect_os
+
   apt-get update -y
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    curl unzip git rsync jq lsb-release software-properties-common ca-certificates gnupg
+    curl \
+    unzip \
+    git \
+    rsync \
+    jq \
+    lsb-release \
+    software-properties-common \
+    ca-certificates \
+    gnupg
 }
 
 PHASE_2_PACKAGES() {
   phase "PHASE 2 — PACKAGES"
-  apt-get install -y \
-    nginx certbot python3-certbot python3-certbot-nginx \
-    python3 python3-pip python3-venv build-essential libffi-dev libssl-dev netcdf-bin \
-    libeccodes-dev libopenjp2-7 coturn ufw netcat-openbsd
-  pip3 install --upgrade pip
-  pip3 install numpy pandas xarray cfgrib eccodes aiohttp fastapi hypercorn websockets
+
+  apt-get update -y
+
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    curl \
+    git \
+    unzip \
+    rsync \
+    jq \
+    nginx \
+    certbot \
+    python3-certbot-nginx \
+    python3 \
+    python3-dev \
+    python3-venv \
+    python3-pip \
+    build-essential \
+    libssl-dev \
+    libffi-dev
+
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    libeccodes-dev \
+    libeccodes-tools
 }
 
 PHASE_3_FIREWALL() {
@@ -60,19 +105,29 @@ PHASE_3_FIREWALL() {
 PHASE_4_GOOGLE_CLOUD_APIS() {
   phase "PHASE 4 — GOOGLE CLOUD APIs"
   mkdir -p "$CFG_DIR"
+
+  if curl -fsS --max-time 2 http://169.254.169.254 >/dev/null 2>&1; then
+    log INFO "Running inside GCP environment"
+    log INFO "Reminder: open VPC firewall ports 80 and 443"
+  fi
+
   if [[ -n "$GOOGLE_APPLICATION_CREDENTIALS_SRC" && -f "$GOOGLE_APPLICATION_CREDENTIALS_SRC" ]]; then
     cp "$GOOGLE_APPLICATION_CREDENTIALS_SRC" "$GCP_KEY_DST"
     chmod 600 "$GCP_KEY_DST"
   fi
+
   [[ -f "$GCP_KEY_DST" ]] || fail "Missing GCP key file at $GCP_KEY_DST (set GOOGLE_APPLICATION_CREDENTIALS_SRC)"
   [[ -n "$GOOGLE_PROJECT_ID" ]] || fail "GOOGLE_PROJECT_ID must be set"
 
   if ! command -v gcloud >/dev/null 2>&1; then
-    log WARN "gcloud CLI not found; Google API enable step skipped. Install google-cloud-cli for full automation."
+    log WARN "gcloud CLI not found; Google API enable step skipped"
   else
     export GOOGLE_APPLICATION_CREDENTIALS="$GCP_KEY_DST"
     gcloud config set project "$GOOGLE_PROJECT_ID"
-    gcloud services enable speech.googleapis.com aiplatform.googleapis.com iamcredentials.googleapis.com
+    gcloud services enable \
+      speech.googleapis.com \
+      aiplatform.googleapis.com \
+      iamcredentials.googleapis.com
     gcloud config set ai/region global
   fi
 }
@@ -87,7 +142,19 @@ PHASE_5_FILESYSTEM() {
 PHASE_6_PYTHON_ENVIRONMENT() {
   phase "PHASE 6 — PYTHON ENVIRONMENT"
   python3 -m venv "$VENV_DIR"
-  "$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel
+  # shellcheck disable=SC1091
+  source "$VENV_DIR/bin/activate"
+  pip install --upgrade pip
+  pip install \
+    numpy \
+    pandas \
+    xarray \
+    cfgrib \
+    eccodes \
+    aiohttp \
+    fastapi \
+    hypercorn \
+    websockets
 }
 
 PHASE_7_APPLICATION_INSTALL() {
@@ -97,7 +164,6 @@ PHASE_7_APPLICATION_INSTALL() {
   [[ -f "$APP_DIR/requirements.txt" ]] || fail "requirements.txt missing"
   "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-  # compatibility wrappers required by ops contract
   [[ -f "$APP_DIR/broadcast_server.py" ]] || cat > "$APP_DIR/broadcast_server.py" <<'PY'
 from main import asgi_app as app
 PY
@@ -115,7 +181,7 @@ PY
 # Vertex agent compatibility stub
 PY
   [[ -f "$APP_DIR/gfs_service.py" ]] || cat > "$APP_DIR/gfs_service.py" <<'PY'
-from server.gfs_service import GFSService  # compatibility import shim
+from server.gfs_service import GFSService
 PY
 
   for f in broadcast_server.py gfs.py gfs_service.py stt_service.py vertex_agent.py; do
@@ -126,7 +192,14 @@ PY
 PHASE_8_TLS_CERTIFICATE() {
   phase "PHASE 8 — TLS CERTIFICATE"
   systemctl stop nginx || true
-  certbot certonly --standalone --non-interactive --agree-tos --email "$CERTBOT_EMAIL" -d "$DOMAIN"
+
+  certbot certonly \
+    --standalone \
+    --agree-tos \
+    --non-interactive \
+    --email "admin@${DOMAIN}" \
+    -d "$DOMAIN"
+
   [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]] || fail "certificate not found for ${DOMAIN}"
 }
 
