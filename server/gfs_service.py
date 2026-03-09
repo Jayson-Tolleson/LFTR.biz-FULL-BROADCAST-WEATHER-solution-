@@ -9,6 +9,7 @@ import random
 import re
 import time
 import threading
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -82,6 +83,18 @@ DEFAULT_REQUIRED_LEVELS = ["surface", "2_m_above_ground", "10_m_above_ground", "
 PRECIP_BUCKETS_MM_HR = [0.15, 0.7, 2.5, 8.0, 18.0, 40.0]
 SPATIAL_GRID_DEG = 8.0
 MAX_TILE_DIAGNOSTICS = 600
+
+log = logging.getLogger("server.gfs")
+
+
+def safe_float(v, default=0.0):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(f):
+        return default
+    return f
 
 
 def utc_now() -> datetime:
@@ -2652,48 +2665,90 @@ class GFSService:
             },
             "summary": summary,
         }
+    def _degraded_scene_payload(self, bbox: dict[str, float], reason: str) -> dict[str, Any]:
+        now = self._now_ms()
+        return {
+            "ok": False,
+            "status": {
+                "ok": False,
+                "mode": "degraded",
+                "degraded": True,
+                "warnings": ["scene_generation_degraded"],
+                "errors": [str(reason)],
+                "partial": True,
+                "generated_at": now,
+                "request_bounds": bbox,
+            },
+            "meta": {
+                "schema_version": "atmo-scene-v1",
+                "generated_at": now,
+                "bounds": bbox,
+                "degraded": True,
+                "decode_backend": self.state.decode_backend,
+                "data_source_mode": self.state.data_source_mode,
+            },
+            "scene": {"clouds": [], "precip": [], "lightning": [], "wind": [], "swell": [], "fish": []},
+            "summary": {"cloud_count": 0, "precip_count": 0, "lightning_count": 0, "wind_count": 0, "swell_count": 0, "fish_count": 0, "notes": ["degraded_response"]},
+            "items": [],
+            "precip_columns": [],
+            "lightning_events": [],
+            "source": "fallback_proxy",
+            "payload_state": "degraded",
+            "heuristic": True,
+            "quality_note": "Degraded scene payload due to internal derivation failure.",
+            "confidence": "low",
+            "bbox_used": bbox,
+        }
+
     def cloud_tiles_payload(self, bbox: dict[str, float] | None = None) -> Dict[str, Any]:
         bbox_norm = self._normalize_bbox(bbox)
-        weather = self.generate_weather_payload(bbox_norm)
+        try:
+            weather = self.generate_weather_payload(bbox_norm)
+        except Exception as exc:
+            log.exception("[gfs] scene weather generation failed")
+            return self._degraded_scene_payload(bbox_norm, str(exc))
 
-        if weather.get("source") == "gfs_nomads":
-            payload = self.serialize_cloud_payload(weather.get("tiles", []), weather)
-            payload["payload_state"] = weather.get("payload_state", "live")
-            payload["heuristic"] = bool(weather.get("heuristic", False))
-            payload["quality_note"] = weather.get("quality_note") or "Real NOMADS field ingestion with visualization-derived geometry."
-            payload["confidence"] = weather.get("confidence") or "high"
-            payload["rain"] = weather.get("rain", {"items": [], "count": 0})
-            payload["hail"] = weather.get("hail", {"items": [], "count": 0})
-            payload["lightning"] = weather.get("lightning", {"items": [], "count": 0})
-            payload["balloons"] = weather.get("balloons", {"items": [], "count": 0})
-            payload["precip_columns"] = self.derive_precip_columns_from_tiles(payload.get("items", []), max_items=260)
-            payload["lightning_events"] = self.derive_lightning_events_from_tiles(payload.get("items", []), max_items=140)
-            payload["note"] = "Primary source is NOAA NOMADS GFS 0.25 via GRIB subset decode."
-            payload["cycle"] = weather.get("cycle")
-            payload["forecast_hour"] = weather.get("forecast_hour")
-            payload["valid_time"] = weather.get("valid_time")
-            payload["bbox_used"] = weather.get("bbox_used")
-        else:
-            payload = self._annotate_weather_payload(
-                weather,
-                bbox=bbox_norm,
-                source=str(weather.get("source") or "fallback_proxy"),
-                payload_state=str(weather.get("payload_state") or "synthetic"),
-                heuristic=bool(weather.get("heuristic", True)),
-                quality_note=str(weather.get("quality_note") or "Synthetic weather fallback in use."),
-                confidence=str(weather.get("confidence") or "low"),
-            )
-            payload.setdefault("precip_columns", self.derive_precip_columns_from_tiles(payload.get("items", []), max_items=260))
-            payload.setdefault("lightning_events", self.derive_lightning_events_from_tiles(payload.get("items", []), max_items=140))
+        try:
+            if weather.get("source") == "gfs_nomads":
+                payload = self.serialize_cloud_payload(weather.get("tiles", []), weather)
+                payload["payload_state"] = weather.get("payload_state", "live")
+                payload["heuristic"] = bool(weather.get("heuristic", False))
+                payload["quality_note"] = weather.get("quality_note") or "Real NOMADS field ingestion with visualization-derived geometry."
+                payload["confidence"] = weather.get("confidence") or "high"
+                payload["rain"] = weather.get("rain", {"items": [], "count": 0})
+                payload["hail"] = weather.get("hail", {"items": [], "count": 0})
+                payload["lightning"] = weather.get("lightning", {"items": [], "count": 0})
+                payload["balloons"] = weather.get("balloons", {"items": [], "count": 0})
+                payload["precip_columns"] = self.derive_precip_columns_from_tiles(payload.get("items", []), max_items=260)
+                payload["lightning_events"] = self.derive_lightning_events_from_tiles(payload.get("items", []), max_items=140)
+                payload["note"] = "Primary source is NOAA NOMADS GFS 0.25 via GRIB subset decode."
+                payload["cycle"] = weather.get("cycle")
+                payload["forecast_hour"] = weather.get("forecast_hour")
+                payload["valid_time"] = weather.get("valid_time")
+                payload["bbox_used"] = weather.get("bbox_used")
+            else:
+                payload = self._annotate_weather_payload(
+                    weather,
+                    bbox=bbox_norm,
+                    source=str(weather.get("source") or "fallback_proxy"),
+                    payload_state=str(weather.get("payload_state") or "synthetic"),
+                    heuristic=bool(weather.get("heuristic", True)),
+                    quality_note=str(weather.get("quality_note") or "Synthetic weather fallback in use."),
+                    confidence=str(weather.get("confidence") or "low"),
+                )
+                payload.setdefault("precip_columns", self.derive_precip_columns_from_tiles(payload.get("items", []), max_items=260))
+                payload.setdefault("lightning_events", self.derive_lightning_events_from_tiles(payload.get("items", []), max_items=140))
 
-        # Add clean scene contract for newer clients while retaining legacy payload keys.
-        scene_payload = self.build_scene_payload(payload, bbox_norm)
-        payload["status"] = scene_payload.get("status", {})
-        payload["meta"] = scene_payload.get("meta", {})
-        payload["scene"] = scene_payload.get("scene", {})
-        payload["summary"] = scene_payload.get("summary", payload.get("summary") or {})
-        payload["ok"] = bool(payload.get("ok", True) and payload["status"].get("ok", True))
-        return payload
+            scene_payload = self.build_scene_payload(payload, bbox_norm)
+            payload["status"] = scene_payload.get("status", {})
+            payload["meta"] = scene_payload.get("meta", {})
+            payload["scene"] = scene_payload.get("scene", {})
+            payload["summary"] = scene_payload.get("summary", payload.get("summary") or {})
+            payload["ok"] = bool(payload.get("ok", True) and payload["status"].get("ok", True))
+            return payload
+        except Exception as exc:
+            log.exception("[gfs] scene payload assembly failed")
+            return self._degraded_scene_payload(bbox_norm, str(exc))
 
 
     def _tile_bounds_xyz(self, z: int, x: int, y: int) -> dict[str, float]:
@@ -2733,14 +2788,14 @@ class GFSService:
         center = feat.get("center") or {}
         lat = center.get("lat")
         lon = center.get("lon")
-        if lat is not None and lon is not None and self._point_in_bounds(float(lat), float(lon), bounds):
+        if lat is not None and lon is not None and self._point_in_bounds(safe_float(lat), safe_float(lon), bounds):
             return True
         # Try legacy bounds center.
         legacy = feat.get("bounds") or {}
         if legacy:
             lat = legacy.get("lat_center")
             lon = legacy.get("lon_center")
-            if lat is not None and lon is not None and self._point_in_bounds(float(lat), float(lon), bounds):
+            if lat is not None and lon is not None and self._point_in_bounds(safe_float(lat), safe_float(lon), bounds):
                 return True
         # Try first footprint/path point if present.
         fp = feat.get("footprint")
@@ -2748,7 +2803,7 @@ class GFSService:
             p0 = fp[0] or {}
             lat = p0.get("lat")
             lon = p0.get("lng", p0.get("lon"))
-            if lat is not None and lon is not None and self._point_in_bounds(float(lat), float(lon), bounds):
+            if lat is not None and lon is not None and self._point_in_bounds(safe_float(lat), safe_float(lon), bounds):
                 return True
         return False
 
@@ -2766,10 +2821,11 @@ class GFSService:
                 p0 = fp[0] or {}
                 lat = p0.get("lat", lat)
                 lon = p0.get("lng", p0.get("lon", lon))
-        try:
-            return float(lat), float(lon)
-        except Exception:
+        lat_f = safe_float(lat, None)
+        lon_f = safe_float(lon, None)
+        if lat_f is None or lon_f is None:
             return None, None
+        return lat_f, lon_f
 
     def _feature_bbox(self, feat: dict[str, Any]) -> dict[str, float]:
         b = feat.get("bbox")
@@ -2801,10 +2857,10 @@ class GFSService:
     def _dedup_key(self, layer: str, feat: dict[str, Any], meta: dict[str, Any]) -> str:
         if layer == "lightning":
             c = meta.get("centroid") or {}
-            lat = round(float(c.get("lat", 0.0)), 2)
-            lon = round(float(c.get("lon", 0.0)), 2)
+            lat = round(safe_float(c.get("lat"), 0.0), 2)
+            lon = round(safe_float(c.get("lon"), 0.0), 2)
             t = str(meta.get("time_bucket") or "na")
-            intensity = round(float(feat.get("estimated_energy") or feat.get("intensity") or feat.get("severity") or 0.0), 2)
+            intensity = round(safe_float(feat.get("estimated_energy") or feat.get("intensity") or feat.get("severity"), 0.0), 2)
             kind = str(feat.get("type") or feat.get("kind") or "strike")
             return f"ltg:{lat}:{lon}:{t}:{intensity}:{kind}"
         return str(meta.get("feature_id") or feat.get("id") or stable_hash_u32(json.dumps(feat, sort_keys=True, default=str)))
@@ -2884,6 +2940,12 @@ class GFSService:
             f.setdefault("time_bucket", meta.get("time_bucket"))
             f.setdefault("altitude_band", meta.get("altitude_band"))
             f.setdefault("dedup_key", meta.get("dedup_key"))
+            c = f.get("centroid") or {}
+            lat = safe_float(c.get("lat"), None)
+            lon = safe_float(c.get("lon"), None)
+            if lat is None or lon is None:
+                log.debug("[gfs] skip malformed feature without finite centroid layer=%s fid=%s", layer, fid)
+                continue
             out.append(f)
         return out, len(candidate_ids)
 
@@ -2907,10 +2969,17 @@ class GFSService:
             diag["cache_age_ms"] = now_ms - int(row.get("ts") or 0)
             return row["payload"], diag
         started = time.perf_counter()
-        payload = self.cloud_tiles_payload(bbox)
+        try:
+            payload = self.cloud_tiles_payload(bbox)
+        except Exception as exc:
+            log.exception("[gfs] cached scene generation failed")
+            payload = self._degraded_scene_payload(bbox, str(exc))
         diag["build_duration_ms"] = int((time.perf_counter() - started) * 1000)
         self.state.tile_cache[key] = {"ts": now_ms, "payload": payload}
-        self._build_layer_feature_indexes(payload)
+        try:
+            self._build_layer_feature_indexes(payload)
+        except Exception:
+            log.exception("[gfs] layer feature index build failed")
         return payload, diag
 
     def layer_tile_payload(self, layer: str, z: int, x: int, y: int, pad_deg: float = 0.18, debug: bool = False) -> dict[str, Any]:
@@ -2932,9 +3001,13 @@ class GFSService:
                 "summary": {"count": 0},
             }
 
-        candidates, candidate_count = self._spatial_candidates(layer_name, filter_bounds)
-        precise = [f for f in candidates if self._feature_intersects_bounds(f, filter_bounds)]
-        precise = sorted(precise, key=lambda f: float(f.get("visual_priority", f.get("importance", 0.0)) or 0.0), reverse=True)
+        try:
+            candidates, candidate_count = self._spatial_candidates(layer_name, filter_bounds)
+            precise = [f for f in candidates if self._feature_intersects_bounds(f, filter_bounds)]
+        except Exception as exc:
+            log.exception("[gfs] tile derivation failed layer=%s tile=%s/%s/%s", layer_name, z, x, y)
+            candidates, candidate_count, precise = [], 0, []
+        precise = sorted(precise, key=lambda f: safe_float(f.get("visual_priority", f.get("importance", 0.0)), 0.0), reverse=True)
 
         dedup = []
         dedup_seen = set()
