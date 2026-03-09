@@ -117,6 +117,8 @@ The `/gfs` page is the Google Maps 3D globe interface for marine context:
 
 A valid Google Maps API configuration is required for full globe functionality.
 
+The `/gfs/api/cloud_tiles` payload explicitly carries source quality metadata (`source` + `payload_state`) so operators can distinguish between live NOMADS data, cached real payloads, and synthetic fallback output.
+
 ## Fish Location Data
 Fish locations are sourced from:
 
@@ -160,6 +162,7 @@ Re-running `broadcast.sh` is the safest way to refresh deployment scripts/templa
 
 ### Google 3D globe not loading
 - Verify backend config route returns a non-empty map key.
+- Confirm `/gfs` status text reports expected source quality (`live`, `cached`, or `synthetic`).
 - Check browser console for Maps JS load/import errors.
 
 ### Missing/invalid Google Maps API key
@@ -173,6 +176,10 @@ Re-running `broadcast.sh` is the safest way to refresh deployment scripts/templa
 ### Altitude mode errors on polygons
 If you see errors like `InvalidValueError` related to `gmp-polygon-3d` `altitudeMode`, polygon altitude handling was likely changed incorrectly in frontend code. Revert to enum-based altitude mode handling for `Polygon3DElement`.
 
+### Weather source transparency
+- `source=gfs_nomads` with `payload_state=live` means direct real model ingestion succeeded.
+- `source=gfs_nomads` with `payload_state=cached` means a recent cached real payload is serving after NOMADS failure.
+- `payload_state=synthetic` indicates heuristic fallback and should be treated as degraded guidance.
 ### nginx/service restart checks
 - Validate nginx config with `nginx -t`.
 - Check app service status/logs via systemd and restart as needed.
@@ -182,6 +189,7 @@ If you see errors like `InvalidValueError` related to `gmp-polygon-3d` `altitude
 - Frontend: static pages under `static/` (`broadcast`, `watch`, `gfs`, etc.).
 - Deployment: modular shell scripts and templates under `deploy/`.
 - Google Maps 3D frontend depends on backend-delivered runtime config.
+- AI endpoints return explicit provider-state responses unless providers are configured (`OPENAI_API_KEY`, `TTS_PROVIDER`, `SERPAPI_API_KEY`).
 
 ## License / Maintainer
 Project maintained by Jayson Tolleson.
