@@ -36,7 +36,7 @@ def open_gfs_groups(grib_path: Path) -> dict[str, Any]:
         datasets["surface"] = xr.open_dataset(
             grib_path,
             engine="cfgrib",
-            backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}, "indexpath": ""},
+            backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface", "stepType": "instant"}, "indexpath": ""},
         )
     except Exception:
         pass
@@ -64,6 +64,15 @@ def open_gfs_groups(grib_path: Path) -> dict[str, Any]:
             grib_path,
             engine="cfgrib",
             backend_kwargs={"filter_by_keys": {"typeOfLevel": "isobaricInhPa"}, "indexpath": ""},
+        )
+    except Exception:
+        pass
+
+    try:
+        datasets["meanSea"] = xr.open_dataset(
+            grib_path,
+            engine="cfgrib",
+            backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}, "indexpath": ""},
         )
     except Exception:
         pass

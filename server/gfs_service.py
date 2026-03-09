@@ -74,6 +74,7 @@ DEFAULT_GFS_CYCLE_AVAILABILITY_DELAY_MINUTES = 290
 INGEST_FALLBACK_CYCLE_DEPTH = 4
 INGEST_PREFERRED_FORECAST_HOUR = 0
 INGEST_CACHE_MIN_BYTES = 2000
+INGEST_MIN_INTERVAL_SECONDS = 600
 
 SURFACE_VARIABLES = ["PRATE", "APCP", "TCDC", "CAPE", "CIN", "PRMSL", "TMP", "RH", "GUST", "UGRD", "VGRD"]
 AGL_VARIABLES = ["TMP", "RH", "UGRD", "VGRD", "TCDC"]
@@ -160,28 +161,8 @@ class GFSNomadsClient:
         return f"/gfs.{date_str}/{int(cycle_hour):02d}/atmos"
 
     def normalize_bbox_for_nomads(self, bbox: dict[str, float]) -> dict[str, float]:
-        west = float(bbox.get("west", -180.0))
-        east = float(bbox.get("east", 180.0))
-        south = float(bbox.get("south", -90.0))
-        north = float(bbox.get("north", 90.0))
-        south = max(-90.0, min(90.0, south))
-        north = max(-90.0, min(90.0, north))
-        if north < south:
-            south, north = north, south
-
-        def norm360(v: float) -> float:
-            vv = v
-            while vv < 0:
-                vv += 360.0
-            while vv >= 360.0:
-                vv -= 360.0
-            return vv
-
-        left = norm360(west)
-        right = norm360(east)
-        if right < left:
-            right = left + 359.75
-        return {"leftlon": round(left, 3), "rightlon": round(right, 3), "toplat": round(north, 3), "bottomlat": round(south, 3)}
+        _ = bbox
+        return {"leftlon": -180.0, "rightlon": 180.0, "toplat": 80.0, "bottomlat": -80.0}
 
     def build_filter_url(self, date_str: str, cycle_hour: int, forecast_hour: int, bbox: dict[str, float], variables: list[str], levels: list[str]) -> str:
         from urllib.parse import urlencode
@@ -807,7 +788,7 @@ class GFSService:
     def open_surface_dataset(self, grib_path: Path) -> Any:
         if xr is None:
             return None
-        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}, "indexpath": ""})
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface", "stepType": "instant"}, "indexpath": ""})
 
     def open_2m_dataset(self, grib_path: Path) -> Any:
         if xr is None:
@@ -961,6 +942,32 @@ class GFSService:
 
         with self._ingest_lock:
             now = utc_now()
+            ttl_ms = INGEST_MIN_INTERVAL_SECONDS * 1000
+            recent_ok = (
+                self.state.ingest_last_success_ts
+                and (now_ms - int(self.state.ingest_last_success_ts)) < ttl_ms
+                and self.state.last_good_model_state
+            )
+            if recent_ok:
+                lkg = self.state.last_good_model_state or {}
+                lkg_path_raw = lkg.get("fetch", {}).get("path")
+                lkg_path = Path(lkg_path_raw) if lkg_path_raw else None
+                if lkg_path and lkg_path.exists():
+                    lkg_groups, lkg_backend = self.open_all_valid_groups(lkg_path)
+                    if lkg_groups:
+                        self.state.decode_backend = lkg_backend
+                        self.state.data_source_mode = "primary" if lkg_backend == "cfgrib" else "fallback" if lkg_backend == "pygrib" else "heuristic"
+                        lkg_fetch = FetchResult(
+                            ok=True,
+                            path=lkg_path,
+                            cycle=str(lkg.get("fetch", {}).get("cycle") or ""),
+                            forecast_hour=int(lkg.get("fetch", {}).get("forecast_hour") or 0),
+                            valid_time=str(lkg.get("fetch", {}).get("valid_time") or ""),
+                            error="",
+                            url=str(lkg.get("fetch", {}).get("url") or ""),
+                        )
+                        self._update_ingest_state_success(lkg_fetch, lkg_groups, mode="last_known_good")
+                        return {"mode": "last_known_good", "fetch": lkg_fetch, "groups": lkg_groups, "bbox": lkg.get("bbox") or bbox}
             try:
                 fetch = self.gfs_client.fetch_latest_available_subset(now, bbox, DEFAULT_REQUIRED_VARIABLES, DEFAULT_REQUIRED_LEVELS)
                 if not fetch.ok or not fetch.path:
@@ -2115,7 +2122,10 @@ class GFSService:
 
     def _derive_real_source_fields(self, groups: dict[str, Any]) -> dict[str, Any]:
         precip = self.extract_precip_rate_mm_hr(groups)
-        cloud_layers = self.derive_cloud_layers(groups.get("surface"), groups.get("10m") or groups.get("2m"), groups.get("isobaricInhPa"))
+        hagl = groups.get("10m")
+        if hagl is None:
+            hagl = groups.get("2m")
+        cloud_layers = self.derive_cloud_layers(groups.get("surface"), hagl, groups.get("isobaricInhPa"))
         vectors = self.derive_balloon_vectors(groups)
         if precip is None or not cloud_layers:
             raise RuntimeError("missing precip/cloud arrays")
