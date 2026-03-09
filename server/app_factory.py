@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from quart import Quart
+import socketio
+
+from server.config import load_settings
+from server.routes import register_routes
+from server.rtc import RTCManager
+from server.socket_handlers import register_socket_handlers
+from server.state import AppState
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+
+
+def _configure_logging(debug: bool) -> None:
+    level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
+
+
+def create_quart_app() -> Quart:
+    settings = load_settings()
+    _configure_logging(settings.debug)
+
+    app = Quart(
+        __name__,
+        static_folder=str(STATIC_DIR),
+        static_url_path="/static",
+    )
+    state = AppState(default_room=settings.default_room)
+    rtc = RTCManager(state)
+
+    sio = socketio.AsyncServer(
+        async_mode="asgi",
+        cors_allowed_origins="*",
+        max_http_buffer_size=20000000,
+        ping_interval=25,
+        ping_timeout=60,
+    )
+    state.sio = sio
+
+    register_routes(app, state, settings, rtc)
+    register_socket_handlers(sio, state, settings, rtc)
+
+    app.state_obj = state
+    app.settings_obj = settings
+    app.rtc_manager = rtc
+    app.sio = sio
+
+    return app
+
+
+def create_asgi_app():
+    app = create_quart_app()
+    settings = app.settings_obj
+    sio = app.sio
+    return socketio.ASGIApp(sio, other_asgi_app=app, socketio_path=settings.socket_path.lstrip("/"))
+
+
+def create_app():
+    """Factory alias for process managers expecting create_app."""
+    return create_asgi_app()
