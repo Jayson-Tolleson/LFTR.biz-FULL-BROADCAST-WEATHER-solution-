@@ -62,3 +62,8 @@ def create_asgi_app():
     settings = app.settings_obj
     sio = app.sio
     return socketio.ASGIApp(sio, other_asgi_app=app, socketio_path=settings.socket_path.lstrip("/"))
+
+
+def create_app():
+    """Factory alias for process managers expecting create_app."""
+    return create_asgi_app()

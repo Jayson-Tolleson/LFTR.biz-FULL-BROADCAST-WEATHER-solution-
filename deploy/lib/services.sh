@@ -9,6 +9,7 @@ install_app_files() {
     --exclude '__pycache__/' \
     --exclude '*.pyc' \
     "$REPO_ROOT/" "$APP_DIR/"
+  run_required "create runtime directories" $SUDO mkdir -p "$APP_DIR/uploads" "$APP_DIR/logs"
   run_required "set app ownership" $SUDO chown -R "${APP_USER}:${APP_GROUP}" "$APP_DIR"
   run_required "verify fish location CSV" test -f "${APP_DIR}/static/data/fishloclist.csv"
 }

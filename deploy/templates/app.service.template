@@ -9,7 +9,7 @@ Group=__APP_GROUP__
 WorkingDirectory=__APP_DIR__
 EnvironmentFile=__APP_ENV_FILE__
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -lc 'if [ -x "__APP_DIR__/venv/bin/hypercorn" ]; then exec __APP_DIR__/venv/bin/hypercorn main:asgi_app --bind __APP_BIND_HOST__:__APP_BIND_PORT__ --workers __APP_WORKERS__; else exec hypercorn main:asgi_app --bind __APP_BIND_HOST__:__APP_BIND_PORT__ --workers __APP_WORKERS__; fi'
+ExecStart=/bin/bash -lc 'if [ -x "__APP_DIR__/venv/bin/hypercorn" ]; then exec __APP_DIR__/venv/bin/hypercorn --factory server.app_factory:create_app --bind __APP_BIND_HOST__:__APP_BIND_PORT__ --workers __APP_WORKERS__; else exec hypercorn --factory server.app_factory:create_app --bind __APP_BIND_HOST__:__APP_BIND_PORT__ --workers __APP_WORKERS__; fi'
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=10000

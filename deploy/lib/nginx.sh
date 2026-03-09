@@ -15,7 +15,7 @@ install_nginx_config() {
 
   local app_proxy_location="location / {\n        proxy_pass http://${APP_BIND_HOST}:${APP_BIND_PORT};\n        proxy_http_version 1.1;\n\n        proxy_set_header Upgrade \$http_upgrade;\n        proxy_set_header Connection \$connection_upgrade;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;\n        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto \$scheme;\n\n        proxy_read_timeout 3600s;\n        proxy_send_timeout 3600s;\n    }"
 
-  local static_locations="location = /favicon.ico {\n        alias ${APP_DIR}/static/favicon.ico;\n        access_log off;\n        log_not_found off;\n        expires 7d;\n    }\n\n    location /static/ {\n        alias ${APP_DIR}/static/;\n        access_log off;\n        expires -1;\n        add_header Cache-Control \"no-store, no-cache, must-revalidate, proxy-revalidate\";\n    }"
+  local static_locations="location = /favicon.ico {\n        alias ${APP_DIR}/static/favicon.ico;\n        access_log off;\n        log_not_found off;\n        expires 7d;\n    }\n\n    location /static/ {\n        alias ${APP_DIR}/static/;\n        access_log off;\n        expires -1;\n        add_header Cache-Control \"no-store, no-cache, must-revalidate, proxy-revalidate\";\n    }\n\n    location /uploads/ {\n        alias ${APP_DIR}/uploads/;\n        access_log off;\n        expires 5m;\n    }"
 
   local http_server_block=""
   local https_server_block=""

@@ -7,6 +7,7 @@ from urllib.parse import quote
 from quart import Quart, jsonify, request, send_file, websocket
 
 from server import ai
+from server.api import api_bp
 from server.config import Settings
 from server.gfs_service import GFSService
 from server.rtc import RTCManager
@@ -119,6 +120,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         return jsonify(await ai.handle_websearch(payload))
 
     gfs = GFSService(str(STATIC_DIR))
+    app.register_blueprint(api_bp)
 
     @app.get("/gfs")
     @app.get("/gfs/")
@@ -137,6 +139,12 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         payload["google_maps_api_key"] = settings.google_maps_api_key
         payload["mapsApiKey"] = settings.google_maps_api_key
         payload["maps3d_available"] = bool(settings.google_maps_api_key)
+        return jsonify(payload)
+
+
+    @app.get("/api/gfs")
+    async def api_gfs_scene_proxy():
+        payload = gfs.cloud_tiles_payload()
         return jsonify(payload)
 
     @app.get("/gfs/api/fish")
