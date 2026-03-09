@@ -3,8 +3,75 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+prompt_default () {
+  local prompt="$1"
+  local default="$2"
+  local value
+  read -r -p "$prompt [$default]: " value
+  echo "${value:-$default}"
+}
+
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exec sudo "$0" "$@"
 fi
+
+echo "===== BROADCAST INSTALLER CONFIGURATION ====="
+
+DEFAULT_IP="$(curl -s ifconfig.me || echo "127.0.0.1")"
+DEFAULT_DOMAIN=""
+if compgen -G "/etc/nginx/sites-enabled/*" >/dev/null 2>&1; then
+  DEFAULT_DOMAIN="$(grep -h "server_name" /etc/nginx/sites-enabled/* 2>/dev/null | awk '{print $2}' | tr -d ';' | head -n1 || true)"
+fi
+DEFAULT_DOMAIN="${DEFAULT_DOMAIN:-$DEFAULT_IP}"
+
+DEFAULT_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+DEFAULT_PROJECT="${DEFAULT_PROJECT:-my-gcp-project}"
+
+DEFAULT_MAPS_KEY="PASTE_API_KEY_HERE"
+if [[ -f "${ROOT_DIR}/static/indexgfs.html" ]]; then
+  DETECTED_MAPS_KEY="$(grep -o 'key=[^"& ]*' "${ROOT_DIR}/static/indexgfs.html" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+  if [[ -n "${DETECTED_MAPS_KEY}" ]]; then
+    DEFAULT_MAPS_KEY="${DETECTED_MAPS_KEY}"
+  fi
+fi
+
+DOMAIN="$(prompt_default "Enter domain name (used for nginx + SSL)" "$DEFAULT_DOMAIN")"
+GOOGLE_PROJECT_ID="$(prompt_default "Enter Google Cloud Project ID" "$DEFAULT_PROJECT")"
+MAPS_API_KEY="$(prompt_default "Enter Google Maps JS API key" "$DEFAULT_MAPS_KEY")"
+EMAIL="$(prompt_default "Enter email for Let's Encrypt certificate" "admin@$DOMAIN")"
+GCP_KEY="$(prompt_default "Path to GCP service account key" "/etc/broadcast/gcp-key.json")"
+
+mkdir -p /etc/broadcast
+cat > /etc/broadcast/install.env <<CFG
+DOMAIN=$DOMAIN
+GOOGLE_PROJECT_ID=$GOOGLE_PROJECT_ID
+MAPS_API_KEY=$MAPS_API_KEY
+EMAIL=$EMAIL
+GCP_KEY=$GCP_KEY
+CFG
+
+export DOMAIN
+export GOOGLE_PROJECT_ID
+export MAPS_API_KEY
+export EMAIL
+export CERTBOT_EMAIL="$EMAIL"
+export GCP_KEY
+
+if [[ -f "${ROOT_DIR}/static/indexgfs.html" ]]; then
+  sed -i "s/GOOGLE_MAPS_API_KEY/${MAPS_API_KEY//\//\\/}/g" "${ROOT_DIR}/static/indexgfs.html"
+fi
+
+if [[ "$DOMAIN" == "$DEFAULT_IP" ]]; then
+  echo "[WARN] Domain matches public IP; SSL request will be skipped in this wrapper phase."
+  export SKIP_SSL=1
+else
+  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" || true
+fi
+
+echo "===== INSTALL CONFIGURATION ====="
+echo "Domain: $DOMAIN"
+echo "Project: $GOOGLE_PROJECT_ID"
+echo "Maps API: configured"
+echo "GCP key: $GCP_KEY"
 
 exec "${ROOT_DIR}/deploy/install.sh" "$@"
