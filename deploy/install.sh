@@ -21,6 +21,21 @@ fail() { printf '[ERROR] %s\n' "$1" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 phase() { printf '\n===== %s =====\n' "$1"; }
 
+install_packages_safe() {
+  local required=("$@")
+  local to_install=()
+  for pkg in "${required[@]}"; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+      to_install+=("$pkg")
+    else
+      log WARN "Package not available on this distro, skipping: $pkg"
+    fi
+  done
+  if ((${#to_install[@]})); then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${to_install[@]}"
+  fi
+}
+
 detect_os() {
 
     if [ -f /etc/os-release ]; then
@@ -53,7 +68,7 @@ PHASE_1_SYSTEM_PREP() {
   detect_os
 
   apt-get update -y
-  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  install_packages_safe \
     curl \
     unzip \
     git \
