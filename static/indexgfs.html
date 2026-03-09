@@ -1751,6 +1751,11 @@
     return [...uniq.values()];
   }
 
+  async function fetchAggregateTile(t) {
+    const url = `/gfs/tile?z=${t.z}&x=${t.x}&y=${t.y}`;
+    return json(url);
+  }
+
   async function fetchLayerTile(layer, t) {
     const debugFlag = state.tileDebug ? '?debug=1' : '';
     const url = `/gfs/tile/${encodeURIComponent(layer)}/${t.z}/${t.x}/${t.y}${debugFlag}`;
@@ -1805,9 +1810,20 @@
       ];
       const requests = [];
       let tileFailures = 0;
+      const aggregateRequests = [];
       for (const [layer, enabled] of layerPlan) {
         if (!enabled) continue;
         for (const t of tiles) {
+          if (layer === "clouds") {
+            aggregateRequests.push(fetchAggregateTile(t).then((ag)=>{
+              const cm = state.layerTileData.clouds;
+              const pm = state.layerTileData.precip;
+              const wm = state.layerTileData.wind;
+              cm.set(t.key, { features: Array.isArray(ag.clouds) ? ag.clouds : [] });
+              pm.set(t.key, { features: Array.isArray(ag.precipitation) ? ag.precipitation : [] });
+              wm.set(t.key, { features: Array.isArray(ag.wind_vectors) ? ag.wind_vectors : [] });
+            }).catch(()=>{}));
+          }
           const m = state.layerTileData[layer];
           if (m.has(t.key)) continue;
           requests.push(
@@ -1824,6 +1840,7 @@
         }
       }
       if (requests.length) await Promise.all(requests);
+      if (aggregateRequests.length) await Promise.all(aggregateRequests);
 
       // prune stale tile entries
       for (const layer of Object.keys(state.layerTileData)) {

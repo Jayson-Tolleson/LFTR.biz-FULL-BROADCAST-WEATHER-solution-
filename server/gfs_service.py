@@ -2117,7 +2117,10 @@ class GFSService:
         low = cloud_layers.get("low")
         mid = cloud_layers.get("mid")
         conv = np.clip((precip / 30.0) * 0.6 + high * 0.4, 0.0, 1.0)
-        wind_speed = np.sqrt(np.square(vectors[0]["u"]) + np.square(vectors[0]["v"])) if vectors else np.zeros_like(precip)
+        humidity = self._extract_scalar_field(groups, [("isobaricInhPa", ["r", "RH"]), ("surface", ["r", "RH"])])
+        wind_u = self._extract_scalar_field(groups, [("isobaricInhPa", ["u", "UGRD"]), ("surface", ["u", "UGRD"])])
+        wind_v = self._extract_scalar_field(groups, [("isobaricInhPa", ["v", "VGRD"]), ("surface", ["v", "VGRD"])])
+        wind_speed = np.sqrt(np.square(wind_u) + np.square(wind_v)) if wind_u is not None and wind_v is not None else (np.sqrt(np.square(vectors[0]["u"]) + np.square(vectors[0]["v"])) if vectors else np.zeros_like(precip))
         temp_k = self._extract_scalar_field(groups, [("surface", ["t", "TMP", "tmp"]), ("heightAboveGround", ["t", "TMP", "tmp"])])
         pressure_pa = self._extract_scalar_field(groups, [("meanSea", ["prmsl", "PRMSL"]), ("surface", ["prmsl", "PRMSL"])])
         return {
@@ -2135,6 +2138,9 @@ class GFSService:
             "wind_speed": wind_speed,
             "temperature_k": temp_k,
             "pressure_pa": pressure_pa,
+            "humidity": humidity,
+            "wind_u": wind_u,
+            "wind_v": wind_v,
         }
 
 
@@ -2168,7 +2174,7 @@ class GFSService:
         except Exception:
             return
         scalar_fields: dict[str, dict[str, Any]] = {}
-        for key in ("cloud_density", "precip_rate", "wind_speed", "temperature_k", "pressure_pa"):
+        for key in ("cloud_density", "precip_rate", "wind_speed", "temperature_k", "pressure_pa", "humidity", "wind_u", "wind_v"):
             val = fields.get(key)
             if val is None:
                 continue

@@ -12,6 +12,8 @@ from server.config import Settings
 from server.gfs_service import GFSService
 from server.rtc import RTCManager
 from server.state import AppState
+from server.weather_tiles.gfs_tiles import tile_to_bounds, marching_squares_precip
+from server.cloud_engine.cloud_builder import build_cloud_clusters
 
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -262,6 +264,69 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         payload = gfs.layer_tile_payload(layer, z, x, y, pad_deg=max(0.0, min(1.2, pad)), debug=debug)
         status = 200 if (payload.get("status") or {}).get("ok", True) else 400
         return jsonify(payload), status
+
+
+    @app.get("/gfs/tile")
+    async def gfs_tile_aggregate():
+        try:
+            z = int(request.args.get("z", 2))
+            x = int(request.args.get("x", 0))
+            y = int(request.args.get("y", 0))
+        except Exception:
+            z, x, y = 2, 0, 0
+
+        bounds = tile_to_bounds(z, x, y)
+        clouds = []
+        precip = []
+        wind_vectors = []
+        try:
+            sf = gfs.state.scalar_fields or {}
+            cloud = sf.get("cloud_density") or {}
+            hum = sf.get("humidity") or sf.get("cloud_density") or {}
+            pr = sf.get("precip_rate") or {}
+            wu = sf.get("wind_u") or sf.get("wind_speed") or {}
+            wv = sf.get("wind_v") or sf.get("wind_speed") or {}
+            lat = cloud.get("lat") or pr.get("lat")
+            lon = cloud.get("lon") or pr.get("lon")
+            if lat is not None and lon is not None:
+                import numpy as np
+                lat_a = np.asarray(lat, dtype=float)
+                lon_a = np.asarray(lon, dtype=float)
+                cloud_a = np.asarray(cloud.get("values"), dtype=float) if cloud.get("values") is not None else None
+                hum_a = np.asarray(hum.get("values"), dtype=float) if hum.get("values") is not None else None
+                pr_a = np.asarray(pr.get("values"), dtype=float) if pr.get("values") is not None else None
+                if cloud_a is not None:
+                    clouds = build_cloud_clusters(lat_a, lon_a, cloud_a, hum_a, z)[:260]
+                if pr_a is not None:
+                    precip = marching_squares_precip(lat_a, lon_a, pr_a, z)[:320]
+                if wu.get("values") is not None and wv.get("values") is not None:
+                    u = np.asarray(wu.get("values"), dtype=float)
+                    v = np.asarray(wv.get("values"), dtype=float)
+                    step = 10 if z < 4 else 6 if z < 7 else 4
+                    for iy in range(0, min(u.shape[0], lat_a.shape[0]), step):
+                        for ix in range(0, min(u.shape[1], lat_a.shape[1]), step):
+                            wind_vectors.append({
+                                "lat": float(lat_a[iy, ix]),
+                                "lon": float(lon_a[iy, ix]),
+                                "u": float(u[iy, ix]),
+                                "v": float(v[iy, ix]),
+                            })
+                def in_bounds(item):
+                    lat_v = float(item.get("lat", 0.0))
+                    lon_v = float(item.get("lon", 0.0))
+                    return bounds["south"] <= lat_v <= bounds["north"] and bounds["west"] <= lon_v <= bounds["east"]
+                clouds = [c for c in clouds if in_bounds(c)]
+                wind_vectors = [w for w in wind_vectors if in_bounds(w)]
+        except Exception:
+            clouds, precip, wind_vectors = [], [], []
+
+        return jsonify({
+            "z": z, "x": x, "y": y,
+            "bounds": bounds,
+            "clouds": clouds,
+            "precipitation": precip,
+            "wind_vectors": wind_vectors,
+        })
 
     @app.get("/gfs/api/tile/diagnostics")
     async def gfs_tile_diagnostics():
