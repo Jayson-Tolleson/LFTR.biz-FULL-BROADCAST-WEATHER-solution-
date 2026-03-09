@@ -440,6 +440,8 @@
     jetSeedCount: 80,
     cloudTiles: [],
     cloudFetchedAt: 0,
+    weatherSource: 'unknown',
+    weatherPayloadState: 'unknown',
     wsConnected: false,
     lastUpdateAt: 0,
     hudPollId: null,
@@ -456,7 +458,7 @@
 
   function setStatus(msg, isStale = false) {
     const mapState = state.mapReady ? 'ready' : 'fallback';
-    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState} • C:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} R:${state.rainMarkers.length + state.hailMarkers.length} J:${state.jetMarkers.length} • ${msg}`;
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState} • Src:${state.weatherSource}/${state.weatherPayloadState} • C:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} R:${state.rainMarkers.length + state.hailMarkers.length} J:${state.jetMarkers.length} • ${msg}`;
     statusLine.classList.toggle('stale', !!isStale);
   }
 
@@ -1560,8 +1562,11 @@
     const payload = await json(`/gfs/api/cloud_tiles?limit=${encodeURIComponent(lod.tileLimit)}&compact=1`);
     state.cloudTiles = payload.items || [];
     state.cloudFetchedAt = Date.now();
+    state.weatherSource = String(payload.source || 'unknown');
+    state.weatherPayloadState = String(payload.payload_state || (payload.source === 'gfs_nomads' ? 'live' : 'synthetic'));
     const fetchMs = Math.round(performance.now() - started);
-    setStatus(`Cloud feed ${state.cloudTiles.length} tiles • ${fetchMs}ms`);
+    const sourceLabel = state.weatherPayloadState === 'live' ? 'live real GFS/NOMADS' : state.weatherPayloadState === 'cached' ? 'cached real payload' : 'synthetic fallback';
+    setStatus(`Cloud feed ${state.cloudTiles.length} tiles • ${fetchMs}ms • ${sourceLabel}`);
     await renderWeatherLayers();
   }
 

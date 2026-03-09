@@ -1875,22 +1875,66 @@ class GFSService:
 
     def generate_fallback_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
         cloud = self._legacy_cloud_tiles_payload()
-        cloud.update({"source": "fallback_proxy", "bbox_used": bbox or {}})
+        cloud.update({
+            "source": "fallback_proxy",
+            "payload_state": "synthetic",
+            "cycle": cloud.get("cycle"),
+            "forecast_hour": cloud.get("forecast_hour"),
+            "valid_time": cloud.get("valid_time"),
+            "bbox_used": bbox or {},
+        })
         cloud["rain"] = {"items": [], "count": 0}
         cloud["hail"] = {"items": [], "count": 0}
         cloud["lightning"] = {"items": [], "count": 0}
         cloud["balloons"] = {"items": [], "count": 0}
         return cloud
 
+
+    def read_most_recent_cached_real_payload(self, max_age_seconds: int = 5400) -> Any:
+        if self.disk_cache is None:
+            return None
+        now_ts = time.time()
+        newest = None
+        newest_ts = 0.0
+        try:
+            for k in self.disk_cache.iterkeys():
+                if not str(k).startswith('gfs_payload:v2:'):
+                    continue
+                row = self.disk_cache.get(k)
+                if not isinstance(row, dict):
+                    continue
+                if row.get('source') != 'gfs_nomads':
+                    continue
+                ts = float(row.get('updated_at', 0)) / 1000.0 if row.get('updated_at') else 0.0
+                if ts <= 0:
+                    continue
+                if now_ts - ts > max_age_seconds:
+                    continue
+                if ts > newest_ts:
+                    newest_ts = ts
+                    newest = row
+        except Exception:
+            return None
+        return newest
+
     def generate_weather_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
         try:
             payload = self.generate_real_gfs_payload(bbox)
+            payload["payload_state"] = "live"
             key = self.payload_cache_key(payload.get("cycle", "na"), int(payload.get("forecast_hour", 0)), bbox or {})
             self.write_cached_payload(key, payload)
             return payload
         except Exception as exc:
-            print(f"[gfs] real nomads path failed; activating fallback: {exc}")
-            return self.generate_fallback_payload(bbox)
+            print(f"[gfs] real nomads path failed; trying cached real payload first: {exc}")
+            cached = self.read_most_recent_cached_real_payload(max_age_seconds=5400)
+            if isinstance(cached, dict):
+                cached_payload = dict(cached)
+                cached_payload["payload_state"] = "cached"
+                cached_payload["bbox_used"] = bbox or cached_payload.get("bbox_used") or {}
+                return cached_payload
+            fb = self.generate_fallback_payload(bbox)
+            fb["payload_state"] = "synthetic"
+            return fb
 
     def debug_real_gfs_cycle(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
         """Manual debug helper for cycle/hour/url/group visibility."""
@@ -1966,12 +2010,22 @@ class GFSService:
         weather = self.generate_weather_payload(bbox or {"west": -180.0, "south": -80.0, "east": 180.0, "north": 80.0})
         if weather.get("source") == "gfs_nomads":
             payload = self.serialize_cloud_payload(weather.get("tiles", []), weather)
+            payload["payload_state"] = weather.get("payload_state", "live")
             payload["rain"] = weather.get("rain", {"items": [], "count": 0})
             payload["hail"] = weather.get("hail", {"items": [], "count": 0})
             payload["lightning"] = weather.get("lightning", {"items": [], "count": 0})
             payload["balloons"] = weather.get("balloons", {"items": [], "count": 0})
             payload["note"] = "Primary source is NOAA NOMADS GFS 0.25 via GRIB subset decode."
+            payload["cycle"] = weather.get("cycle")
+            payload["forecast_hour"] = weather.get("forecast_hour")
+            payload["valid_time"] = weather.get("valid_time")
+            payload["bbox_used"] = weather.get("bbox_used")
             return payload
+        weather.setdefault("cycle", None)
+        weather.setdefault("forecast_hour", None)
+        weather.setdefault("valid_time", None)
+        weather.setdefault("bbox_used", bbox or {})
+        weather.setdefault("payload_state", "synthetic")
         return weather
 
     def _load_store(self) -> Dict[str, Any]:

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+import os
+import urllib.request
+import urllib.parse
+from typing import Any, Dict, Iterable, List, Sequence
 
 from quart import Response
 
@@ -10,37 +14,94 @@ from quart import Response
 log = logging.getLogger("server.ai")
 
 
+def _json_response(payload: Dict[str, Any], status: int = 200) -> Response:
+    return Response(json.dumps(payload), status=status, content_type="application/json")
+
+
 async def handle_chat(payload: Dict[str, Any], fallback_text: str) -> Dict[str, Any]:
-    text = (payload or {}).get("text", "")
-    text = (text or "").strip()
+    text = ((payload or {}).get("text") or "").strip()
     if not text:
-        return {"reply": "Please provide text.", "command": None}
-    return {"reply": fallback_text, "command": None}
+        return {"ok": False, "provider": "none", "error": "missing_text", "message": "Please provide text.", "data": {"reply": "", "command": None}}
+
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not openai_key:
+        return {
+            "ok": False,
+            "provider": "none",
+            "error": "provider_unconfigured",
+            "message": "No chat provider configured. Set OPENAI_API_KEY to enable AI chat.",
+            "data": {"reply": fallback_text, "command": None},
+        }
+
+    return {
+        "ok": False,
+        "provider": "openai",
+        "error": "provider_not_wired",
+        "message": "OPENAI_API_KEY is present, but direct provider wiring is not enabled in this build.",
+        "data": {"reply": fallback_text, "command": None},
+    }
 
 
 async def handle_tts(payload: Dict[str, Any]) -> Response:
-    # Compatibility-first placeholder response (silent wav header bytes)
     text = ((payload or {}).get("text") or "").strip()
     if not text:
-        text = ""
-    # tiny empty WAV-ish payload (clients tolerate empty/short audio)
-    audio = b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
-    return Response(audio, content_type="audio/wav")
+        return _json_response({"ok": False, "provider": "none", "error": "missing_text", "message": "text is required", "data": None}, 400)
+
+    provider = os.getenv("TTS_PROVIDER", "").strip().lower()
+    if not provider:
+        return _json_response({
+            "ok": False,
+            "provider": "none",
+            "error": "provider_unconfigured",
+            "message": "TTS provider is not configured. Set TTS_PROVIDER and provider credentials.",
+            "data": None,
+        }, 503)
+
+    return _json_response({
+        "ok": False,
+        "provider": provider,
+        "error": "provider_not_wired",
+        "message": f"TTS provider '{provider}' is configured but not enabled in this build.",
+        "data": None,
+    }, 501)
 
 
 async def handle_websearch(payload: Dict[str, Any]) -> Dict[str, Any]:
-    query = (payload or {}).get("query", "")
-    query = (query or "").strip()
-    return {
-        "query": query,
-        "results": [
+    query = ((payload or {}).get("query") or "").strip()
+    if not query:
+        return {"ok": False, "provider": "none", "error": "missing_query", "message": "query is required", "data": {"results": []}}
+
+    serpapi_key = os.getenv("SERPAPI_API_KEY", "").strip()
+    if not serpapi_key:
+        return {
+            "ok": False,
+            "provider": "none",
+            "error": "provider_unconfigured",
+            "message": "Web search provider is not configured. Set SERPAPI_API_KEY.",
+            "data": {"query": query, "results": []},
+        }
+
+    def _fetch() -> Dict[str, Any]:
+        q = urllib.parse.urlencode({"q": query, "api_key": serpapi_key, "engine": "google", "num": 5})
+        url = f"https://serpapi.com/search.json?{q}"
+        with urllib.request.urlopen(url, timeout=8) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+        organic = body.get("organic_results") or []
+        results = [
             {
-                "title": "Mock result",
-                "url": "https://example.com",
-                "snippet": f"No API configured for: {query}",
+                "title": r.get("title") or "",
+                "url": r.get("link") or "",
+                "snippet": r.get("snippet") or "",
             }
-        ],
-    }
+            for r in organic[:5]
+        ]
+        return {"ok": True, "provider": "serpapi", "error": None, "message": "ok", "data": {"query": query, "results": results}}
+
+    try:
+        return await asyncio.to_thread(_fetch)
+    except Exception as exc:
+        log.exception("websearch provider request failed")
+        return {"ok": False, "provider": "serpapi", "error": "provider_request_failed", "message": str(exc), "data": {"query": query, "results": []}}
 
 
 def _extract_transcript(responses: Iterable[Any]) -> str:
@@ -56,11 +117,6 @@ def _extract_transcript(responses: Iterable[Any]) -> str:
 
 
 def _streaming_recognize_with_google(client: Any, streaming_config: Any, requests: Sequence[Any]) -> Iterable[Any]:
-    """Call Google Speech streaming API using required config argument variants.
-
-    Some client builds accept positional `(config, requests)`, while others
-    require keyword arguments.
-    """
     try:
         return client.streaming_recognize(streaming_config, iter(requests))
     except TypeError:
@@ -122,11 +178,6 @@ def _transcribe_sync(chunks: Sequence[bytes], mime: str = "audio/webm") -> str:
 
 
 async def transcribe_track(chunks: Sequence[bytes], mime: str = "audio/webm") -> str:
-    """Transcribe one or more encoded audio chunks to text.
-
-    Returns an empty string when STT providers are unavailable, allowing callers
-    to keep socket/event compatibility without hard failures.
-    """
     return await asyncio.to_thread(_transcribe_sync, list(chunks), mime)
 
 
