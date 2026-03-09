@@ -14,6 +14,8 @@ from server.rtc import RTCManager
 from server.state import AppState
 from server.weather_tiles.gfs_tiles import tile_to_bounds, marching_squares_precip
 from server.cloud_engine.cloud_builder import build_cloud_clusters
+from server.broadcast.routes import register_broadcast_routes
+from server.gfs.routes import register_gfs_routes
 
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -122,6 +124,9 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         return jsonify(await ai.handle_websearch(payload))
 
     gfs = GFSService(str(STATIC_DIR))
+
+    register_broadcast_routes(app)
+    register_gfs_routes(app)
     app.register_blueprint(api_bp)
 
     @app.get("/gfs")
