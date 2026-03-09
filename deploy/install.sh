@@ -114,6 +114,16 @@ phase4_google_cloud() {
 
   export GOOGLE_CLOUD_REGION=global
 
+  mkdir -p /etc/broadcast
+  cat > /etc/broadcast/install.env <<EOF
+DOMAIN=${DOMAIN}
+GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
+MAPS_API_KEY=${MAPS_API_KEY:-}
+GOOGLE_MAPS_API_KEY=${MAPS_API_KEY:-}
+GOOGLE_CLOUD_REGION=global
+GCP_KEY=${GCP_KEY}
+EOF
+
   if command -v gcloud >/dev/null 2>&1; then
     if [ -n "$GOOGLE_PROJECT_ID" ] && [ -f "$GCP_KEY" ]; then
 
@@ -175,7 +185,8 @@ server {
 # HTTPS server
 server {
 
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name DOMAIN_PLACEHOLDER;
 
     ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
@@ -264,8 +275,8 @@ After=network.target
 [Service]
 User=jayson_tolleson
 WorkingDirectory=/home/jayson_tolleson/broadcast
-Environment=GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION}
-ExecStart=/home/jayson_tolleson/broadcast/venv/bin/hypercorn server.gfs_service:app --bind 127.0.0.1:8000
+EnvironmentFile=/etc/broadcast/install.env
+ExecStart=/home/jayson_tolleson/broadcast/venv/bin/hypercorn -w 3 -b 127.0.0.1:8000 main:app
 Restart=always
 
 [Install]
@@ -302,7 +313,7 @@ phase8_health() {
       echo "[installer] backend ready"
       break
     fi
-    sleep 2
+    sleep 1
     if [[ "$i" -eq 20 ]]; then
       fail "broadcast health endpoint check failed"
     fi

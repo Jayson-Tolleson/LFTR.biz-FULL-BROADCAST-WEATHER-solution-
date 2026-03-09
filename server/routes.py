@@ -91,6 +91,10 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     async def index():
         return await send_file(str(STATIC_DIR / "index.html"))
 
+    @app.get("/health")
+    async def health():
+        return jsonify({"ok": True}), 200
+
     @app.get("/broadcast")
     async def broadcast():
         return await send_file(str(STATIC_DIR / "broadcast.html"))
