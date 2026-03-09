@@ -48,24 +48,43 @@ Recommended deployment baseline:
 - Google Maps JavaScript API key for the 3D globe path.
 
 ## Installation
-Example install flow:
+Fresh VM one-pass installer (Debian 12 / Ubuntu 22+ / Ubuntu 24+):
 
 ```bash
 git clone <your-repo-url>
-mv LFTR.biz-FULL-BROADCAST-WEATHER-solution- broadcast
-cd broadcast
-sudo bash broadcast.sh
+cd LFTR.biz-FULL-BROADCAST-WEATHER-solution-
+sudo ./install.sh
 ```
 
-The installer delegates to the modular deploy pipeline and configures:
-- System packages.
-- nginx.
-- TLS/cert provisioning flow.
-- coturn/TURN config.
-- Python virtual environment and dependencies.
-- Service files.
-- Application environment file.
-- App startup/restart.
+Deterministic installer phases:
+1. System prep
+2. Package installation
+3. Firewall configuration
+4. Google Cloud API configuration
+5. Filesystem layout
+6. Python virtual environment
+7. Application install
+8. TLS certificate issuance (certbot standalone, nginx stopped)
+9. nginx configuration
+10. systemd service setup
+11. health verification
+
+Required non-interactive environment variables for zero-touch deployment:
+
+```bash
+export DOMAIN=lftr.biz
+export GOOGLE_PROJECT_ID=<your-project-id>
+export GOOGLE_APPLICATION_CREDENTIALS_SRC=/path/to/gcp-key.json
+export CERTBOT_EMAIL=admin@lftr.biz
+sudo ./install.sh
+```
+
+Installed paths:
+- App root: `/opt/broadcast`
+- App code: `/opt/broadcast/app`
+- Runtime config: `/etc/broadcast`
+- Services: `broadcast.service`, `gfs.service`
+- nginx site: `/etc/nginx/sites-available/broadcast.conf`
 
 ## Installer Prompts
 
