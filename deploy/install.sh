@@ -108,7 +108,16 @@ PHASE_2_PACKAGES() {
 }
 
 PHASE_3_FIREWALL() {
-  phase "PHASE 3 — FIREWALL"
+  echo "===== PHASE 3 — FIREWALL ====="
+
+  # Ensure ufw exists
+  if ! command -v ufw >/dev/null 2>&1; then
+    echo "[INFO] Installing ufw firewall"
+    apt-get update
+    apt-get install -y ufw
+  fi
+
+  # Configure firewall
   ufw allow 22 || true
   ufw allow 80 || true
   ufw allow 443 || true
@@ -131,18 +140,24 @@ PHASE_4_GOOGLE_CLOUD_APIS() {
     chmod 600 "$GCP_KEY_DST"
   fi
 
-  [[ -f "$GCP_KEY_DST" ]] || fail "Missing GCP key file at $GCP_KEY_DST (set GOOGLE_APPLICATION_CREDENTIALS_SRC)"
-  [[ -n "$GOOGLE_PROJECT_ID" ]] || fail "GOOGLE_PROJECT_ID must be set"
+  GCP_KEY="$GCP_KEY_DST"
+  if [[ ! -f "$GCP_KEY" ]]; then
+    echo "[WARN] No GCP key found at $GCP_KEY"
+    echo "[WARN] Skipping Vertex AI and Speech-to-Text configuration"
+  else
+    echo "[INFO] Using GCP service account key"
+    export GOOGLE_APPLICATION_CREDENTIALS="$GCP_KEY"
+  fi
 
   if ! command -v gcloud >/dev/null 2>&1; then
     log WARN "gcloud CLI not found; Google API enable step skipped"
+  elif [[ -z "$GOOGLE_PROJECT_ID" ]]; then
+    log WARN "GOOGLE_PROJECT_ID not set; skipping gcloud service enable"
+  elif [[ ! -f "$GCP_KEY" ]]; then
+    log WARN "Missing GCP key — AI features disabled"
   else
-    export GOOGLE_APPLICATION_CREDENTIALS="$GCP_KEY_DST"
     gcloud config set project "$GOOGLE_PROJECT_ID"
-    gcloud services enable \
-      speech.googleapis.com \
-      aiplatform.googleapis.com \
-      iamcredentials.googleapis.com
+    gcloud services enable       speech.googleapis.com       aiplatform.googleapis.com       iamcredentials.googleapis.com
     gcloud config set ai/region global
   fi
 }
