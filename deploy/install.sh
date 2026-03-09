@@ -309,6 +309,10 @@ phase8_health() {
   done
   curl -fsS http://127.0.0.1:8000/gfs >/dev/null || fail "gfs endpoint check failed"
   curl -kfsS "https://$DOMAIN" >/dev/null || fail "public TLS endpoint check failed"
+  if [ ! -f "$APP_DIR/static/indexgfs.html" ]; then
+    echo "[installer] static assets missing"
+    exit 1
+  fi
   echo "[OK] Installer completed successfully"
 }
 

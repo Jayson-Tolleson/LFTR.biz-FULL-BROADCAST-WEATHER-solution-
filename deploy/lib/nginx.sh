@@ -3,6 +3,8 @@ set -euo pipefail
 
 configure_nginx_impl() {
   local conf="/etc/nginx/sites-available/broadcast.conf"
+  systemctl start nginx
+  sleep 2
   cat > "$conf" <<EOF
 server {
     listen 80;
