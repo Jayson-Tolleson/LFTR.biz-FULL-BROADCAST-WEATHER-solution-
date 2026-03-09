@@ -57,9 +57,34 @@ export EMAIL
 export CERTBOT_EMAIL="$EMAIL"
 export GCP_KEY
 
-if [[ -f "${ROOT_DIR}/static/indexgfs.html" ]]; then
-  sed -i "s/GOOGLE_MAPS_API_KEY/${MAPS_API_KEY//\//\\/}/g" "${ROOT_DIR}/static/indexgfs.html"
-fi
+python - <<PYMAPS
+from pathlib import Path
+import re
+
+root = Path("${ROOT_DIR}")
+loader = '<script src="https://maps.googleapis.com/maps/api/js?key=${MAPS_API_KEY}&v=beta&libraries=maps3d,marker"></script>'
+pattern = re.compile(r'^\s*<script[^>]*maps\.googleapis\.com/maps/api/js[^>]*></script>\s*$', re.IGNORECASE)
+
+for html in sorted((root / "static").rglob("*.html")):
+    text = html.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    replaced = False
+    for i, line in enumerate(lines):
+        if pattern.search(line):
+            lines[i] = loader
+            replaced = True
+    if not replaced:
+        updated = "\n".join(lines)
+        if "</head>" in updated:
+            updated = updated.replace("</head>", f"{loader}\n</head>", 1)
+            html.write_text(updated, encoding="utf-8")
+            continue
+        else:
+            lines.insert(0, loader)
+    html.write_text("\n".join(lines), encoding="utf-8")
+PYMAPS
+
+echo "[INFO] Injected Google Maps API key into HTML files"
 
 if [[ "$DOMAIN" == "$DEFAULT_IP" ]]; then
   echo "[WARN] Domain matches public IP; SSL request will be skipped in this wrapper phase."
