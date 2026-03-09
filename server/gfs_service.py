@@ -809,10 +809,15 @@ class GFSService:
             return None
         return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}, "indexpath": ""})
 
-    def open_height_agl_dataset(self, grib_path: Path) -> Any:
+    def open_2m_dataset(self, grib_path: Path) -> Any:
         if xr is None:
             return None
-        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "heightAboveGround"}, "indexpath": ""})
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": 2}, "indexpath": ""})
+
+    def open_10m_dataset(self, grib_path: Path) -> Any:
+        if xr is None:
+            return None
+        return xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": 10}, "indexpath": ""})
 
     def open_isobaric_dataset(self, grib_path: Path) -> Any:
         if xr is None:
@@ -828,7 +833,8 @@ class GFSService:
         groups: dict[str, Any] = {}
         openers = {
             "surface": self.open_surface_dataset,
-            "heightAboveGround": self.open_height_agl_dataset,
+            "2m": self.open_2m_dataset,
+            "10m": self.open_10m_dataset,
             "isobaricInhPa": self.open_isobaric_dataset,
             "meanSea": self.open_mean_sea_dataset,
         }
@@ -883,6 +889,8 @@ class GFSService:
         """Open available GRIB groups with cfgrib primary and pygrib fallback."""
         groups = self._open_all_valid_groups_cfgrib(grib_path)
         if groups:
+            loaded = ", ".join([k for k in ["surface", "2m", "10m", "isobaric"] if (k in groups or (k == "isobaric" and "isobaricInhPa" in groups))])
+            print(f"[gfs] datasets loaded: {loaded}")
             return groups, "cfgrib"
         groups = self._open_all_valid_groups_pygrib(grib_path)
         if groups:
@@ -916,7 +924,7 @@ class GFSService:
 
         desired = {
             "surface:PRATE", "surface:APCP", "surface:TCDC", "surface:CAPE", "surface:UGRD", "surface:VGRD",
-            "heightAboveGround:TCDC", "heightAboveGround:UGRD", "heightAboveGround:VGRD",
+            "2m:TCDC", "2m:UGRD", "2m:VGRD", "10m:UGRD", "10m:VGRD",
             "isobaricInhPa:RH", "isobaricInhPa:TMP", "isobaricInhPa:HGT", "isobaricInhPa:UGRD", "isobaricInhPa:VGRD",
         }
         missing = sorted([k for k in desired if k not in available])
@@ -962,7 +970,11 @@ class GFSService:
                     raise RuntimeError("downloaded GRIB2 too small")
                 print(f"[gfs-ingest] cache file ready path={fetch.path} size={fetch.path.stat().st_size}")
 
-                groups, decode_backend = self.open_all_valid_groups(fetch.path)
+                try:
+                    groups, decode_backend = self.open_all_valid_groups(fetch.path)
+                except Exception as e:
+                    print(f"[gfs] gfs decode failed: {e}")
+                    raise RuntimeError("gfs decode failed") from e
                 self.state.decode_backend = decode_backend
                 self.state.data_source_mode = "primary" if decode_backend == "cfgrib" else "fallback" if decode_backend == "pygrib" else "heuristic"
                 if not groups:
@@ -2103,12 +2115,18 @@ class GFSService:
 
     def _derive_real_source_fields(self, groups: dict[str, Any]) -> dict[str, Any]:
         precip = self.extract_precip_rate_mm_hr(groups)
-        cloud_layers = self.derive_cloud_layers(groups.get("surface"), groups.get("heightAboveGround"), groups.get("isobaricInhPa"))
+        cloud_layers = self.derive_cloud_layers(groups.get("surface"), groups.get("10m") or groups.get("2m"), groups.get("isobaricInhPa"))
         vectors = self.derive_balloon_vectors(groups)
         if precip is None or not cloud_layers:
             raise RuntimeError("missing precip/cloud arrays")
 
-        sample_ds = groups.get("surface") or groups.get("isobaricInhPa") or groups.get("heightAboveGround")
+        sample_ds = groups.get("surface")
+        if sample_ds is None:
+            sample_ds = groups.get("isobaricInhPa")
+        if sample_ds is None:
+            sample_ds = groups.get("10m")
+        if sample_ds is None:
+            sample_ds = groups.get("2m")
         lat2d, lon2d = self.ensure_lat_lon_2d(sample_ds)
         if lat2d is None or lon2d is None:
             raise RuntimeError("missing lat lon grid")
@@ -2118,10 +2136,10 @@ class GFSService:
         mid = cloud_layers.get("mid")
         conv = np.clip((precip / 30.0) * 0.6 + high * 0.4, 0.0, 1.0)
         humidity = self._extract_scalar_field(groups, [("isobaricInhPa", ["r", "RH"]), ("surface", ["r", "RH"])])
-        wind_u = self._extract_scalar_field(groups, [("isobaricInhPa", ["u", "UGRD"]), ("surface", ["u", "UGRD"])])
-        wind_v = self._extract_scalar_field(groups, [("isobaricInhPa", ["v", "VGRD"]), ("surface", ["v", "VGRD"])])
+        wind_u = self._extract_scalar_field(groups, [("10m", ["u", "UGRD"]), ("isobaricInhPa", ["u", "UGRD"]), ("surface", ["u", "UGRD"])])
+        wind_v = self._extract_scalar_field(groups, [("10m", ["v", "VGRD"]), ("isobaricInhPa", ["v", "VGRD"]), ("surface", ["v", "VGRD"])])
         wind_speed = np.sqrt(np.square(wind_u) + np.square(wind_v)) if wind_u is not None and wind_v is not None else (np.sqrt(np.square(vectors[0]["u"]) + np.square(vectors[0]["v"])) if vectors else np.zeros_like(precip))
-        temp_k = self._extract_scalar_field(groups, [("surface", ["t", "TMP", "tmp"]), ("heightAboveGround", ["t", "TMP", "tmp"])])
+        temp_k = self._extract_scalar_field(groups, [("surface", ["t", "TMP", "tmp"]), ("2m", ["t", "TMP", "tmp"])])
         pressure_pa = self._extract_scalar_field(groups, [("meanSea", ["prmsl", "PRMSL"]), ("surface", ["prmsl", "PRMSL"])])
         return {
             "precip": precip,

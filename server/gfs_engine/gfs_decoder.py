@@ -27,13 +27,66 @@ class DecodedFields:
     precip_rate: Any
 
 
+def open_gfs_groups(grib_path: Path) -> dict[str, Any]:
+    datasets: dict[str, Any] = {}
+    if xr is None:
+        return datasets
+
+    try:
+        datasets["surface"] = xr.open_dataset(
+            grib_path,
+            engine="cfgrib",
+            backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}, "indexpath": ""},
+        )
+    except Exception:
+        pass
+
+    try:
+        datasets["2m"] = xr.open_dataset(
+            grib_path,
+            engine="cfgrib",
+            backend_kwargs={"filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": 2}, "indexpath": ""},
+        )
+    except Exception:
+        pass
+
+    try:
+        datasets["10m"] = xr.open_dataset(
+            grib_path,
+            engine="cfgrib",
+            backend_kwargs={"filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": 10}, "indexpath": ""},
+        )
+    except Exception:
+        pass
+
+    try:
+        datasets["isobaric"] = xr.open_dataset(
+            grib_path,
+            engine="cfgrib",
+            backend_kwargs={"filter_by_keys": {"typeOfLevel": "isobaricInhPa"}, "indexpath": ""},
+        )
+    except Exception:
+        pass
+
+    return datasets
+
+
 class GFSDecoder:
     """Decode core atmospheric fields from GRIB2 through cfgrib."""
 
     def decode(self, grib_path: Path) -> DecodedFields | None:
         if xr is None or np is None:
             return None
-        ds = xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs={"indexpath": ""})
+        groups = open_gfs_groups(grib_path)
+        ds = groups.get("surface")
+        if ds is None:
+            ds = groups.get("2m")
+        if ds is None:
+            ds = groups.get("10m")
+        if ds is None:
+            ds = groups.get("isobaric")
+        if ds is None:
+            return None
         lat = ds.coords.get("latitude")
         lon = ds.coords.get("longitude")
         if lat is None or lon is None:
