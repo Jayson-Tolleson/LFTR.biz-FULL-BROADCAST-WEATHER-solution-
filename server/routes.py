@@ -104,6 +104,13 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     async def watch():
         return await send_file(str(STATIC_DIR / "watch.html"))
 
+    @app.get("/favicon.ico")
+    async def favicon():
+        ico = STATIC_DIR / "favicon.ico"
+        if ico.exists():
+            return await send_file(str(ico))
+        return "", 204
+
     @app.get("/status-dashboard")
     async def status_dashboard():
         return await send_file(str(STATIC_DIR / "status_dashboard.html"))
@@ -136,7 +143,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
 
     gfs = GFSService(str(STATIC_DIR))
 
-    register_broadcast_routes(app)
+    register_broadcast_routes(app, state, rtc)
     register_gfs_routes(app)
     app.register_blueprint(api_bp)
 
@@ -280,8 +287,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         req_url = request.path + (("?" + request.query_string.decode("utf-8", errors="ignore")) if request.query_string else "")
         try:
             payload = gfs.layer_tile_payload(layer, z, x, y, pad_deg=max(0.0, min(1.2, pad)), debug=debug)
-            status = 200 if (payload.get("status") or {}).get("ok", True) else 400
-            return jsonify(payload), status
+            return jsonify(payload), 200
         except Exception as exc:
             app.logger.exception("[gfs] layer tile request failed url=%s layer=%s z=%s x=%s y=%s", req_url, layer, z, x, y)
             return jsonify({

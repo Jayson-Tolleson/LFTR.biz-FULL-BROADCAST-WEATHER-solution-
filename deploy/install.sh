@@ -105,23 +105,68 @@ phase3_firewall() {
 
 phase4_google_cloud() {
   echo "===== PHASE 4 — GOOGLE CLOUD ====="
-  if curl -fsS --max-time 2 http://169.254.169.254 >/dev/null 2>&1; then
-    echo "Running inside GCP environment"
-    echo "[INFO] Ensure firewall ports 80 and 443 are open in VPC rules"
+
+  local metadata_project=""
+  local metadata_sa_email=""
+  local gcp_detected="no"
+  local attached_sa="no"
+  local auth_mode="disabled"
+  local vertex_enabled="no"
+  local apis_attempted="no"
+
+  if curl -fsS --max-time 2 -H 'Metadata-Flavor: Google'     http://metadata.google.internal/computeMetadata/v1/instance/id >/dev/null 2>&1; then
+    gcp_detected="yes"
   fi
 
-  if [ -f "/etc/broadcast/gcp-key.json" ]; then
-    export GOOGLE_APPLICATION_CREDENTIALS="/etc/broadcast/gcp-key.json"
+  if [[ -z "${GOOGLE_PROJECT_ID:-}" ]] && [[ -n "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
+    GOOGLE_PROJECT_ID="${GOOGLE_CLOUD_PROJECT}"
+  fi
+
+  if [[ -z "$GOOGLE_PROJECT_ID" ]] && command -v gcloud >/dev/null 2>&1; then
+    GOOGLE_PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+    GOOGLE_PROJECT_ID="${GOOGLE_PROJECT_ID//\(unset\)/}"
+    GOOGLE_PROJECT_ID="$(echo "$GOOGLE_PROJECT_ID" | xargs || true)"
+  fi
+
+  if [[ -z "$GOOGLE_PROJECT_ID" ]] && [[ "$gcp_detected" == "yes" ]]; then
+    metadata_project="$(curl -fsS --max-time 2 -H 'Metadata-Flavor: Google'       http://metadata.google.internal/computeMetadata/v1/project/project-id 2>/dev/null || true)"
+    if [[ -n "$metadata_project" ]]; then
+      GOOGLE_PROJECT_ID="$metadata_project"
+    fi
+  fi
+
+  if [[ "$gcp_detected" == "yes" ]]; then
+    metadata_sa_email="$(curl -fsS --max-time 2 -H 'Metadata-Flavor: Google'       http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email 2>/dev/null || true)"
+    if [[ -n "$metadata_sa_email" ]]; then
+      attached_sa="yes"
+    fi
+  fi
+
+  local explicit_key=""
+  if [[ -n "${GCP_KEY:-}" ]] && [[ -f "$GCP_KEY" ]]; then
+    explicit_key="$GCP_KEY"
+  elif [[ -f "/etc/broadcast/gcp-key.json" ]]; then
+    explicit_key="/etc/broadcast/gcp-key.json"
     GCP_KEY="/etc/broadcast/gcp-key.json"
-    echo "[INFO] GCP credentials loaded"
-  elif [ -f "$GCP_KEY" ]; then
-    export GOOGLE_APPLICATION_CREDENTIALS="$GCP_KEY"
-    echo "[INFO] GCP credentials loaded"
-  else
-    echo "[WARN] GCP key missing — AI features disabled"
   fi
 
-  export GOOGLE_CLOUD_REGION=global
+  if [[ "$attached_sa" == "yes" ]] && [[ -n "$GOOGLE_PROJECT_ID" ]]; then
+    auth_mode="adc"
+    vertex_enabled="yes"
+    unset GOOGLE_APPLICATION_CREDENTIALS || true
+  elif [[ -n "$explicit_key" ]]; then
+    auth_mode="json_key"
+    vertex_enabled="yes"
+    export GOOGLE_APPLICATION_CREDENTIALS="$explicit_key"
+    chmod 600 "$explicit_key" || true
+  else
+    auth_mode="disabled"
+    vertex_enabled="no"
+    echo "[WARN] No attached service account ADC and no valid JSON key; AI features disabled"
+  fi
+
+  export GOOGLE_CLOUD_REGION="global"
+  export GOOGLE_CLOUD_PROJECT="${GOOGLE_PROJECT_ID}"
 
   mkdir -p /etc/broadcast
   cat > /etc/broadcast/install.env <<EOF
@@ -135,28 +180,24 @@ GCP_KEY=${GCP_KEY}
 VERTEX_LOCATION=${VERTEX_LOCATION}
 VERTEX_MODEL=${VERTEX_MODEL}
 AI_PROVIDER=${AI_PROVIDER}
+AI_AUTH_MODE=${auth_mode}
+VERTEX_ENABLED=${vertex_enabled}
+GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
 EOF
 
-  if command -v gcloud >/dev/null 2>&1; then
-    if [ -n "$GOOGLE_PROJECT_ID" ] && [ -f "$GCP_KEY" ]; then
-
-      echo "[INFO] Configuring Google Cloud project"
-
-      gcloud config set project "$GOOGLE_PROJECT_ID"
-
-      gcloud services enable \
-        aiplatform.googleapis.com \
-        speech.googleapis.com \
-        texttospeech.googleapis.com
-
-      echo "[INFO] Google APIs enabled"
-
-    else
-      echo "[WARN] Skipping API enablement (missing project or key)"
+  if command -v gcloud >/dev/null 2>&1 && [[ -n "$GOOGLE_PROJECT_ID" ]]; then
+    apis_attempted="yes"
+    if gcloud config set project "$GOOGLE_PROJECT_ID" >/dev/null 2>&1; then
+      gcloud services enable         aiplatform.googleapis.com         speech.googleapis.com         texttospeech.googleapis.com >/dev/null 2>&1 || true
     fi
-  else
-    echo "[WARN] gcloud CLI not installed — skipping API setup"
   fi
+
+  echo "[INFO] GCP detected: ${gcp_detected}"
+  echo "[INFO] Project ID: ${GOOGLE_PROJECT_ID:-<missing>}"
+  echo "[INFO] Attached service account: ${attached_sa}${metadata_sa_email:+ (${metadata_sa_email})}"
+  echo "[INFO] AI auth mode: ${auth_mode}"
+  echo "[INFO] APIs enable attempted: ${apis_attempted}"
+  echo "[INFO] Vertex enabled: ${vertex_enabled}"
 }
 
 phase5_tls() {

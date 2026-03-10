@@ -476,6 +476,8 @@
     tileFailureStreak: 0,
     tileMaxConcurrent: 12,
     initialTileWarmupDone: false,
+    polygonWarn: { byKey: new Map(), total: 0 },
+    renderStats: { fishItems: 0, fishMarkersRendered: 0, cloudTiles: 0, cloudPolygonsRendered: 0, cloudInteractiveRendered: 0, rainRendered: 0, lightningRendered: 0 },
   };
 
   const layerManager = {
@@ -527,7 +529,7 @@
   function setStatus(msg, isStale = false) {
     const mapState = state.mapReady ? 'ready' : 'fallback';
     const modeFlag = state.tileMode ? 'tile' : 'scene';
-    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • fish:${state.fish.length} markers:${state.mapMarkers.length} cloudTiles:${state.cloudTiles.length} cloudPolys:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} tileFail:${state.tileFailureCount} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • fish:${state.renderStats.fishItems} markers:${state.renderStats.fishMarkersRendered} cloudTiles:${state.renderStats.cloudTiles} cloudPolys:${state.renderStats.cloudPolygonsRendered + state.renderStats.cloudInteractiveRendered} rain:${state.renderStats.rainRendered} ltg:${state.renderStats.lightningRendered} tileFail:${state.tileFailureCount} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
     statusLine.classList.toggle('stale', !!isStale);
   }
 
@@ -1313,6 +1315,24 @@
     return specs;
   }
 
+  function normalizeLng(v) {
+    let out = Number(v);
+    if (!Number.isFinite(out)) return null;
+    while (out > 180) out -= 360;
+    while (out < -180) out += 360;
+    return out;
+  }
+
+  function sanitizePolygonWarning(featureType, mode, reason) {
+    const key = `${featureType || 'unknown'}:${mode || 'none'}:${reason || 'error'}`;
+    const cur = Number(state.polygonWarn.byKey.get(key) || 0) + 1;
+    state.polygonWarn.byKey.set(key, cur);
+    state.polygonWarn.total += 1;
+    if (cur <= 3 || cur % 25 === 0) {
+      console.warn('[gfs] polygon issue', { key, count: cur, total: state.polygonWarn.total });
+    }
+  }
+
   function resolveAltitudeMode(featureType = 'surface', preferred = null) {
     const AltitudeMode = state.maps3dLib?.AltitudeMode || window.google?.maps?.maps3d?.AltitudeMode;
     if (!AltitudeMode) return null;
@@ -1331,18 +1351,24 @@
   function normalizePolygonPath(points, mode, opts = {}) {
     const out = [];
     const useAltitude = isAbsoluteLikeMode(mode);
+    let prev = null;
     for (const p of (points || [])) {
-      const lat = Number(p?.lat);
-      const lng = Number(p?.lng ?? p?.lon);
+      let lat = Number(p?.lat);
+      let lng = normalizeLng(p?.lng ?? p?.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      lat = Math.max(-85.0, Math.min(85.0, lat));
       if (useAltitude) {
         let altitude = Number(p?.altitude ?? opts.altitude ?? 0);
-        if (!Number.isFinite(altitude)) {
-          console.warn('[gfs] invalid polygon altitude; defaulting to 0');
-          altitude = 0;
-        }
+        if (!Number.isFinite(altitude)) altitude = 0;
+        altitude = Math.max(-1000, Math.min(50000, altitude));
+        const cur = `${lat.toFixed(6)},${lng.toFixed(6)},${altitude.toFixed(1)}`;
+        if (cur === prev) continue;
+        prev = cur;
         out.push({ lat, lng, altitude });
       } else {
+        const cur = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+        if (cur === prev) continue;
+        prev = cur;
         out.push({ lat, lng });
       }
     }
@@ -1350,32 +1376,39 @@
   }
 
   function appendPolygon3D(points, opts = {}) {
-    try {
-      const mode = resolveAltitudeMode(opts.type || 'surface', opts.altitudeMode);
-      const path = normalizePolygonPath(points, mode, opts);
-      if (path.length < 3) {
-        console.warn('[gfs] polygon skipped: insufficient valid points', { featureType: opts.featureType || opts.type, pointCount: path.length });
-        return null;
+    const featureType = opts.featureType || opts.type || 'surface';
+    const modePrimary = resolveAltitudeMode(opts.type || 'surface', opts.altitudeMode);
+    const modeFallback = resolveAltitudeMode('surface');
+    const modes = modePrimary && modePrimary !== modeFallback ? [modePrimary, modeFallback] : [modePrimary || modeFallback];
+    const Ctor = opts.interactive ? state.maps3dLib?.Polygon3DInteractiveElement : state.maps3dLib?.Polygon3DElement;
+    if (!Ctor || !state.mapReady || !state.maps3dLib) return null;
+
+    for (const mode of modes) {
+      try {
+        const path = normalizePolygonPath(points, mode, opts);
+        if (path.length < 3) {
+          sanitizePolygonWarning(featureType, mode, 'insufficient_points');
+          return null;
+        }
+        const polygon = new Ctor({
+          altitudeMode: mode,
+          drawsOccludedSegments: !!opts.drawsOccludedSegments,
+          extruded: !!opts.extruded && isAbsoluteLikeMode(mode),
+          fillColor: opts.fillColor ?? 'rgba(0,224,255,0.2)',
+          geodesic: true,
+          path,
+          innerPaths: (opts.innerPaths || []).map((h) => normalizePolygonPath(h, mode, opts)).filter((h) => h.length >= 3),
+          strokeColor: opts.strokeColor ?? 'rgba(255,255,255,0.2)',
+          strokeWidth: opts.strokeWidth ?? 0.6,
+          zIndex: opts.zIndex || 1,
+        });
+        globeEl.append(polygon);
+        return polygon;
+      } catch (error) {
+        sanitizePolygonWarning(featureType, mode, error?.name || 'create_failed');
       }
-      const Ctor = opts.interactive ? state.maps3dLib.Polygon3DInteractiveElement : state.maps3dLib.Polygon3DElement;
-      const polygon = new Ctor({
-        altitudeMode: mode,
-        drawsOccludedSegments: !!opts.drawsOccludedSegments,
-        extruded: !!opts.extruded,
-        fillColor: opts.fillColor ?? 'rgba(0,224,255,0.2)',
-        geodesic: true,
-        path,
-        innerPaths: (opts.innerPaths || []).map((h) => normalizePolygonPath(h, mode, opts)).filter((h) => h.length >= 3),
-        strokeColor: opts.strokeColor ?? 'rgba(255,255,255,0.2)',
-        strokeWidth: opts.strokeWidth ?? 0.6,
-        zIndex: opts.zIndex || 1,
-      });
-      globeEl.append(polygon);
-      return polygon;
-    } catch (error) {
-      console.error('[gfs] polygon creation failed', { featureType: opts.featureType || opts.type, mode: opts.type, pointCount: (points || []).length, error });
-      return null;
     }
+    return null;
   }
 
   function createCloudPolygonElement(shellSpec, interactive = false) {
@@ -1639,6 +1672,7 @@
 
   async function renderBaitLayer() {
     await renderBaitPolygons();
+    state.renderStats.fishMarkersRendered = state.mapMarkers.length;
   }
 
   async function renderSstLayer() {
@@ -1735,6 +1769,11 @@
     const cloudCount = state.cloudPolygons.length + state.cloudInteractivePolygons.length;
     const precipCount = state.rainMarkers.length + state.rainColumns.length;
     const lightningCount = state.hailMarkers.length + state.hailCorePolygons.length + state.lightningPolygons.length;
+    state.renderStats.cloudTiles = state.cloudTiles.length;
+    state.renderStats.cloudPolygonsRendered = state.cloudPolygons.length;
+    state.renderStats.cloudInteractiveRendered = state.cloudInteractivePolygons.length;
+    state.renderStats.rainRendered = precipCount;
+    state.renderStats.lightningRendered = lightningCount;
     setStatus(`Weather ${lod.label} • clouds:${cloudCount} rain:${precipCount} lightning:${lightningCount} jet:${state.jetMarkers.length} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"}${suffix}`, faults.length > 0);
     if (!faults.length) console.info('[gfs] cloud/rain/lightning/jet layers ready');
   }
@@ -2223,6 +2262,8 @@
 
   async function renderMapMarkers() {
     clearMapMarkers();
+    state.renderStats.fishItems = state.fish.length;
+    state.renderStats.fishMarkersRendered = 0;
     if (!state.mapReady || !state.feature.markers || !state.maps3dLib || !state.markerLib) return;
 
     state.fish.forEach((p) => {
@@ -2273,6 +2314,7 @@
       state.mapMarkers.push(marker);
     });
     await renderBaitPolygons();
+    state.renderStats.fishMarkersRendered = state.mapMarkers.length;
   }
 
   async function loadFish() {

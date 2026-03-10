@@ -12,6 +12,7 @@
 
   let ws = null;
   let pc = null;
+  let retryDelayMs = 1000;
 
   async function iceServers() {
     try {
@@ -79,16 +80,24 @@
   }
 
   function connect() {
-    ws = new WebSocket(`${wsBase}/ws/watch`);
+    const url = `${wsBase}/ws/watch`;
+    console.info('[watch] websocket connect', { url, room });
+    ws = new WebSocket(url);
     conn.textContent = 'connecting';
     ws.onopen = () => {
+      retryDelayMs = 1000;
       conn.textContent = 'connected';
       send('watch_join', { room });
     };
     ws.onmessage = (ev) => handleMessage(ev.data);
-    ws.onclose = () => {
+    ws.onerror = (err) => {
+      console.warn('[watch] websocket error', { url, room, err });
+    };
+    ws.onclose = (ev) => {
       conn.textContent = 'reconnecting';
-      setTimeout(connect, 2000);
+      console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
+      setTimeout(connect, retryDelayMs);
+      retryDelayMs = Math.min(15000, Math.round(retryDelayMs * 1.6));
     };
   }
 
