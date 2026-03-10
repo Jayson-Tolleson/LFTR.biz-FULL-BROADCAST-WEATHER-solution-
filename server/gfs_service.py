@@ -745,12 +745,14 @@ class GFSService:
                 return ds[name]
         return None
 
-    def squeeze_forecast_array(self, arr: Any) -> Any:
-        """Squeeze time/step dimensions to 2D spatial array."""
+    def squeeze_forecast_array(self, arr: Any, preserve_dims: tuple[str, ...] = ()) -> Any:
+        """Squeeze forecast-only singleton dimensions while optionally preserving vertical dims."""
         if arr is None:
             return None
         a = arr
-        for dim in ["time", "step", "valid_time", "isobaricInhPa", "heightAboveGround", "surface"]:
+        for dim in ["time", "step", "valid_time", "heightAboveGround", "surface", "isobaricInhPa"]:
+            if dim in preserve_dims:
+                continue
             if hasattr(a, "dims") and dim in a.dims and a.sizes.get(dim, 0) > 0:
                 a = a.isel({dim: 0})
         return a
@@ -1894,33 +1896,76 @@ class GFSService:
     def compute_layer_rh(self, isobaric_ds: Any, top_hpa: int, bottom_hpa: int) -> Any:
         if np is None or isobaric_ds is None:
             return None
+
         rh = self.safe_data_var(isobaric_ds, ["r", "RH"])
         if rh is None or "isobaricInhPa" not in rh.dims:
             return None
+
         levels = np.asarray(isobaric_ds["isobaricInhPa"].values, dtype=float)
         sel = (levels <= bottom_hpa) & (levels >= top_hpa)
         if not np.any(sel):
             return None
-        vals = np.asarray(self.squeeze_forecast_array(rh.sel(isobaricInhPa=levels[sel])).values, dtype=float)
-        return np.nanmean(vals, axis=0)
+
+        layer = rh.sel(isobaricInhPa=levels[sel])
+
+        for dim in ["time", "step", "valid_time", "surface", "heightAboveGround"]:
+            if hasattr(layer, "dims") and dim in layer.dims and layer.sizes.get(dim, 0) > 0:
+                layer = layer.isel({dim: 0})
+
+        vals = np.asarray(layer.values, dtype=float)
+
+        if vals.ndim == 3:
+            return np.nanmean(vals, axis=0)
+
+        if vals.ndim == 2:
+            return vals
+
+        return None
 
     def estimate_cloud_base_top(self, isobaric_ds: Any, hgt_ds: Any = None) -> dict[str, Any]:
         if np is None or isobaric_ds is None:
             return {}
+
         rh = self.safe_data_var(isobaric_ds, ["r", "RH"])
         hgt = self.safe_data_var(isobaric_ds, ["gh", "HGT"])
         if rh is None or hgt is None:
             return {}
-        rhv = np.asarray(self.squeeze_forecast_array(rh).values, dtype=float)
-        hgtv = np.asarray(self.squeeze_forecast_array(hgt).values, dtype=float)
-        sat = rhv >= 80.0
-        if rhv.ndim < 3:
+
+        rh_arr = self.squeeze_forecast_array(rh, preserve_dims=("isobaricInhPa",))
+        hgt_arr = self.squeeze_forecast_array(hgt, preserve_dims=("isobaricInhPa",))
+        if rh_arr is None or hgt_arr is None:
             return {}
+
+        rhv = np.asarray(rh_arr.values, dtype=float)
+        hgtv = np.asarray(hgt_arr.values, dtype=float)
+
+        try:
+            print(
+                "[gfs] cloud base/top shapes:",
+                f"rh={None if rhv is None else rhv.shape}",
+                f"hgt={None if hgtv is None else hgtv.shape}",
+            )
+        except Exception:
+            pass
+
+        if rhv.ndim != 3 or hgtv.ndim != 3:
+            return {}
+
+        sat = rhv >= 80.0
+        if not np.any(sat):
+            return {}
+
         base_idx = np.argmax(sat, axis=0)
         top_idx = np.maximum(base_idx, rhv.shape[0] - 1 - np.argmax(np.flip(sat, axis=0), axis=0))
+
         base_m = np.take_along_axis(hgtv, np.expand_dims(base_idx, axis=0), axis=0)[0]
         top_m = np.take_along_axis(hgtv, np.expand_dims(top_idx, axis=0), axis=0)[0]
-        return {"base_m": base_m, "top_m": top_m, "thickness_m": np.maximum(0.0, top_m - base_m)}
+
+        return {
+            "base_m": base_m,
+            "top_m": top_m,
+            "thickness_m": np.maximum(0.0, top_m - base_m),
+        }
 
     def derive_cloud_layers(self, surface_ds: Any, agl_ds: Any, isobaric_ds: Any) -> dict[str, Any]:
         if np is None:
@@ -1933,6 +1978,26 @@ class GFSService:
         low = self.compute_layer_rh(isobaric_ds, 850, 1000)
         mid = self.compute_layer_rh(isobaric_ds, 600, 850)
         high = self.compute_layer_rh(isobaric_ds, 300, 600)
+
+        for name, arr in [("low", low), ("mid", mid), ("high", high)]:
+            if arr is not None and getattr(arr, "ndim", 0) != 2:
+                if name == "low":
+                    low = None
+                elif name == "mid":
+                    mid = None
+                elif name == "high":
+                    high = None
+
+        try:
+            print(
+                "[gfs] layer shapes:",
+                f"low={None if low is None else low.shape}",
+                f"mid={None if mid is None else mid.shape}",
+                f"high={None if high is None else high.shape}",
+            )
+        except Exception:
+            pass
+
         low_occ = np.clip(((low if low is not None else 40.0) / 100.0), 0.0, 1.0)
         mid_occ = np.clip(((mid if mid is not None else 35.0) / 100.0), 0.0, 1.0)
         high_occ = np.clip(((high if high is not None else 30.0) / 100.0), 0.0, 1.0)
