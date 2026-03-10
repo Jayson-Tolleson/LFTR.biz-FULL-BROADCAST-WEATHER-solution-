@@ -75,11 +75,15 @@
     if (msg.type === 'state_sync') {
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
+      const present = !!st.runtime?.broadcaster_present;
+      if (present) requestStream();
       return;
     }
     if (msg.type === 'state_update') {
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || 'idle');
+      const present = !!st.runtime?.broadcaster_present;
+      if (present) requestStream();
       return;
     }
     if (msg.type === 'presence') {
@@ -142,7 +146,6 @@
       retryDelayMs = 1000;
       conn.textContent = 'connected';
       sendJson('join');
-      requestStream();
     };
     ws.onmessage = (ev) => {
       let msg;

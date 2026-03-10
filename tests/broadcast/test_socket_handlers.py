@@ -66,3 +66,34 @@ def test_request_stream_only_in_watch_socket_flow():
     watch_block = src[w_start:]
     assert 'request_stream' not in broadcast_block
     assert 'request_stream' in watch_block
+
+
+def test_watch_socket_stays_open_without_broadcaster():
+    quart = __import__('pytest').importorskip('quart')
+    import asyncio
+    from server.app_factory import create_quart_app
+
+    async def _run():
+        app = create_quart_app()
+        client = app.test_client()
+        async with client.websocket('/ws/watch') as ws:
+            await ws.send_json({'type': 'join', 'room': 'default', 'clientId': 'viewer-test', 'role': 'viewer'})
+            saw_waiting = False
+            for _ in range(6):
+                msg = await ws.receive_json()
+                if msg.get('type') == 'error' and msg.get('message') == 'no_broadcaster':
+                    saw_waiting = True
+                    break
+                if msg.get('type') == 'presence' and msg.get('broadcaster_present') is False:
+                    saw_waiting = True
+            assert saw_waiting
+            await ws.send_json({'type': 'ping', 'room': 'default', 'clientId': 'viewer-test'})
+            got_pong = False
+            for _ in range(6):
+                msg = await ws.receive_json()
+                if msg.get('type') == 'pong':
+                    got_pong = True
+                    break
+            assert got_pong
+
+    asyncio.run(_run())

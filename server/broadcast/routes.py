@@ -165,6 +165,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         client_id = f"chat:{id(ws)}"
         role = "participant"
         joined = False
+        log.info("watch socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
                 payload = await websocket.receive_json()
@@ -228,6 +229,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         room_id = state.default_room
         client_id = f"broadcaster:{id(ws)}"
         joined = False
+        log.info("watch socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
                 payload = await websocket.receive_json()
@@ -302,6 +304,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         room_id = state.default_room
         client_id = f"watch:{id(ws)}"
         joined = False
+        log.info("watch socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
                 payload = await websocket.receive_json()
@@ -309,6 +312,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 if kind in {"join", "watch_join"}:
                     room_id, client_id = _normalize_room_client(data, state.default_room, "viewer")
+                    log.info("watch join received room=%s client=%s", room_id, client_id)
                     registry.register(room_id, "watch", ws, client_id)
                     joined = True
                     state.ensure_room(room_id).viewers[client_id] = True
@@ -316,9 +320,11 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     await _broadcast_presence(state, room_id)
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
+                        log.info("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
                         await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
                         await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                     else:
+                        log.info("watch signaling started room=%s client=%s", room_id, client_id)
                         offer = await rtc.start_viewer_offer(room_id, client_id)
                         await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                     await ws.send_json({"type": "stage_state", "payload": _stage_payload(room_id, state.ensure_room(room_id))})
@@ -327,8 +333,10 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 if kind == "ping":
                     await ws.send_json({"type": "pong", "room": room_id, "ts": now_ms()})
                 elif kind == "request_stream":
+                    log.info("watch request_stream room=%s client=%s", room_id, client_id)
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
+                        log.info("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
                         await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
                         await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                         continue
@@ -356,6 +364,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     except Exception:
                         log.exception("watch cleanup failed")
                 await _broadcast_presence(state, room_id)
+            log.info("watch socket disconnected room=%s client=%s", room_id, client_id)
 
     @app.post('/api/upload')
     async def api_upload():
