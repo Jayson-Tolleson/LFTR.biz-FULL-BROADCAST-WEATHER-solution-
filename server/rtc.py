@@ -35,13 +35,11 @@ class RTCManager:
         self._pending_viewer_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
 
     async def _emit_room(self, room_id: str, event: str, payload: Dict[str, Any]) -> None:
-        if not self.state.sio:
-            return
-        await self.state.sio.emit(event, payload, to=f"room:{room_id}:all")
+        emitter = getattr(self.state, "ws_emit_room", None)
+        if callable(emitter):
+            await emitter(room_id, {"type": event, "payload": payload})
 
     async def _emit_status(self, room_id: str) -> None:
-        if not self.state.sio:
-            return
         room = self.state.ensure_room(room_id)
         await self._emit_room(
             room_id,

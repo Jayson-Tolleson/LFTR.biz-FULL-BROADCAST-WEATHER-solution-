@@ -1,3 +1,5 @@
+"""Deprecated: raw Quart websocket routes are now canonical. Kept temporarily for reference/migration."""
+
 from __future__ import annotations
 
 import base64

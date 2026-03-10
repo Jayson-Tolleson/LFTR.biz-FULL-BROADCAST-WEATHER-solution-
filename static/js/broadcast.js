@@ -9,21 +9,58 @@
     chatInput: document.getElementById('chatInput'),
     sendBtn: document.getElementById('sendBtn'),
     roomStatus: document.getElementById('roomStatus'),
-    stSock: document.getElementById('stSock'),
-    ledSock: document.getElementById('ledSock'),
+    stRoom: document.getElementById('stRoom'),
+    stServer: document.getElementById('stServer'),
+    stRoomConn: document.getElementById('stRoomConn'),
+    stLive: document.getElementById('stLive'),
+    stAi: document.getElementById('stAi'),
+    stWatchers: document.getElementById('stWatchers'),
     stPc: document.getElementById('stPc'),
     stIce: document.getElementById('stIce'),
-    stRoom: document.getElementById('stRoom'),
+    ledServer: document.getElementById('ledServer'),
+    ledRoom: document.getElementById('ledRoom'),
+    ledLive: document.getElementById('ledLive'),
+    ledAi: document.getElementById('ledAi'),
     camBtn: document.getElementById('camBtn'),
+    screenBtn: document.getElementById('screenBtn'),
+    micBtn: document.getElementById('micBtn'),
+    sttBtn: document.getElementById('sttBtn'),
+    ncBtn: document.getElementById('ncBtn'),
+    aiEnableBtn: document.getElementById('aiEnableBtn'),
+    aiStatusBtn: document.getElementById('aiStatusBtn'),
+    ttsMonBtn: document.getElementById('ttsMonBtn'),
+    speakBtn: document.getElementById('speakBtn'),
+    attachBtn: document.getElementById('attachBtn'),
+    webBtn: document.getElementById('webBtn'),
+    searchCloseBtn: document.getElementById('searchCloseBtn'),
+    searchPane: document.getElementById('searchPane'),
+    searchFrame: document.getElementById('searchFrame'),
+    searchFallback: document.getElementById('searchFallback'),
+    searchOpenLink: document.getElementById('searchOpenLink'),
+    fileInput: document.getElementById('file'),
   };
 
   const state = {
-    room: new URLSearchParams(location.search).get('room') || 'default',
+    room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
+    clientId: `b-${Math.random().toString(36).slice(2, 10)}`,
     camStream: null,
+    screenStream: null,
     pc: null,
     chatWs: null,
     signalWs: null,
+    media: {
+      ai_enabled: true,
+      ai_status: 'idle',
+      stt_enabled: true,
+      tts_enabled: true,
+      hear_ai_voice: true,
+      mic_enabled: true,
+      camera_enabled: true,
+      screen_enabled: false,
+      noise_cancel_enabled: true,
+    },
   };
+
   dom.stRoom && (dom.stRoom.textContent = state.room);
 
   function setLed(el, on) {
@@ -32,34 +69,169 @@
     el.classList.add(on ? 'g' : 'r');
   }
 
+  function sendJson(ws, type, extra = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type, room: state.room, clientId: state.clientId, role: 'broadcaster', ...extra }));
+  }
+
   function appendChat(msg) {
     if (!dom.chat) return;
     const d = document.createElement('div');
     d.className = 'entry';
-    const who = msg.user || 'system';
-    const text = (msg.payload && msg.payload.text) || msg.text || '';
+    const who = msg.user || msg.sender || 'system';
+    const text = msg.text || msg.payload?.text || '';
     d.innerHTML = `<b>[${who}]</b><div>${String(text).replace(/[<>&]/g, (s)=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[s]))}</div>`;
+    if (msg.attachment?.url) {
+      const a = document.createElement('a');
+      a.href = msg.attachment.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = msg.attachment.name || 'attachment';
+      d.appendChild(a);
+    }
     dom.chat.appendChild(d);
     dom.chat.scrollTop = dom.chat.scrollHeight;
   }
 
-  function sendWs(ws, type, payload) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type, payload }));
+  function applyRoomState(nextState = {}) {
+    const settings = nextState.settings || {};
+    state.media = { ...state.media, ...settings };
+    const runtime = nextState.runtime || {};
+
+    dom.stWatchers && (dom.stWatchers.textContent = `${runtime.viewer_count ?? 0}`);
+    dom.stLive && (dom.stLive.textContent = runtime.broadcaster_present ? 'live' : 'offline');
+    setLed(dom.ledLive, !!runtime.broadcaster_present);
+
+    dom.stAi && (dom.stAi.textContent = state.media.ai_status || 'idle');
+    setLed(dom.ledAi, state.media.ai_status === 'active' || state.media.ai_enabled);
+
+    const setTxt = (id, txt) => {
+      const n = document.getElementById(id);
+      if (n) n.textContent = txt;
+    };
+    setLed(document.getElementById('camLed'), !!state.media.camera_enabled);
+    setTxt('camTxt', `CAM: ${state.media.camera_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('screenLed'), !!state.media.screen_enabled);
+    setTxt('screenTxt', `SCREEN: ${state.media.screen_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('micLed'), !!state.media.mic_enabled);
+    setTxt('micTxt', `MIC: ${state.media.mic_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('sttLed'), !!state.media.stt_enabled);
+    setTxt('sttTxt', `STT: ${state.media.stt_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('ncLed'), !!state.media.noise_cancel_enabled);
+    setTxt('ncTxt', `NoiseCancel: ${state.media.noise_cancel_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('ttsMonLed'), !!state.media.hear_ai_voice);
+    setTxt('ttsMonTxt', `Hear AI voice: ${state.media.hear_ai_voice ? 'on' : 'off'}`);
+    setLed(document.getElementById('aiEnableLed'), !!state.media.ai_enabled);
+    setTxt('aiEnableTxt', `AI: ${state.media.ai_enabled ? 'on' : 'off'}`);
+    if (dom.aiStatusBtn) dom.aiStatusBtn.textContent = `AI ${state.media.ai_status || 'idle'}`;
+  }
+
+  function updateConnectivity(online) {
+    dom.stServer && (dom.stServer.textContent = online ? 'connected' : 'disconnected');
+    dom.stRoomConn && (dom.stRoomConn.textContent = online ? 'connected' : 'disconnected');
+    setLed(dom.ledServer, online);
+    setLed(dom.ledRoom, online);
+  }
+
+  async function ensureCam() {
+    if (state.camStream) return state.camStream;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: state.media.camera_enabled,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: !!state.media.noise_cancel_enabled,
+        autoGainControl: true,
+      },
+    });
+    state.camStream = stream;
+    if (dom.preview && !state.screenStream) dom.preview.srcObject = stream;
+    return stream;
+  }
+
+  async function ensureScreen() {
+    if (state.screenStream) return state.screenStream;
+    state.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    state.screenStream.getVideoTracks().forEach((t) => t.addEventListener('ended', () => {
+      state.media.screen_enabled = false;
+      state.screenStream = null;
+      if (dom.preview && state.camStream) dom.preview.srcObject = state.camStream;
+      sendJson(state.signalWs, 'set_media_mode', { camera: state.media.camera_enabled, screen: false, mic: state.media.mic_enabled });
+      applyRoomState({ settings: state.media, runtime: { broadcaster_present: true, viewer_count: Number(dom.stWatchers?.textContent || 0) } });
+    }));
+    if (dom.preview) dom.preview.srcObject = state.screenStream;
+    return state.screenStream;
+  }
+
+  async function ensurePc() {
+    if (state.pc) return state.pc;
+    const iceCfg = await fetch(cfg.iceConfigUrl || '/webrtc/ice-config').then((r) => r.json()).catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
+    const pc = new RTCPeerConnection({ iceServers: iceCfg.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }] });
+    state.pc = pc;
+    pc.onicecandidate = (e) => { if (e.candidate) sendJson(state.signalWs, 'webrtc_ice', { candidate: e.candidate }); };
+    pc.onconnectionstatechange = () => dom.stPc && (dom.stPc.textContent = pc.connectionState);
+    pc.oniceconnectionstatechange = () => dom.stIce && (dom.stIce.textContent = pc.iceConnectionState);
+    return pc;
+  }
+
+  async function syncLocalTracks() {
+    const pc = await ensurePc();
+    const senders = pc.getSenders ? pc.getSenders() : [];
+    const currentTracks = [];
+
+    if (state.media.screen_enabled) {
+      const s = await ensureScreen();
+      s.getVideoTracks().forEach((t) => currentTracks.push(t));
+    } else if (state.media.camera_enabled || state.media.mic_enabled) {
+      const c = await ensureCam();
+      if (state.media.camera_enabled) c.getVideoTracks().forEach((t) => currentTracks.push(t));
+      if (state.media.mic_enabled) c.getAudioTracks().forEach((t) => currentTracks.push(t));
+    }
+
+    currentTracks.forEach((t) => {
+      const has = senders.find((s) => s.track && s.track.id === t.id);
+      if (!has) pc.addTrack(t, state.media.screen_enabled ? state.screenStream : state.camStream);
+    });
+  }
+
+  async function negotiate(reason = 'update') {
+    const pc = await ensurePc();
+    await syncLocalTracks();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendJson(state.signalWs, 'webrtc_offer', { sdp: offer.sdp, type: offer.type, reason });
   }
 
   function connectChat() {
     const ws = new WebSocket(`${wsBase}/ws/chat`);
     state.chatWs = ws;
     ws.onopen = () => {
-      dom.stSock && (dom.stSock.textContent = 'connected');
-      setLed(dom.ledSock, true);
+      updateConnectivity(true);
+      sendJson(ws, 'join', { role: 'participant' });
     };
-    ws.onmessage = (ev) => handleChatMessage(ev.data);
+    ws.onmessage = (ev) => {
+      let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'state_sync') applyRoomState(msg.state || {});
+      if (msg.type === 'presence') {
+        dom.stWatchers && (dom.stWatchers.textContent = `${msg.viewer_count ?? 0}`);
+        dom.roomStatus && (dom.roomStatus.textContent = `viewers: ${msg.viewer_count ?? 0}`);
+      }
+      if (msg.type === 'ai_status') {
+        state.media.ai_status = msg.status || 'idle';
+        applyRoomState({ settings: state.media, runtime: { broadcaster_present: true, viewer_count: Number(dom.stWatchers?.textContent || 0) } });
+      }
+      if (['chat', 'ai', 'ai_partial', 'transcript', 'attachment'].includes(msg.type)) appendChat(msg);
+      if (msg.type === 'web_search_result') {
+        const q = encodeURIComponent(msg.query || '');
+        const fallbackUrl = `https://www.google.com/search?q=${q}`;
+        if (dom.searchOpenLink) dom.searchOpenLink.href = fallbackUrl;
+        if (dom.searchFrame) dom.searchFrame.src = fallbackUrl;
+        if (dom.searchPane) dom.searchPane.classList.add('open');
+        if (dom.searchFallback) dom.searchFallback.classList.add('show');
+      }
+    };
     ws.onclose = () => {
-      dom.stSock && (dom.stSock.textContent = 'reconnecting');
-      setLed(dom.ledSock, false);
-      setTimeout(connectChat, 2000);
+      updateConnectivity(false);
+      setTimeout(connectChat, 1500);
     };
   }
 
@@ -67,76 +239,95 @@
     const ws = new WebSocket(`${wsBase}/ws/broadcast`);
     state.signalWs = ws;
     ws.onopen = async () => {
-      await ensurePc();
+      sendJson(ws, 'join', { role: 'broadcaster' });
       await negotiate('initial');
     };
     ws.onmessage = async (ev) => {
-      let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === 'webrtc_answer' && msg.payload?.sdp && state.pc) {
-        await state.pc.setRemoteDescription(msg.payload);
+      let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'webrtc_answer' && msg.sdp && state.pc) {
+        await state.pc.setRemoteDescription({ type: msg.answerType || 'answer', sdp: msg.sdp });
       }
-      if (msg.type === 'webrtc_ice' && msg.payload?.candidate && state.pc) {
-        try { await state.pc.addIceCandidate(msg.payload.candidate); } catch {}
-      }
-      if (msg.type === 'viewer_count') {
-        dom.roomStatus && (dom.roomStatus.textContent = `viewers: ${msg.payload?.count ?? 0}`);
+      if (msg.type === 'state_sync') applyRoomState(msg.state || {});
+      if (msg.type === 'presence') {
+        dom.stWatchers && (dom.stWatchers.textContent = `${msg.viewer_count ?? 0}`);
+        dom.roomStatus && (dom.roomStatus.textContent = `viewers: ${msg.viewer_count ?? 0}`);
       }
     };
-    ws.onclose = () => setTimeout(connectSignal, 2000);
+    ws.onclose = () => setTimeout(connectSignal, 1500);
   }
 
-  function handleChatMessage(raw) {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
-    if (msg.type === 'chat' || msg.type === 'ai' || msg.type === 'transcript') {
-      appendChat(msg.payload ? { ...msg.payload, user: msg.user || msg.payload.user } : msg);
+  async function announceState() {
+    sendJson(state.chatWs, 'toggle_state', { state: state.media });
+    sendJson(state.signalWs, 'toggle_state', { state: state.media });
+    sendJson(state.signalWs, 'set_media_mode', { camera: state.media.camera_enabled, screen: state.media.screen_enabled, mic: state.media.mic_enabled });
+    applyRoomState({ settings: state.media, runtime: { broadcaster_present: true, viewer_count: Number(dom.stWatchers?.textContent || 0) } });
+    if (state.signalWs && state.signalWs.readyState === WebSocket.OPEN) {
+      try { await negotiate('state-change'); } catch (_) {}
     }
-    if (msg.type === 'viewer_count') {
-      dom.roomStatus && (dom.roomStatus.textContent = `viewers: ${msg.payload?.count ?? 0}`);
-    }
-  }
-
-  async function ensureCam() {
-    if (state.camStream) return;
-    state.camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    if (dom.preview) dom.preview.srcObject = state.camStream;
-  }
-
-  async function ensurePc() {
-    if (state.pc) return;
-    const iceCfg = await fetch('/webrtc/ice-config').then((r) => r.json()).catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
-    const pc = new RTCPeerConnection({ iceServers: iceCfg.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }] });
-    state.pc = pc;
-    dom.stPc && (dom.stPc.textContent = 'new');
-
-    pc.onicecandidate = (e) => { if (e.candidate) sendWs(state.signalWs, 'webrtc_ice', { candidate: e.candidate }); };
-    pc.onconnectionstatechange = () => { dom.stPc && (dom.stPc.textContent = pc.connectionState); };
-    pc.oniceconnectionstatechange = () => { dom.stIce && (dom.stIce.textContent = pc.iceConnectionState); };
-
-    await ensureCam();
-    for (const track of state.camStream.getTracks()) pc.addTrack(track, state.camStream);
-  }
-
-  async function negotiate(reason) {
-    if (!state.pc) return;
-    const offer = await state.pc.createOffer();
-    await state.pc.setLocalDescription(offer);
-    sendWs(state.signalWs, 'webrtc_offer', { sdp: offer.sdp, type: offer.type, reason });
   }
 
   dom.sendBtn?.addEventListener('click', () => {
     const text = dom.chatInput?.value?.trim();
     if (!text) return;
-    sendWs(state.chatWs, 'chat', { user: 'broadcaster', text, room: state.room });
+    sendJson(state.chatWs, 'chat', { text });
     dom.chatInput.value = '';
   });
 
-  dom.camBtn?.addEventListener('click', async () => {
-    await ensureCam();
-    appendChat({ user: 'system', text: 'Camera active' });
+  dom.chatInput?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      dom.sendBtn?.click();
+    }
   });
 
+  dom.webBtn?.addEventListener('click', () => {
+    const query = (dom.chatInput?.value || '').trim();
+    if (!query) return;
+    sendJson(state.chatWs, 'web_search', { query });
+  });
+
+  dom.searchCloseBtn?.addEventListener('click', () => dom.searchPane?.classList.remove('open'));
+
+  dom.attachBtn?.addEventListener('click', () => dom.fileInput?.click());
+  dom.fileInput?.addEventListener('change', async () => {
+    const f = dom.fileInput.files?.[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('file', f);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd }).then((r) => r.json()).catch(() => ({}));
+    sendJson(state.chatWs, 'attachment_uploaded', { attachment: { url: res.url || '', name: f.name, mime: f.type, size: f.size } });
+    dom.fileInput.value = '';
+  });
+
+  dom.camBtn?.addEventListener('click', async () => {
+    state.media.camera_enabled = !state.media.camera_enabled;
+    try { if (state.media.camera_enabled) await ensureCam(); } catch (_) {}
+    announceState();
+  });
+  dom.screenBtn?.addEventListener('click', async () => {
+    state.media.screen_enabled = !state.media.screen_enabled;
+    try { if (state.media.screen_enabled) await ensureScreen(); } catch (_) {}
+    announceState();
+  });
+  dom.micBtn?.addEventListener('click', async () => {
+    state.media.mic_enabled = !state.media.mic_enabled;
+    try { if (state.media.mic_enabled) await ensureCam(); } catch (_) {}
+    announceState();
+  });
+  dom.sttBtn?.addEventListener('click', () => { state.media.stt_enabled = !state.media.stt_enabled; announceState(); });
+  dom.ncBtn?.addEventListener('click', () => { state.media.noise_cancel_enabled = !state.media.noise_cancel_enabled; announceState(); });
+  dom.aiEnableBtn?.addEventListener('click', () => { state.media.ai_enabled = !state.media.ai_enabled; announceState(); });
+  dom.ttsMonBtn?.addEventListener('click', () => { state.media.hear_ai_voice = !state.media.hear_ai_voice; announceState(); });
+  dom.speakBtn?.addEventListener('click', () => {
+    const lastAi = [...(dom.chat?.querySelectorAll('.entry') || [])].reverse().find((e) => (e.textContent || '').includes('[ai]'));
+    if (!lastAi) return;
+    sendJson(state.chatWs, 'chat', { text: (lastAi.textContent || '').replace(/^\[ai\]/i, '').trim() });
+  });
+
+  applyRoomState({ settings: state.media, runtime: { broadcaster_present: false, viewer_count: 0 } });
   connectChat();
   connectSignal();
+
+  // Best-effort startup: keep pills ON by default even if permissions require user gesture.
+  ensureCam().then(() => announceState()).catch(() => announceState());
 })();

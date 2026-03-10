@@ -4,13 +4,11 @@ import logging
 from pathlib import Path
 
 from quart import Quart
-import socketio
 
 from server.ai.gemini import provider_name
 from server.config import load_settings
 from server.routes import register_routes
 from server.rtc import RTCManager
-from server.socket_handlers import register_socket_handlers
 from server.state import AppState
 
 
@@ -39,33 +37,19 @@ def create_quart_app() -> Quart:
     state = AppState(default_room=settings.default_room)
     rtc = RTCManager(state)
 
-    sio = socketio.AsyncServer(
-        async_mode="asgi",
-        cors_allowed_origins="*",
-        max_http_buffer_size=20000000,
-        ping_interval=25,
-        ping_timeout=60,
-    )
-    state.sio = sio
-
     register_routes(app, state, settings, rtc)
-    register_socket_handlers(sio, state, settings, rtc)
 
     app.state_obj = state
     app.settings_obj = settings
     app.rtc_manager = rtc
-    app.sio = sio
 
     return app
 
 
 def create_asgi_app():
-    app = create_quart_app()
-    settings = app.settings_obj
-    sio = app.sio
-    return socketio.ASGIApp(sio, other_asgi_app=app, socketio_path=settings.socket_path.lstrip("/"))
+    return create_quart_app()
 
 
 def create_app():
     """Factory alias for process managers expecting create_app."""
-    return create_asgi_app()
+    return create_quart_app()

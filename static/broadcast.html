@@ -40,12 +40,13 @@ textarea{flex:1;min-height:58px;max-height:140px;background:#0b1220;color:#eaf1f
 <body>
 <div class="app">
   <div class="hdr">
-    <span class="badge"><span id="ledSock" class="led r"></span><span class="mono">SOCKET</span><span id="stSock">…</span></span>
-    <span class="badge"><span id="ledRtc" class="led r"></span><span class="mono">WEBRTC</span><span id="stPc">new</span></span>
-    <span class="badge"><span id="ledIce" class="led r"></span><span class="mono">ICE</span><span id="stIce">new</span></span>
-    <span class="badge"><span id="ledStt" class="led r"></span><span class="mono">STT</span><span id="stStt">off</span></span>
+    <span class="badge"><span id="ledServer" class="led r"></span><span class="mono">SERVER</span><span id="stServer">disconnected</span></span>
+    <span class="badge"><span id="ledRoom" class="led r"></span><span class="mono">ROOM</span><span id="stRoomConn">disconnected</span></span>
+    <span class="badge"><span id="ledLive" class="led r"></span><span class="mono">BROADCAST</span><span id="stLive">offline</span></span>
     <span class="badge"><span id="ledAi" class="led r"></span><span class="mono">AI</span><span id="stAi">idle</span></span>
-    <span class="badge"><span class="mono">Bitrate</span><span id="stBr">0 kbps</span></span>
+    <span class="badge"><span class="mono">Watchers</span><span id="stWatchers">0</span></span>
+    <span class="badge"><span class="mono">WebRTC</span><span id="stPc">new</span></span>
+    <span class="badge"><span class="mono">ICE</span><span id="stIce">new</span></span>
     <span class="badge"><span class="mono">Room</span><span id="stRoom">default</span></span>
   </div>
 
@@ -55,11 +56,11 @@ textarea{flex:1;min-height:58px;max-height:140px;background:#0b1220;color:#eaf1f
       <div class="controlBar">
         <button id="camBtn" class="btn"><span id="camLed" class="led r"></span><span id="camTxt">CAM: off</span></button>
         <button id="screenBtn" class="btn"><span id="screenLed" class="led r"></span><span id="screenTxt">SCREEN: off</span></button>
+        <button id="micBtn" class="btn"><span id="micLed" class="led r"></span><span id="micTxt">MIC: off</span></button>
+        <button id="sttBtn" class="btn"><span id="sttLed" class="led r"></span><span id="sttTxt">STT: off</span></button>
         <button id="ncBtn" class="btn"><span id="ncLed" class="led r"></span><span id="ncTxt">NoiseCancel: off</span></button>
-        <button id="sttBtn" class="btn"><span id="sttLed" class="led r"></span><span id="sttTxt">STT off</span></button>
-        <button id="sstBtn" class="btn"><span id="sstLed" class="led r"></span><span id="sstTxt">SST: off</span></button>
-        <button id="aiIdleBtn" class="btn">AI Idle</button>
-        <button id="aiActiveBtn" class="btn">AI Active</button>
+        <button id="aiEnableBtn" class="btn"><span id="aiEnableLed" class="led r"></span><span id="aiEnableTxt">AI: off</span></button>
+        <button id="aiStatusBtn" class="btn">AI idle</button>
         <button id="ttsMonBtn" class="btn"><span id="ttsMonLed" class="led r"></span><span id="ttsMonTxt">Hear AI voice: off</span></button>
         <button id="speakBtn" class="btn"><span class="led b"></span><span>Speak last AI</span></button>
       </div>
@@ -87,7 +88,7 @@ textarea{flex:1;min-height:58px;max-height:140px;background:#0b1220;color:#eaf1f
   </div>
 </div>
 <script>
-window.BROADCAST_CONFIG = { iceConfigUrl:'/webrtc/ice-config', aiChatUrl:'/ai/chat', aiTtsUrl:'/ai/tts', aiWebSearchUrl:'/ai/websearch', role:'broadcast', debug:true };
+window.BROADCAST_CONFIG = { iceConfigUrl:'/webrtc/ice-config', aiChatUrl:'/ai/chat', aiTtsUrl:'/ai/tts', aiWebSearchUrl:'/ai/websearch', role:'broadcast', room:(new URLSearchParams(location.search).get('room')||'default'), debug:true };
 </script>
 <script src="/static/js/broadcast.js"></script>
 </body>

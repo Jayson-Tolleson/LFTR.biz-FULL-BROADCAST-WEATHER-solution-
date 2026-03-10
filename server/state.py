@@ -1,15 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass
 class RoomSettings:
     ai_enabled: bool = True
+    ai_status: str = "idle"
     ai_mode: str = "active"
     tts_enabled: bool = True
-    stt_enabled: bool = False
+    hear_ai_voice: bool = True
+    stt_enabled: bool = True
+    mic_enabled: bool = True
+    camera_enabled: bool = True
+    screen_enabled: bool = False
+    noise_cancel_enabled: bool = True
+    web_search_enabled: bool = True
+    attachments_enabled: bool = True
 
 
 @dataclass
@@ -24,12 +32,27 @@ class MediaState:
 
 
 @dataclass
+class RoomRuntime:
+    chat_connected: bool = False
+    broadcast_connected: bool = False
+    watch_connected: bool = False
+    broadcaster_present: bool = False
+    viewer_count: int = 0
+
+
+@dataclass
 class RoomState:
     broadcaster_sid: Optional[str] = None
     viewers: Dict[str, Any] = field(default_factory=dict)
     settings: RoomSettings = field(default_factory=RoomSettings)
     media: MediaState = field(default_factory=MediaState)
+    runtime: RoomRuntime = field(default_factory=RoomRuntime)
     latest_upload: Optional[Dict[str, Any]] = None
+
+
+
+def get_default_room_state() -> RoomState:
+    return RoomState()
 
 
 class AppState:
@@ -37,12 +60,11 @@ class AppState:
         self.default_room = default_room
         self.rooms: Dict[str, RoomState] = {}
         self.sid_meta: Dict[str, Tuple[str, str]] = {}
-        self.sio = None
 
     def ensure_room(self, room_id: str) -> RoomState:
         room = self.rooms.get(room_id)
         if room is None:
-            room = RoomState()
+            room = get_default_room_state()
             self.rooms[room_id] = room
         return room
 
@@ -64,3 +86,14 @@ class AppState:
 
     def pop_sid_meta(self, sid: str) -> Tuple[str, str]:
         return self.sid_meta.pop(sid, (self.default_room, "unknown"))
+
+    def room_state_payload(self, room_id: str) -> dict[str, Any]:
+        room = self.ensure_room(room_id)
+        room.runtime.viewer_count = len(room.viewers)
+        room.runtime.broadcaster_present = room.broadcaster_sid is not None
+        return {
+            "room": room_id,
+            "settings": asdict(room.settings),
+            "runtime": asdict(room.runtime),
+            "media": asdict(room.media),
+        }
