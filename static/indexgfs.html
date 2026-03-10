@@ -1,0 +1,2820 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GFS v7 Marine Intelligence Globe</title>
+  <style>
+    :root {
+      --glass: rgba(8, 20, 41, 0.66);
+      --line: rgba(56, 189, 248, 0.38);
+      --txt: #e6f4ff;
+      --muted: rgba(230, 244, 255, 0.72);
+      --cyan: #22d3ee;
+      --pink: #f472b6;
+      --lime: #84cc16;
+      --amber: #f59e0b;
+      --red: #f43f5e;
+      --teal: #14b8a6;
+      --shadow: 0 18px 60px rgba(2, 8, 23, .55);
+      --cinema: linear-gradient(180deg, rgba(3, 8, 20, 0.9) 0%, rgba(5, 12, 28, 0.82) 45%, rgba(8, 20, 41, 0.72) 100%);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      color: var(--txt);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at 14% 10%, #1d4ed8 0%, #081226 42%, #04070f 100%);
+      overflow: hidden;
+    }
+
+    .layout {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 0 24px rgba(34, 211, 238, .12), inset 0 0 0 1px rgba(255,255,255,.04);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 10px;
+      padding: 12px;
+      align-items: center;
+    }
+
+    .title { font-size: 18px; font-weight: 800; letter-spacing: .02em; }
+    .subline { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .statusline { margin-top: 8px; font-size: 12px; opacity: .94; display: flex; flex-wrap: wrap; gap: 8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .feature {
+      border: 1px solid #334155;
+      background: rgba(15, 23, 42, 0.72);
+      color: #dbeafe;
+      border-radius: 999px;
+      padding: 6px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+
+    .feature:hover { transform: translateY(-1px); border-color: rgba(148, 163, 184, .6); }
+    .light { width: 10px; height: 10px; border-radius: 999px; background: #334155; flex: 0 0 10px; }
+    .feature.on .light { animation: blink 1.15s linear infinite; }
+    .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+    .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
+    .feature[data-kind="lightning"].on .light { background: #fef08a; box-shadow: 0 0 10px #fef08a; }
+    .feature[data-kind="jet"].on .light { background: var(--pink); box-shadow: 0 0 10px var(--pink); }
+    .feature[data-kind="markers"].on .light { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
+    .feature[data-kind="bait"].on .light { background: var(--teal); box-shadow: 0 0 10px var(--teal); }
+    .feature[data-kind="sst"].on .light { background: #fb923c; box-shadow: 0 0 10px #fb923c; }
+    .feature[data-kind="swell"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
+    .feature[data-kind="popups"].on .light { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+    .feature[data-kind="reports"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .28; } }
+
+    .main { min-height: 0; position: relative; }
+    .mapwrap { position: relative; overflow: hidden; min-height: 460px; height: 100%; }
+
+    #globe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 460px;
+      border-radius: 14px;
+      background: radial-gradient(circle at center, rgba(30, 64, 175, .35), rgba(15, 23, 42, .95));
+    }
+
+    .globe-fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      text-align: center;
+      padding: 20px;
+      color: #dbeafe;
+      background: radial-gradient(circle at center, rgba(30, 64, 175, .28), rgba(15, 23, 42, .92));
+      border-radius: 14px;
+      z-index: 3;
+    }
+
+    .globe-fallback.show { display: grid; }
+    .globe-fallback .inner {
+      max-width: 560px;
+      border: 1px solid rgba(129, 140, 248, .38);
+      background: rgba(10, 14, 29, 0.78);
+      padding: 16px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+    }
+
+    .fish-pin {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(220, 252, 231, 0.92);
+      background: radial-gradient(circle at 35% 32%, #deffe9 0%, #88ffad 22%, #26e963 48%, #0d8f35 78%, #06391a 100%);
+      box-shadow: 0 0 12px rgba(34, 255, 102, 0.95), 0 0 24px rgba(34, 255, 102, 0.72), 0 0 42px rgba(16, 185, 129, 0.5);
+      animation: fishPinPulse 1.8s ease-in-out infinite;
+      transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
+    }
+    .fish-pin-low { transform: scale(1); }
+    .fish-pin-medium { transform: scale(1.08); }
+    .fish-pin-high { transform: scale(1.16); }
+    .fish-pin.hover, .fish-pin.active {
+      filter: saturate(1.2) brightness(1.08);
+      box-shadow: 0 0 18px rgba(74, 222, 128, 1), 0 0 34px rgba(34, 255, 102, 0.9), 0 0 52px rgba(16, 185, 129, 0.62);
+    }
+    .fish-pin.active { transform: scale(1.22); }
+    @keyframes fishPinPulse { 0%,100% { opacity: 1; } 50% { opacity: .86; } }
+
+        .rain-sphere { border-radius: 999px; border: 1px solid rgba(186, 230, 253, 0.68); box-shadow: 0 0 9px rgba(56,189,248,.5); }
+    .jet-balloon { border-radius: 999px; border: 1px solid rgba(255,255,255,.4); box-shadow: 0 0 14px rgba(244,114,182,.45), 0 0 26px rgba(129,140,248,.32); }
+
+    .hover-hud {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      width: min(368px, calc(100% - 28px));
+      max-height: min(72vh, 760px);
+      border: 1px solid rgba(125, 211, 252, 0.22);
+      border-radius: 18px;
+      padding: 0;
+      background: var(--cinema);
+      backdrop-filter: blur(16px) saturate(1.15);
+      -webkit-backdrop-filter: blur(16px) saturate(1.15);
+      z-index: 20;
+      display: none;
+      overflow: hidden;
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,.06);
+    }
+    .hover-hud::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 76px;
+      background: linear-gradient(180deg, rgba(34, 211, 238, 0.14), rgba(129, 140, 248, 0.06), transparent);
+      pointer-events: none;
+    }
+    .hover-hud.show { display: block; }
+    .hover-hud.locked { border-color: rgba(132, 204, 22, .48); box-shadow: 0 20px 64px rgba(8, 18, 20, .7), 0 0 26px rgba(132, 204, 22, .14); }
+    .hud-scroll { position: relative; z-index: 1; max-height: min(72vh, 760px); overflow: auto; padding: 12px; }
+    .hud-hero { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; margin-bottom: 10px; }
+    .hud-title { margin-top: 6px; font-size: 16px; font-weight: 800; letter-spacing: .01em; line-height: 1.15; }
+    .hud-subgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 8px; }
+    .mini-stat { border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 12px; padding: 8px 9px; background: rgba(15, 23, 42, 0.34); min-width: 0; }
+    .mini-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: rgba(191, 219, 254, .65); margin-bottom: 3px; }
+    .mini-stat-value { font-size: 12px; color: #e0f2fe; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hud-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+    .hud-actions.tight3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .hud-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
+    .hud-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: rgba(191, 219, 254, .72); margin-bottom: 8px; }
+    .hover-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(132, 204, 22, .35);
+      background: rgba(20, 35, 18, .45);
+      color: #dcfce7;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .live-badge.live {
+      color: #fecaca;
+      border-color: rgba(248, 113, 113, 0.7);
+      background: rgba(127, 29, 29, .4);
+      box-shadow: 0 0 14px rgba(244, 63, 94, 0.4);
+      animation: livePulse 1.05s ease-in-out infinite;
+    }
+    .live-badge.offline { color: #bbf7d0; border-color: rgba(134, 239, 172, 0.35); background: rgba(6, 78, 59, .35); }
+    @keyframes livePulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.02); opacity: .72; } }
+
+    .player-pane {
+      margin-top: 0;
+      border: 1px solid rgba(51, 65, 85, 0.9);
+      border-radius: 14px;
+      background: radial-gradient(circle at top, rgba(30, 41, 59, .7), rgba(2, 6, 23, 0.92));
+      min-height: 128px;
+      overflow: hidden;
+      position: relative;
+    }
+    .player-pane iframe,
+    .player-pane video {
+      width: 100%;
+      min-height: 128px;
+      display: block;
+      border: 0;
+      background: #020617;
+    }
+    .player-empty { min-height: 128px; display: grid; place-items: center; text-align: center; padding: 14px; color: #bfdbfe; font-size: 13px; }
+
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input, textarea, button { background: #0b1220; color: #e8eefc; border: 1px solid #334161; border-radius: 8px; padding: 8px; font: inherit; }
+    button { cursor: pointer; }
+    button:hover { border-color: rgba(34, 211, 238, .55); }
+    textarea { width: 100%; min-height: 74px; resize: vertical; }
+    .videos a { color: #93c5fd; display: block; margin-top: 4px; word-break: break-word; }
+    .stale { color: #fca5a5; }
+    .context { margin-top: 8px; white-space: pre-wrap; color: #cfe8ff; }
+    .muted { color: var(--muted); }
+    .tiny { font-size: 12px; }
+
+    .meta-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .meta-row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: start; font-size: 12px; }
+    .meta-k { color: rgba(191, 219, 254, .72); text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
+    .meta-v { color: #e2e8f0; word-break: break-word; white-space: pre-wrap; }
+
+    @media (max-width: 980px) {
+      .topbar { grid-template-columns: 1fr; }
+      .features { justify-content: flex-start; }
+      #globe, .mapwrap { min-height: 320px; }
+      .hover-hud { width: calc(100% - 20px); right: 10px; bottom: 10px; max-height: 68vh; }
+      .hud-actions.tight3,
+      .hud-actions,
+      .hud-subgrid,
+      .meta-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <div class="card topbar">
+    <div>
+      <div class="title">LFTR v7 Marine Intelligence Globe</div>
+      <div class="subline">Google Photorealistic 3D globe • fish intelligence • bait/weather context • live media hover HUD</div>
+      <div class="statusline" id="statusLine"></div>
+    </div>
+    <div class="features" id="features"></div>
+  </div>
+
+  <div class="main">
+    <div class="card mapwrap">
+      <gmp-map-3d id="globe"
+        mode="hybrid"
+        center="34.2000,-120.0000,120"
+        range="1800000"
+        tilt="42"
+        heading="7.5"
+        default-ui-hidden>
+      </gmp-map-3d>
+
+      <div class="globe-fallback" id="globeFallback">
+        <div class="inner">
+          <strong>3D globe unavailable</strong>
+          <div class="muted" style="margin-top:8px">
+            Configure <span class="mono">GOOGLE_MAPS_API_KEY</span> and ensure the Maps JavaScript API with
+            <span class="mono">maps3d</span> support is enabled.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="hover-hud" id="hud">
+  <div class="hud-scroll">
+    <div class="hud-hero">
+      <div class="hud-heading">
+        <div class="hover-pill" id="hudMode">Hover target</div>
+        <div class="hud-title" id="hudTitle">Location</div>
+        <div class="mono tiny muted" id="hudKey"></div>
+      </div>
+      <div class="hud-actions tight3" style="margin-top:2px">
+        <button id="pinHudBtn">Pin</button>
+        <button id="refreshContextBtn">Refresh</button>
+        <button id="closeHud">Close</button>
+      </div>
+    </div>
+
+    <div class="hud-subgrid">
+      <div class="mini-stat">
+        <div class="mini-stat-label">Context</div>
+        <div class="mini-stat-value" id="mediaInfo">Hover a green sphere to load context…</div>
+      </div>
+      <div class="mini-stat">
+        <div class="mini-stat-label">Live</div>
+        <div class="mini-stat-value"><span class="live-badge offline" id="liveBadge">Offline</span></div>
+      </div>
+    </div>
+
+    <div class="player-pane" id="mediaPlayerPane">
+      <div class="player-empty">Hover a fish marker to load live media.</div>
+    </div>
+
+    <div class="hud-actions" style="margin-top:10px">
+      <button id="startLiveBtn">Start Live</button>
+      <button id="stopLiveBtn">Stop Live</button>
+    </div>
+
+    <div class="hud-section" id="reportSection">
+      <div class="hud-section-title">Field Report</div>
+      <textarea id="reportText" placeholder="Write location report..."></textarea>
+      <div class="hud-actions">
+        <button id="saveReportBtn">Save Report</button>
+        <button id="connectLiveBtn">Update URL</button>
+      </div>
+    </div>
+
+    <div class="hud-section">
+      <div class="hud-section-title">Live URL</div>
+      <input id="liveUrl" placeholder="https://..." style="width:100%">
+    </div>
+
+    <div class="hud-section">
+      <div class="hud-section-title">Upload Clip</div>
+      <input id="videoFile" type="file" accept="video/*" style="width:100%">
+      <div class="hud-actions">
+        <button id="uploadBtn">Upload Video</button>
+      </div>
+    </div>
+
+    <div class="hud-section">
+      <div class="hud-section-title">Location Metadata</div>
+      <div class="meta-grid" id="fishMeta"></div>
+    </div>
+
+    <div class="hud-section">
+      <div class="hud-section-title">Intel</div>
+      <div class="context mono" id="intel"></div>
+      <div class="videos" id="videoList"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/cloud-advection.js"></script>
+<script src="/static/volumetric-clouds.js"></script>
+<script src="/static/rain-shafts.js"></script>
+<script src="/static/lightning.js"></script>
+<script src="/static/jetstream.js"></script>
+<script src="/static/ocean-swell.js"></script>
+
+<script>
+(() => {
+  const FULL_GLOBE_BBOX = { west: -180, south: -90, east: 180, north: 90 };
+  const SPAWN_BBOX = { west: -180, south: -80, east: 180, north: 80 };
+  const JET_BALLOON_ALTITUDE_M = 3048;
+
+  const statusLine = document.getElementById('statusLine');
+  const globeFallback = document.getElementById('globeFallback');
+
+  const hud = document.getElementById('hud');
+  const hudTitle = document.getElementById('hudTitle');
+  const hudKey = document.getElementById('hudKey');
+  const hudMode = document.getElementById('hudMode');
+  const reportText = document.getElementById('reportText');
+  const reportSection = document.getElementById('reportSection');
+  const mediaInfo = document.getElementById('mediaInfo');
+  const videoList = document.getElementById('videoList');
+  const liveUrl = document.getElementById('liveUrl');
+  const videoFile = document.getElementById('videoFile');
+  const intel = document.getElementById('intel');
+  const liveBadge = document.getElementById('liveBadge');
+  const mediaPlayerPane = document.getElementById('mediaPlayerPane');
+  const pinHudBtn = document.getElementById('pinHudBtn');
+  const fishMeta = document.getElementById('fishMeta');
+
+  let globeEl = document.getElementById('globe');
+
+  const state = {
+    fish: [],
+    selected: null,
+    hoverTarget: null,
+    feature: {
+      clouds: true,
+      rain: true,
+      lightning: true,
+      jet: true,
+      markers: true,
+      bait: true,
+      sst: true,
+      swell: false,
+      popups: true,
+      reports: true,
+    },
+    mapReady: false,
+    mapMarkers: [],
+    markerStates: new Map(),
+    cloudPolygons: [],
+    cloudInteractivePolygons: [],
+    rainMarkers: [],
+    rainColumns: [],
+    hailMarkers: [],
+    hailCorePolygons: [],
+    lightningPolygons: [],
+    baitPolygons: [],
+    sstPolygons: [],
+    sstMarkers: [],
+    swellPolygons: [],
+    jetMarkers: [],
+    jetBalloons: [],
+    jetSeedCount: 80,
+    cloudTiles: [],
+    weatherPayload: null,
+    tileMode: true,
+    tileFetchInFlight: false,
+    layerTileData: { clouds: new Map(), precip: new Map(), lightning: new Map(), wind: new Map(), swell: new Map(), sst: new Map(), fish: new Map() },
+    activeTileKeys: new Set(),
+    cloudFetchedAt: 0,
+    weatherSource: 'unknown',
+    weatherPayloadState: 'unknown',
+    weatherQualityNote: '',
+    weatherConfidence: 'unknown',
+    wsConnected: false,
+    lastUpdateAt: 0,
+    hudPollId: null,
+    mapsApiKey: '',
+    maps3dLib: null,
+    markerLib: null,
+    mapsScriptLoading: null,
+    hudLocked: false,
+    hudHover: false,
+    hudHideTimer: null,
+    lastHudLoadedKey: '',
+    tileDebug: false,
+    lightningRegistry: new Map(),
+    tileFailureCount: 0,
+    tileFailureStreak: 0,
+    tileMaxConcurrent: 12,
+    initialTileWarmupDone: false,
+    polygonWarn: { byKey: new Map(), total: 0 },
+    renderStats: { fishItems: 0, fishMarkersRendered: 0, cloudTiles: 0, cloudPolygonsRendered: 0, cloudInteractiveRendered: 0, rainRendered: 0, lightningRendered: 0 },
+  };
+
+  const layerManager = {
+    registry: {},
+    register(name, handlers) {
+      if (this.registry[name]) return;
+      this.registry[name] = {
+        init: handlers?.init || (async () => {}),
+        refresh: handlers?.refresh || (async () => {}),
+        clear: handlers?.clear || (() => {}),
+        destroy: handlers?.destroy || (() => {}),
+        enabled: true,
+        inited: false,
+      };
+    },
+    enable(name) {
+      const layer = this.registry[name];
+      if (!layer) return;
+      layer.enabled = true;
+    },
+    disable(name) {
+      const layer = this.registry[name];
+      if (!layer) return;
+      layer.enabled = false;
+      try { layer.clear(); } catch (_) {}
+    },
+    async refresh(name) {
+      const layer = this.registry[name];
+      if (!layer || !layer.enabled) return;
+      if (!layer.inited) {
+        await layer.init();
+        layer.inited = true;
+      }
+      await layer.refresh();
+    },
+    clear(name) {
+      const layer = this.registry[name];
+      if (!layer) return;
+      layer.clear();
+    },
+    destroy(name) {
+      const layer = this.registry[name];
+      if (!layer) return;
+      try { layer.destroy(); } catch (_) {}
+      delete this.registry[name];
+    },
+  };
+
+  function setStatus(msg, isStale = false) {
+    const mapState = state.mapReady ? 'ready' : 'fallback';
+    const modeFlag = state.tileMode ? 'tile' : 'scene';
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • fish:${state.renderStats.fishItems} markers:${state.renderStats.fishMarkersRendered} cloudTiles:${state.renderStats.cloudTiles} cloudPolys:${state.renderStats.cloudPolygonsRendered + state.renderStats.cloudInteractiveRendered} rain:${state.renderStats.rainRendered} ltg:${state.renderStats.lightningRendered} tileFail:${state.tileFailureCount} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
+    statusLine.classList.toggle('stale', !!isStale);
+  }
+
+  function setHudMessage(msg) { mediaInfo.textContent = msg; }
+
+  function normalizeFeatureButton(btn, kind) {
+    btn.classList.toggle('on', !!state.feature[kind]);
+  }
+
+  async function onFeatureToggle(kind) {
+    const layerByKind = {
+      clouds: 'clouds',
+      rain: 'rain',
+      lightning: 'lightning',
+      jet: 'jet',
+      markers: 'fish',
+      bait: 'bait',
+      sst: 'sst',
+      swell: 'swell',
+    };
+
+    if (kind === 'markers') {
+      state.mapMarkers.forEach((m) => {
+        try { m.style.display = state.feature.markers ? '' : 'none'; } catch (_) {}
+      });
+      if (!state.feature.markers) {
+        hideHud(true);
+        setActiveMarkerByKey(null);
+        clearMapMarkers();
+      } else {
+        await renderMapMarkers();
+      }
+    }
+
+    if (kind === 'popups' && !state.feature.popups) {
+      hideHud(true);
+    }
+
+    if (kind === 'reports') {
+      const disabled = !state.feature.reports;
+      reportSection.style.display = disabled ? 'none' : '';
+      reportText.disabled = disabled;
+      document.getElementById('saveReportBtn').disabled = disabled;
+    }
+
+    if (kind === 'bait' && state.selected) {
+      setHudMessage(baitText(state.selected));
+    }
+
+    const layerName = layerByKind[kind];
+    if (layerName) {
+      if (state.feature[kind]) {
+        layerManager.enable(layerName);
+        await layerManager.refresh(layerName);
+      } else {
+        layerManager.disable(layerName);
+      }
+      if (state.mapReady) {
+        await refreshVisibleTiles().catch(() => {});
+      }
+      await renderWeatherLayers();
+    }
+  }
+
+
+  function mkFeature(kind, label) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'feature on';
+    btn.dataset.kind = kind;
+    btn.innerHTML = `<span class="light"></span><span>${label}</span>`;
+    btn.addEventListener('click', () => {
+      state.feature[kind] = !state.feature[kind];
+      normalizeFeatureButton(btn, kind);
+      onFeatureToggle(kind).catch((e) => setStatus(e.message, true));
+    });
+    return btn;
+  }
+
+  const featuresEl = document.getElementById('features');
+  [
+    ['clouds', 'Clouds'],
+    ['rain', 'Rain'],
+    ['lightning', 'Lightning'],
+    ['jet', 'Jet balloons'],
+    ['markers', 'Fish markers'],
+    ['bait', 'Bait layer'],
+    ['sst', 'SST'],
+    ['swell', 'Ocean swell'],
+    ['popups', 'Hover HUD'],
+    ['reports', 'Reports'],
+  ].forEach(([k, l]) => featuresEl.appendChild(mkFeature(k, l)));
+
+  async function json(url, opts) {
+    const res = await fetch(url, opts);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) {
+      throw new Error(body.error || `request failed (${res.status})`);
+    }
+    return body;
+  }
+
+  function baitText(point) {
+    const bait = (point?.bait?.intensity) || 'unknown';
+    const confidence = Number.isFinite(point?.bait?.confidence) ? ` (${point.bait.confidence}%)` : '';
+    return state.feature.bait ? `Bait: ${bait}${confidence}` : 'Bait layer disabled';
+  }
+
+  async function loadHealth() {
+    const payload = await json('/gfs/api/health');
+    state.lastUpdateAt = Date.now();
+    const fishCount = Number(payload?.fish_count || 0);
+    setStatus(`Operational feed nominal • fish:${fishCount}`);
+  }
+
+  function clearMapMarkers() {
+    state.mapMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.mapMarkers = [];
+    state.markerStates = new Map();
+  }
+
+  function clearCloudPolygons() {
+    state.cloudPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.cloudPolygons = [];
+    state.cloudInteractivePolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.cloudInteractivePolygons = [];
+  }
+  function clearRainMarkers() {
+    state.rainMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.rainMarkers = [];
+    state.rainColumns.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.rainColumns = [];
+  }
+  function clearHailAndLightning() {
+    state.hailMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.hailMarkers = [];
+    state.hailCorePolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.hailCorePolygons = [];
+    state.lightningPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.lightningPolygons = [];
+    if (state.lightningRegistry) state.lightningRegistry.clear();
+  }
+  function clearBaitPolygons() {
+    state.baitPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.baitPolygons = [];
+  }
+  function clearSstLayer() {
+    state.sstPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.sstPolygons = [];
+    state.sstMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.sstMarkers = [];
+  }
+  function clearSwellLayer() {
+    state.swellPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.swellPolygons = [];
+  }
+  function clearJetMarkers() { state.jetMarkers.forEach((m) => { try { m.remove(); } catch (_) {} }); state.jetMarkers = []; }
+
+  function hashString32(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i += 1) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function seededUnit(key) {
+    const h = hashString32(String(key));
+    return (h % 1000000) / 1000000;
+  }
+
+  function seededRange(key, min, max) {
+    return min + (max - min) * seededUnit(key);
+  }
+
+  function currentCameraRange() {
+    const val = Number(globeEl?.getAttribute('range') || 1800000);
+    return Number.isFinite(val) ? val : 1800000;
+  }
+
+  function cloudLodProfile() {
+    const range = currentCameraRange();
+    if (range > 2400000) {
+      return { tileLimit: 130, cloudPartBudget: 1200, deckParts: 3, towerParts: 2, anvilParts: 3, rainCap: 180, jetCap: 60, label: 'high-alt' };
+    }
+    if (range > 1400000) {
+      return { tileLimit: 230, cloudPartBudget: 2400, deckParts: 5, towerParts: 4, anvilParts: 5, rainCap: 380, jetCap: 90, label: 'mid-alt' };
+    }
+    return { tileLimit: 340, cloudPartBudget: 4200, deckParts: 7, towerParts: 6, anvilParts: 8, rainCap: 620, jetCap: 120, label: 'low-alt' };
+  }
+
+  function getSunState() {
+    const now = new Date();
+    const hour = now.getUTCHours() + now.getUTCMinutes() / 60;
+    const daylight = Math.max(0.08, Math.sin(((hour - 6) / 12) * Math.PI));
+    return { daylight, shade: 1 - daylight * 0.55 };
+  }
+
+  function wrapLon(lon) {
+    let v = lon;
+    while (v > FULL_GLOBE_BBOX.east) v -= 360;
+    while (v < FULL_GLOBE_BBOX.west) v += 360;
+    return v;
+  }
+
+  function clampLat(lat) {
+    return Math.max(-85, Math.min(85, lat));
+  }
+
+  function advectCloudPosition(item, offsetLat = 0, offsetLon = 0) {
+    const ageHours = Math.max(0, (Date.now() - Number(item.updated_at || Date.now())) / 3600000);
+    const u = Number(item.wind?.u || 0);
+    const v = Number(item.wind?.v || 0);
+    const driftLat = v * ageHours * 0.035;
+    const cosLat = Math.max(0.25, Math.cos((Number(item.lat) * Math.PI) / 180));
+    const driftLon = (u * ageHours * 0.035) / cosLat;
+    const lat = clampLat(Number(item.lat) + driftLat + offsetLat);
+    const lon = wrapLon(Number(item.lon) + driftLon + offsetLon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { lat, lon };
+  }
+
+  function normalizeTileBand(tile, band) {
+    const bandData = tile.bands?.[band] || {};
+    const density = Number(bandData.density ?? tile[`${band}_density`] ?? 0);
+    const baseFallback = Number(tile.base_altitude_m ?? tile[`altitude_${band}`] ?? (band === 'high' ? 9000 : band === 'mid' ? 4200 : 1200));
+    const base_altitude_m = Number(bandData.base_altitude_m ?? baseFallback);
+    const thickness_m = Number(bandData.thickness_m ?? (band === 'high' ? 1700 : band === 'mid' ? 2000 : 1200));
+    const top_altitude_m = Number(bandData.top_altitude_m ?? (base_altitude_m + thickness_m));
+    const lateral_scale_km = Number(bandData.lateral_scale_km ?? (tile.regime === 'frontal_shield' ? 180 : tile.regime === 'marine_stratocumulus' ? 150 : 95));
+    const coverage = Number(bandData.coverage ?? density);
+    const wind = bandData.wind || tile.wind?.[band] || { u: 0, v: 0 };
+    return {
+      tile_id: tile.tile_id,
+      lat: Number(tile.bounds?.lat_center || 0),
+      lon: Number(tile.bounds?.lon_center || 0),
+      density,
+      altitude: base_altitude_m,
+      base_altitude_m,
+      top_altitude_m,
+      thickness_m,
+      lateral_scale_km,
+      coverage,
+      wind,
+      precip: Number(tile.precipitation_factor || tile.precip || 0),
+      convection: Number(tile.convection_factor || tile.convection || 0),
+      importance: Number(tile.importance || 0),
+      updated_at: Number(tile.updated_at || Date.now()),
+      band,
+      regime: tile.regime || 'cumulus_field',
+      opacity: Number(tile.opacity || 0.45),
+      underside_darkness: Number(tile.underside_darkness || 0.2),
+      fringe_softness: Number(tile.fringe_softness || 0.6),
+      organization: Number(tile.organization || 0.5),
+      wind_shear: Number(tile.wind_shear || 0),
+      tower_bias: Number(tile.tower_bias || 0.3),
+      deck_bias: Number(tile.deck_bias || 0.4),
+      wispy_bias: Number(tile.wispy_bias || 0.2),
+      anvil_dir_deg: Number(tile.anvil_dir_deg || 0),
+      anvil_spread_km: Number(tile.anvil_spread_km || 0),
+      subcells: Array.isArray(tile.subcells) ? tile.subcells : [],
+    };
+  }
+
+  function lerpColor(a, b, t) {
+    const ah = a.replace('#', '');
+    const bh = b.replace('#', '');
+    const ar = parseInt(ah.slice(0, 2), 16);
+    const ag = parseInt(ah.slice(2, 4), 16);
+    const ab = parseInt(ah.slice(4, 6), 16);
+    const br = parseInt(bh.slice(0, 2), 16);
+    const bg = parseInt(bh.slice(2, 4), 16);
+    const bb = parseInt(bh.slice(4, 6), 16);
+    const rr = Math.round(ar + (br - ar) * t);
+    const rg = Math.round(ag + (bg - ag) * t);
+    const rb = Math.round(ab + (bb - ab) * t);
+    return `rgb(${rr}, ${rg}, ${rb})`;
+  }
+
+  function mphSpectrumColor(mph) {
+    const stops = [
+      [0, '#ffffff'],
+      [10, '#60a5fa'],
+      [25, '#22c55e'],
+      [45, '#fde047'],
+      [65, '#fb923c'],
+      [90, '#ef4444'],
+      [120, '#0a0a0a'],
+    ];
+    const clamped = Math.max(0, Math.min(160, mph));
+    for (let i = 0; i < stops.length - 1; i += 1) {
+      const [s0, c0] = stops[i];
+      const [s1, c1] = stops[i + 1];
+      if (clamped >= s0 && clamped <= s1) {
+        const t = (clamped - s0) / (s1 - s0 || 1);
+        return lerpColor(c0, c1, t);
+      }
+    }
+    return 'rgb(10,10,10)';
+  }
+
+  function rainIntensityColor(precip) {
+    const p = Math.max(0, Math.min(1.2, precip));
+    if (p < 0.15) return lerpColor('#e0f2fe', '#93c5fd', p / 0.15);
+    if (p < 0.35) return lerpColor('#93c5fd', '#22c55e', (p - 0.15) / 0.2);
+    if (p < 0.55) return lerpColor('#22c55e', '#fde047', (p - 0.35) / 0.2);
+    if (p < 0.75) return lerpColor('#fde047', '#fb923c', (p - 0.55) / 0.2);
+    if (p < 0.95) return lerpColor('#fb923c', '#ef4444', (p - 0.75) / 0.2);
+    return lerpColor('#ef4444', '#111111', Math.min(1, (p - 0.95) / 0.25));
+  }
+
+  function uvToMph(u, v) {
+    const speedMs = Math.hypot(Number(u || 0), Number(v || 0));
+    return speedMs * 2.23693629;
+  }
+
+  function uvToHeadingDeg(u, v) {
+    const ang = Math.atan2(Number(u || 0), Number(v || 0)) * 180 / Math.PI;
+    return (ang + 360) % 360;
+  }
+
+  function createStyledPin(markerLib, opts) {
+    return new markerLib.PinElement(opts);
+  }
+
+  function sampleSigmaWind(lat, lon) {
+    const latR = lat * Math.PI / 180;
+    const lonR = lon * Math.PI / 180;
+    const t = Date.now() / 100000;
+    const jetBand = Math.exp(-Math.pow((Math.abs(lat) - 38) / 18, 2));
+    const wave = Math.sin(lonR * 2.1 + t) * 0.8 + Math.cos((latR + lonR) * 1.4 - t * 0.7) * 0.55;
+    const baseU = 18 + jetBand * 32 + wave * 9;
+    const baseV = Math.cos(lonR * 1.5 - t * 0.9) * (2.5 + jetBand * 3.5);
+    return { sigma_u: baseU, sigma_v: baseV };
+  }
+
+  function createJetBalloon(id, lat, lon, sigmaU, sigmaV) {
+    const mph = uvToMph(sigmaU, sigmaV);
+    return {
+      id,
+      lat,
+      lon,
+      sigma_u: sigmaU,
+      sigma_v: sigmaV,
+      mph,
+      heading: uvToHeadingDeg(sigmaU, sigmaV),
+      altitude_m: JET_BALLOON_ALTITUDE_M,
+      updated_at: Date.now(),
+    };
+  }
+
+  function seedJetBalloons(count) {
+    if (state.jetBalloons.length) return;
+    for (let i = 0; i < count; i += 1) {
+      const lat = SPAWN_BBOX.south + Math.random() * (SPAWN_BBOX.north - SPAWN_BBOX.south);
+      const lon = SPAWN_BBOX.west + Math.random() * (SPAWN_BBOX.east - SPAWN_BBOX.west);
+      const sampled = sampleSigmaWind(lat, lon);
+      state.jetBalloons.push(createJetBalloon(`jet-${i + 1}`, lat, lon, sampled.sigma_u, sampled.sigma_v));
+    }
+  }
+
+  function advectJetBalloon(balloon, now) {
+    const dt = Math.max(0.2, Math.min(6.5, (now - Number(balloon.updated_at || now)) / 1000));
+    const sampled = sampleSigmaWind(balloon.lat, balloon.lon);
+    balloon.sigma_u = sampled.sigma_u;
+    balloon.sigma_v = sampled.sigma_v;
+
+    const dLat = (sampled.sigma_v * dt) / 111320;
+    const lonScale = Math.max(0.22, Math.cos((balloon.lat * Math.PI) / 180));
+    const dLon = (sampled.sigma_u * dt) / (111320 * lonScale);
+
+    balloon.lat = clampLat(balloon.lat + dLat);
+    balloon.lon = wrapLon(balloon.lon + dLon);
+    balloon.mph = uvToMph(balloon.sigma_u, balloon.sigma_v);
+    balloon.heading = uvToHeadingDeg(balloon.sigma_u, balloon.sigma_v);
+    balloon.updated_at = now;
+  }
+
+  function buildJetBalloonPin(markerLib, balloon) {
+    const color = mphSpectrumColor(balloon.mph);
+    const mphGlyph = `${Math.round(balloon.mph)}`;
+    const pin = createStyledPin(markerLib, {
+      glyphText: mphGlyph.length > 3 ? mphGlyph.slice(0, 3) : mphGlyph,
+      scale: 0.76 + Math.min(0.95, balloon.mph / 95),
+      background: color,
+      borderColor: 'rgba(255,255,255,0.62)',
+      glyphColor: balloon.mph >= 85 ? '#fff' : '#0b1020',
+    });
+    return pin;
+  }
+
+  function buildRainSpherePin(markerLib, rainParticle) {
+    const color = rainParticle?.colorOverride || rainIntensityColor(rainParticle.precip);
+    return createStyledPin(markerLib, {
+      scale: Math.max(0.18, rainParticle.scale * (0.8 + rainParticle.opacity * 0.4)),
+      background: color,
+      borderColor: 'rgba(226,232,240,0.72)',
+      glyphColor: '#ffffff',
+    });
+  }
+
+  function cloudTileDensity(tile, band) {
+    const bandData = tile.bands?.[band];
+    const raw = bandData?.density ?? tile[`${band}_density`] ?? 0;
+    return Math.max(0, Math.min(1, Number(raw) || 0));
+  }
+
+  function cloudRoleStyle(tile, band, role, density, sun) {
+    const regime = tile.regime || 'cumulus_field';
+    const precip = Number(tile.precipitation_factor || 0);
+    const convection = Number(tile.convection_factor || 0);
+    const underside = Number(tile.underside_darkness || 0.22);
+    const dayBoost = sun.daylight * (band === 'high' ? 0.24 : 0.14);
+    const stormDark = Math.min(0.42, precip * 0.2 + convection * 0.26 + underside * 0.22);
+    const base = Math.max(118, Math.min(245, Math.round(215 + dayBoost * 32 - stormDark * 112)));
+
+    let opacity = Math.max(0.16, Math.min(0.88, 0.18 + density * 0.54));
+    let scaleMul = 1;
+    let cool = 10;
+    if (role === 'fringe') { opacity *= 0.66; scaleMul = 1.25; cool = 18; }
+    if (role === 'deck') { opacity *= 0.86; scaleMul = 1.33; cool = 12; }
+    if (role === 'tower') { opacity = Math.min(0.94, opacity * 1.18 + convection * 0.14); scaleMul = 0.9; cool = 6; }
+    if (role === 'anvil') { opacity *= 0.76; scaleMul = 1.2; cool = 16; }
+    if (role === 'wispy') { opacity *= 0.54; scaleMul = 1.45; cool = 24; }
+    if (role === 'cap') { opacity *= 0.9; scaleMul = 0.95; cool = 22; }
+    if (role === 'skirt') { opacity *= 0.72; scaleMul = 1.25; cool = 8; }
+
+    if (regime === 'marine_stratocumulus' && (role === 'deck' || role === 'fringe')) {
+      opacity = Math.min(0.74, opacity * 0.9);
+      scaleMul *= 1.18;
+    }
+    if (regime === 'cirrus_sheet' || band === 'high') {
+      opacity *= 0.8;
+      cool += 12;
+    }
+
+    return {
+      color: `rgb(${base}, ${Math.min(250, base + 4)}, ${Math.min(255, base + cool)})`,
+      opacity: Math.max(0.08, Math.min(0.95, opacity)),
+      scaleMul,
+    };
+  }
+
+  function colorWithAlpha(rgb, alpha) {
+    const m = String(rgb || '').match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+    if (!m) return rgb;
+    const a = Math.max(0.04, Math.min(1, Number(alpha) || 1));
+    return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${a})`;
+  }
+
+  function buildTowerStructure(parts, item, tile, lod, sun, keyBase) {
+    const count = Math.max(2, Math.round(lod.towerParts * (0.58 + item.convection * 0.7)));
+    for (let i = 0; i < count; i += 1) {
+      const role = i === count - 1 ? 'cap' : 'tower';
+      const style = cloudRoleStyle(tile, item.band, role, item.density, sun);
+      const latOff = seededRange(`${keyBase}:tower:${i}:lat`, -0.12, 0.12);
+      const lonOff = seededRange(`${keyBase}:tower:${i}:lon`, -0.12, 0.12);
+      const pos = advectCloudPosition(item, latOff, lonOff);
+      if (!pos) continue;
+      const climb = i / Math.max(1, count - 1);
+      const altitude = Math.max(0, item.base_altitude_m + item.thickness_m * (0.22 + climb * 1.1));
+      parts.push({
+        lat: pos.lat,
+        lon: pos.lon,
+        altitude,
+        scale: (0.6 + item.density * 0.7 + item.coverage * 0.2) * style.scaleMul,
+        opacity: style.opacity,
+        band: item.band,
+        role,
+        color: style.color,
+        title: `${tile.regime} ${role} ${item.band}`,
+      });
+    }
+  }
+
+  function buildAnvilStructure(parts, item, tile, lod, sun, keyBase) {
+    const spread = Number(tile.anvil_spread_km || 0);
+    if (spread < 8) return;
+    const headingR = (Number(tile.anvil_dir_deg || 0) * Math.PI) / 180;
+    const count = Math.max(2, Math.round(lod.anvilParts * (0.6 + item.convection * 0.5)));
+    for (let i = 0; i < count; i += 1) {
+      const frac = i / Math.max(1, count - 1);
+      const downwindKm = spread * (0.22 + frac * 0.88);
+      const latOff = (Math.cos(headingR) * downwindKm) / 111;
+      const lonOff = (Math.sin(headingR) * downwindKm) / Math.max(18, 111 * Math.cos((item.lat * Math.PI) / 180));
+      const side = seededRange(`${keyBase}:anvil:${i}:side`, -0.34, 0.34);
+      const pos = advectCloudPosition(item, latOff + side * 0.09, lonOff + side * 0.16);
+      if (!pos) continue;
+      const style = cloudRoleStyle(tile, item.band, 'anvil', item.density, sun);
+      parts.push({
+        lat: pos.lat,
+        lon: pos.lon,
+        altitude: Math.max(item.top_altitude_m * 0.88, item.base_altitude_m + item.thickness_m * 0.68),
+        scale: (0.82 + item.coverage * 0.9) * style.scaleMul,
+        opacity: style.opacity,
+        band: item.band,
+        role: 'anvil',
+        color: style.color,
+        title: `${tile.regime} anvil ${item.band}`,
+      });
+    }
+  }
+
+  function planCloudMass(tile, band, lod, sun) {
+    const item = normalizeTileBand(tile, band);
+    if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon) || item.density < 0.08) return [];
+
+    const keyBase = `${tile.tile_id || 'tile'}:${band}:${tile.seed || 0}`;
+    const regime = item.regime;
+    const parts = [];
+    const subcells = item.subcells.length ? item.subcells : [{ id: 'sc-0', dx: 0, dy: 0, weight: 0.8, role: 'core' }];
+    const lateralScale = Math.max(42, Number(item.lateral_scale_km || 95));
+    const lateralDeg = Math.min(1.45, lateralScale / 260);
+    const softness = Math.max(0.2, Math.min(1, Number(item.fringe_softness || 0.6)));
+    const organization = Math.max(0.1, Math.min(1, Number(item.organization || 0.5)));
+    const windShear = Math.max(0, Math.min(1, Number(item.wind_shear || 0)));
+    const spreadMul = 0.35 + (1 - organization) * 0.9 + softness * 0.35;
+    const compactMul = 0.55 + organization * 0.75;
+
+    subcells.forEach((sub, idx) => {
+      const role = sub.role || (idx < 2 ? 'core' : 'fringe');
+      const style = cloudRoleStyle(tile, band, role, item.density, sun);
+      const baseLatSpread = (0.06 + lateralDeg * 0.12) * (role === 'core' || role === 'tower' ? compactMul : spreadMul);
+      const baseLonSpread = (0.07 + lateralDeg * 0.18 + windShear * 0.06) * (role === 'core' || role === 'tower' ? compactMul : spreadMul);
+      const latOff = (Number(sub.dy) || 0) * baseLatSpread + seededRange(`${keyBase}:${idx}:lat`, -baseLatSpread, baseLatSpread);
+      const lonOff = (Number(sub.dx) || 0) * baseLonSpread + seededRange(`${keyBase}:${idx}:lon`, -baseLonSpread, baseLonSpread);
+      const pos = advectCloudPosition(item, latOff, lonOff);
+      if (!pos) return;
+
+      const lift = seededRange(`${keyBase}:${idx}:alt`, 0.05, 0.92);
+      const roleLift = role === 'deck' ? 0.18 : role === 'wispy' ? 0.76 : role === 'tower' ? 0.62 : 0.45;
+      const altitude = item.base_altitude_m + item.thickness_m * Math.min(1.12, lift * 0.6 + roleLift);
+      const scaleBase = 0.48 + item.density * 0.9 + item.coverage * 0.2 + lateralDeg * 0.18;
+        parts.push({
+          lat: pos.lat,
+          lon: pos.lon,
+          altitude,
+          scale: scaleBase * style.scaleMul * (0.72 + (Number(sub.weight) || 0.7) * 0.68),
+          opacity: style.opacity,
+          band,
+          role,
+          color: style.color,
+          title: `${regime} ${role} ${band}`,
+        });
+    });
+
+    if (regime === 'deep_convection') {
+      buildTowerStructure(parts, item, tile, lod, sun, keyBase);
+      buildAnvilStructure(parts, item, tile, lod, sun, keyBase);
+      const style = cloudRoleStyle(tile, band, 'skirt', item.density, sun);
+      for (let i = 0; i < Math.max(2, Math.round(lod.deckParts * 0.5)); i += 1) {
+        const pos = advectCloudPosition(item, seededRange(`${keyBase}:sk:${i}:lat`, -0.2, 0.2), seededRange(`${keyBase}:sk:${i}:lon`, -0.2, 0.2));
+        if (!pos) continue;
+        parts.push({
+          lat: pos.lat,
+          lon: pos.lon,
+          altitude: item.base_altitude_m + item.thickness_m * 0.18,
+          scale: (0.84 + item.coverage * 0.8) * style.scaleMul,
+          opacity: style.opacity,
+          band,
+          role: 'skirt',
+          color: style.color,
+          title: `${regime} skirt ${band}`,
+        });
+      }
+    } else if (regime === 'marine_stratocumulus' || regime === 'frontal_shield') {
+      const extra = Math.max(2, lod.deckParts - 1);
+      const deckLat = regime === 'marine_stratocumulus' ? 0.2 + lateralDeg * 0.25 : 0.18 + lateralDeg * 0.2;
+      const deckLon = regime === 'marine_stratocumulus' ? 0.34 + lateralDeg * 0.42 : 0.28 + lateralDeg * 0.48;
+      for (let i = 0; i < extra; i += 1) {
+        const style = cloudRoleStyle(tile, band, 'deck', item.density, sun);
+        const pos = advectCloudPosition(item, seededRange(`${keyBase}:deck:${i}:lat`, -deckLat, deckLat), seededRange(`${keyBase}:deck:${i}:lon`, -deckLon, deckLon));
+        if (!pos) continue;
+        parts.push({
+          lat: pos.lat,
+          lon: pos.lon,
+          altitude: item.base_altitude_m + item.thickness_m * seededRange(`${keyBase}:deck:${i}:h`, 0.12, 0.36),
+          scale: (0.86 + item.coverage * 0.85) * style.scaleMul,
+          opacity: style.opacity,
+          band,
+          role: 'deck',
+          color: style.color,
+          title: `${regime} deck ${band}`,
+        });
+      }
+    } else if (regime === 'cirrus_sheet') {
+      const smearLat = 0.22 + lateralDeg * 0.22 + windShear * 0.16;
+      const smearLon = 0.3 + lateralDeg * 0.34 + windShear * 0.28;
+      for (let i = 0; i < Math.max(2, lod.anvilParts - 1); i += 1) {
+        const style = cloudRoleStyle(tile, band, 'wispy', item.density, sun);
+        const pos = advectCloudPosition(item, seededRange(`${keyBase}:wispy:${i}:lat`, -smearLat, smearLat), seededRange(`${keyBase}:wispy:${i}:lon`, -smearLon, smearLon));
+        if (!pos) continue;
+        parts.push({
+          lat: pos.lat,
+          lon: pos.lon,
+          altitude: item.base_altitude_m + item.thickness_m * seededRange(`${keyBase}:wispy:${i}:h`, 0.45, 0.92),
+          scale: (0.66 + item.coverage * 0.76) * style.scaleMul,
+          opacity: style.opacity,
+          band,
+          role: 'wispy',
+          color: style.color,
+          title: `${regime} wispy ${band}`,
+        });
+      }
+    } else {
+      buildTowerStructure(parts, item, tile, { ...lod, towerParts: Math.max(2, Math.floor(lod.towerParts * 0.65)) }, sun, keyBase);
+    }
+
+    return parts;
+  }
+
+  function ringCenter(points) {
+    if (!Array.isArray(points) || !points.length) return { lat: 0, lng: 0 };
+    const sums = points.reduce((a, p) => ({ lat: a.lat + Number(p.lat || 0), lng: a.lng + Number(p.lng || p.lon || 0) }), { lat: 0, lng: 0 });
+    return { lat: sums.lat / points.length, lng: sums.lng / points.length };
+  }
+
+  function ensureClosedRing(points) {
+    const ring = (points || []).map((p) => ({ lat: clampLat(Number(p.lat || 0)), lng: wrapLon(Number(p.lng ?? p.lon ?? 0)) }));
+    if (!ring.length) return ring;
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (Math.abs(first.lat - last.lat) > 1e-7 || Math.abs(first.lng - last.lng) > 1e-7) ring.push({ ...first });
+    return ring;
+  }
+
+  function scaleFootprint(points, scaleLat, scaleLon, centerLat, centerLon) {
+    return ensureClosedRing((points || []).map((p) => ({
+      lat: centerLat + (Number(p.lat || 0) - centerLat) * scaleLat,
+      lng: centerLon + (Number(p.lng ?? p.lon ?? 0) - centerLon) * scaleLon,
+    })));
+  }
+
+  function offsetFootprint(points, latOffset, lonOffset) {
+    return ensureClosedRing((points || []).map((p) => ({ lat: Number(p.lat || 0) + latOffset, lng: Number(p.lng ?? p.lon ?? 0) + lonOffset })));
+  }
+
+  function jitterFootprint(points, latJitter, lonJitter, keyBase) {
+    return ensureClosedRing((points || []).map((p, i) => ({
+      lat: Number(p.lat || 0) + seededRange(`${keyBase}:lat:${i}`, -latJitter, latJitter),
+      lng: Number(p.lng ?? p.lon ?? 0) + seededRange(`${keyBase}:lon:${i}`, -lonJitter, lonJitter),
+    })));
+  }
+
+  function buildAltitudePath(points, altitudeM) {
+    return ensureClosedRing(points).map((p) => ({ lat: p.lat, lng: p.lng, altitude: Math.max(0, altitudeM) }));
+  }
+
+  function buildAltitudeInnerPaths(holeSets, altitudeM) {
+    return (holeSets || []).map((h) => buildAltitudePath(h, altitudeM)).filter((h) => h.length >= 4);
+  }
+
+  function buildBaseFootprintFromTile(tile, item, keyBase) {
+    const lat = Number(tile.bounds?.lat_center || item.lat || 0);
+    const lon = Number(tile.bounds?.lon_center || item.lon || 0);
+    const scaleKm = Math.max(20, Number(item.lateral_scale_km || 95));
+    const org = Math.max(0.1, Math.min(1, Number(tile.organization || item.organization || 0.5)));
+    const soft = Math.max(0.05, Math.min(1, Number(tile.fringe_softness || item.fringe_softness || 0.6)));
+    const windShear = Math.max(0, Math.min(1.2, Number(tile.wind_shear || item.wind_shear || 0)));
+    const latRadius = 0.12 + scaleKm / 180;
+    const lonRadius = (0.16 + scaleKm / 140) * (1 + windShear * 0.55 + (1 - org) * 0.35 + soft * 0.28);
+    const points = [];
+    const n = 14;
+    for (let i = 0; i < n; i += 1) {
+      const a = (Math.PI * 2 * i) / n;
+      const radial = 0.78 + seededRange(`${keyBase}:rad:${i}`, 0.04, 0.38);
+      points.push({ lat: lat + Math.sin(a) * latRadius * radial, lng: lon + Math.cos(a) * lonRadius * radial });
+    }
+    return jitterFootprint(points, latRadius * 0.05, lonRadius * 0.05, `${keyBase}:jit`);
+  }
+
+  function buildHoleFootprints(tile, item, keyBase) {
+    const holes = [];
+    const soft = Math.max(0.1, Math.min(1, Number(tile.fringe_softness || item.fringe_softness || 0.6)));
+    const holeCount = Math.max(0, Math.min(3, Math.round((1 - soft) * 3)));
+    for (let h = 0; h < holeCount; h += 1) {
+      const base = buildBaseFootprintFromTile(tile, item, `${keyBase}:hole:${h}`);
+      const c = ringCenter(base);
+      holes.push(scaleFootprint(base, seededRange(`${keyBase}:hsl:${h}`, 0.18, 0.35), seededRange(`${keyBase}:hsw:${h}`, 0.18, 0.4), c.lat, c.lng));
+    }
+    return holes;
+  }
+
+  function rolePaint(regime, band, role, density, sun) {
+    const light = Math.max(0.22, Math.min(0.95, sun.daylight));
+    const densityAlpha = Math.max(0.08, Math.min(0.5, 0.08 + density * 0.38));
+    const highCool = band === 'high' ? 22 : band === 'mid' ? 12 : 4;
+    const stormDark = regime === 'deep_convection' ? 20 : 0;
+    const base = Math.max(148, Math.min(244, Math.round(214 + highCool - stormDark + light * 8)));
+    const roleAlpha = role === 'wispy' ? 0.55 : role === 'anvil' ? 0.72 : role === 'tower' ? 1.2 : role === 'skirt' ? 0.62 : 1;
+    return {
+      fillColor: `rgba(${base},${Math.min(252, base + 6)},${Math.min(255, base + 16)},${Math.max(0.08, Math.min(0.62, densityAlpha * roleAlpha))})`,
+      strokeColor: `rgba(240,246,255,${role === 'wispy' ? 0.04 : 0.1})`,
+      strokeWidth: role === 'wispy' ? 0.3 : 0.55,
+    };
+  }
+
+  function buildDeckShellSpecs(tile, item, lod, sun, keyBase) {
+    const shells = [];
+    const base = buildBaseFootprintFromTile(tile, item, `${keyBase}:deck:base`);
+    const holes = buildHoleFootprints(tile, item, `${keyBase}:deck`);
+    const deckCount = Math.max(2, Math.min(6, Math.round(lod.deckParts * (0.8 + item.coverage * 0.7))));
+    for (let i = 0; i < deckCount; i += 1) {
+      const c = ringCenter(base);
+      const expanded = scaleFootprint(base, 0.82 + i * 0.12, 0.88 + i * 0.14, c.lat, c.lng);
+      const paint = rolePaint(tile.regime || item.regime, item.band, i % 2 ? 'deck' : 'fringe', item.density, sun);
+      shells.push({ role: i % 2 ? 'deck' : 'fringe', regime: tile.regime || item.regime, band: item.band, outerCoordinates: buildAltitudePath(expanded, item.base_altitude_m + item.thickness_m * 0.08 * i), innerCoordinates: buildAltitudeInnerPaths(holes, item.base_altitude_m + item.thickness_m * 0.08 * i), extruded: true, ...paint, zIndex: 10 + i, title: `${tile.regime || item.regime} deck`, meta: { tile_id: tile.tile_id, importance: item.importance, base_altitude_m: item.base_altitude_m, top_altitude_m: item.top_altitude_m } });
+    }
+    return shells;
+  }
+
+  function buildTowerShellSpecs(tile, item, lod, sun, keyBase) {
+    const specs = [];
+    const base = buildBaseFootprintFromTile(tile, item, `${keyBase}:tower`);
+    const c = ringCenter(base);
+    const towerN = Math.max(2, Math.min(7, lod.towerParts));
+    for (let i = 0; i < towerN; i += 1) {
+      const scaled = scaleFootprint(base, seededRange(`${keyBase}:tsl:${i}`, 0.2, 0.5), seededRange(`${keyBase}:tsw:${i}`, 0.2, 0.5), c.lat, c.lng);
+      const shifted = offsetFootprint(scaled, seededRange(`${keyBase}:tlat:${i}`, -0.06, 0.06), seededRange(`${keyBase}:tlon:${i}`, -0.08, 0.08));
+      const paint = rolePaint(tile.regime || item.regime, item.band, i === towerN - 1 ? 'cap' : 'tower', item.density, sun);
+      const baseAlt = item.base_altitude_m + item.thickness_m * (0.18 + i * 0.08);
+      specs.push({ role: i === towerN - 1 ? 'cap' : 'tower', regime: tile.regime || item.regime, band: item.band, outerCoordinates: buildAltitudePath(shifted, baseAlt), innerCoordinates: [], extruded: true, ...paint, zIndex: 30 + i, interactive: i === 0 && (tile.regime === 'deep_convection') && Number(tile.importance || 0) > 0.7, title: `Storm core ${tile.tile_id || ''}`, meta: { tile_id: tile.tile_id, importance: item.importance, base_altitude_m: baseAlt, top_altitude_m: item.top_altitude_m } });
+    }
+    return specs;
+  }
+
+  function buildAnvilShellSpecs(tile, item, lod, sun, keyBase) {
+    const specs = [];
+    const base = buildBaseFootprintFromTile(tile, item, `${keyBase}:anvil`);
+    const c = ringCenter(base);
+    const spread = Math.max(1, Number(tile.anvil_spread_km || item.anvil_spread_km || 40) / 55);
+    const n = Math.max(1, Math.min(5, lod.anvilParts));
+    for (let i = 0; i < n; i += 1) {
+      const smear = scaleFootprint(base, 1 + i * 0.15, (1.2 + spread * 0.4 + i * 0.2), c.lat, c.lng);
+      const paint = rolePaint(tile.regime || item.regime, item.band, i === n - 1 ? 'wispy' : 'anvil', item.density, sun);
+      const alt = item.base_altitude_m + item.thickness_m * seededRange(`${keyBase}:alt:${i}`, 0.6, 0.96);
+      specs.push({ role: i === n - 1 ? 'wispy' : 'anvil', regime: tile.regime || item.regime, band: item.band, outerCoordinates: buildAltitudePath(smear, alt), innerCoordinates: [], extruded: i === n - 1 ? false : true, ...paint, zIndex: 42 + i, title: `${tile.regime || item.regime} anvil`, meta: { tile_id: tile.tile_id, importance: item.importance, base_altitude_m: alt, top_altitude_m: item.top_altitude_m } });
+    }
+    return specs;
+  }
+
+  function buildWispyShellSpecs(tile, item, lod, sun, keyBase) {
+    const specs = [];
+    const base = buildBaseFootprintFromTile(tile, item, `${keyBase}:w`);
+    const c = ringCenter(base);
+    const n = Math.max(2, Math.min(5, lod.anvilParts));
+    for (let i = 0; i < n; i += 1) {
+      const smear = scaleFootprint(base, 1.2 + i * 0.22, 1.45 + i * 0.3, c.lat, c.lng);
+      const paint = rolePaint(tile.regime || item.regime, item.band, 'wispy', item.density, sun);
+      specs.push({ role: 'wispy', regime: tile.regime || item.regime, band: item.band, outerCoordinates: buildAltitudePath(smear, item.base_altitude_m + item.thickness_m * seededRange(`${keyBase}:wh:${i}`, 0.42, 0.95)), innerCoordinates: [], extruded: false, ...paint, zIndex: 56 + i, title: `${tile.regime || item.regime} wispy`, meta: { tile_id: tile.tile_id, importance: item.importance, base_altitude_m: item.base_altitude_m, top_altitude_m: item.top_altitude_m } });
+    }
+    return specs;
+  }
+
+  function buildCloudPolygonSpecs(tile, band, lod, sun) {
+    const item = normalizeTileBand(tile, band);
+    const keyBase = `${tile.tile_id || 'tile'}:${band}:${tile.seed || tile.updated_at || 0}`;
+    const specs = [];
+    if (Array.isArray(tile.bands?.[band]?.shells) && Array.isArray(tile.bands?.[band]?.footprints)) {
+      const fp = tile.bands[band].footprints;
+      const holes = tile.bands[band].holes || [];
+      for (const shell of tile.bands[band].shells) {
+        const footprint = fp[shell.footprint_ref]?.points || [];
+        if (!footprint.length) continue;
+        const baseAlt = Number(shell.base_m ?? item.base_altitude_m);
+        const holeSets = (shell.hole_refs || []).map((idx) => holes[idx]?.points || []).filter((h) => h.length);
+        specs.push({ role: shell.role || 'deck', regime: tile.regime || item.regime, band, outerCoordinates: buildAltitudePath(footprint, baseAlt), innerCoordinates: buildAltitudeInnerPaths(holeSets, baseAlt), extruded: shell.extruded !== false, fillColor: shell.fill || 'rgba(238,244,250,0.2)', strokeColor: shell.stroke || 'rgba(250,250,255,0.12)', strokeWidth: Number(shell.stroke_width || 0.55), zIndex: Number(shell.z_index || 12), interactive: (shell.role === 'core' || shell.role === 'tower') && tile.regime === 'deep_convection' && Number(tile.importance || 0) > 0.7, title: `${tile.regime || item.regime} ${shell.role || 'shell'}`, meta: { tile_id: tile.tile_id, importance: item.importance, base_altitude_m: baseAlt, top_altitude_m: Number(shell.top_m || item.top_altitude_m) } });
+      }
+      if (specs.length) return specs;
+    }
+
+    if (tile.regime === 'marine_stratocumulus' || tile.regime === 'frontal_shield') specs.push(...buildDeckShellSpecs(tile, item, lod, sun, keyBase));
+    else if (tile.regime === 'cirrus_sheet') specs.push(...buildWispyShellSpecs(tile, item, lod, sun, keyBase));
+    else if (tile.regime === 'deep_convection') {
+      specs.push(...buildDeckShellSpecs(tile, item, lod, sun, keyBase));
+      specs.push(...buildTowerShellSpecs(tile, item, lod, sun, keyBase));
+      specs.push(...buildAnvilShellSpecs(tile, item, lod, sun, keyBase));
+    } else {
+      specs.push(...buildDeckShellSpecs(tile, item, { ...lod, deckParts: Math.max(2, Math.floor(lod.deckParts * 0.7)) }, sun, keyBase));
+      specs.push(...buildTowerShellSpecs(tile, item, { ...lod, towerParts: Math.max(2, Math.floor(lod.towerParts * 0.45)) }, sun, keyBase));
+    }
+    return specs;
+  }
+
+  function normalizeLng(v) {
+    let out = Number(v);
+    if (!Number.isFinite(out)) return null;
+    while (out > 180) out -= 360;
+    while (out < -180) out += 360;
+    return out;
+  }
+
+  function sanitizePolygonWarning(featureType, mode, reason) {
+    const key = `${featureType || 'unknown'}:${mode || 'none'}:${reason || 'error'}`;
+    const cur = Number(state.polygonWarn.byKey.get(key) || 0) + 1;
+    state.polygonWarn.byKey.set(key, cur);
+    state.polygonWarn.total += 1;
+    if (cur <= 3 || cur % 25 === 0) {
+      console.warn('[gfs] polygon issue', { key, count: cur, total: state.polygonWarn.total });
+    }
+  }
+
+  function resolveAltitudeMode(featureType = 'surface', preferred = null) {
+    const AltitudeMode = state.maps3dLib?.AltitudeMode || window.google?.maps?.maps3d?.AltitudeMode;
+    if (!AltitudeMode) return null;
+    if (preferred && AltitudeMode[preferred]) return AltitudeMode[preferred];
+    if (featureType === 'elevated') return AltitudeMode.ABSOLUTE;
+    if (featureType === 'column') return AltitudeMode.RELATIVE_TO_GROUND;
+    if (featureType === 'mesh') return AltitudeMode.RELATIVE_TO_MESH || AltitudeMode.RELATIVE_TO_GROUND;
+    return AltitudeMode.CLAMP_TO_GROUND;
+  }
+
+  function isAbsoluteLikeMode(mode) {
+    const AltitudeMode = state.maps3dLib?.AltitudeMode || window.google?.maps?.maps3d?.AltitudeMode;
+    return mode === AltitudeMode?.ABSOLUTE || mode === AltitudeMode?.RELATIVE_TO_GROUND || mode === AltitudeMode?.RELATIVE_TO_MESH;
+  }
+
+  function normalizePolygonPath(points, mode, opts = {}) {
+    const out = [];
+    const useAltitude = isAbsoluteLikeMode(mode);
+    let prev = null;
+    for (const p of (points || [])) {
+      let lat = Number(p?.lat);
+      let lng = normalizeLng(p?.lng ?? p?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      lat = Math.max(-85.0, Math.min(85.0, lat));
+      if (useAltitude) {
+        let altitude = Number(p?.altitude ?? opts.altitude ?? 0);
+        if (!Number.isFinite(altitude)) altitude = 0;
+        altitude = Math.max(-1000, Math.min(50000, altitude));
+        const cur = `${lat.toFixed(6)},${lng.toFixed(6)},${altitude.toFixed(1)}`;
+        if (cur === prev) continue;
+        prev = cur;
+        out.push({ lat, lng, altitude });
+      } else {
+        const cur = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+        if (cur === prev) continue;
+        prev = cur;
+        out.push({ lat, lng });
+      }
+    }
+    return out;
+  }
+
+  function appendPolygon3D(points, opts = {}) {
+    const featureType = opts.featureType || opts.type || 'surface';
+    const modePrimary = resolveAltitudeMode(opts.type || 'surface', opts.altitudeMode);
+    const modeFallback = resolveAltitudeMode('surface');
+    const modes = modePrimary && modePrimary !== modeFallback ? [modePrimary, modeFallback] : [modePrimary || modeFallback];
+    const Ctor = opts.interactive ? state.maps3dLib?.Polygon3DInteractiveElement : state.maps3dLib?.Polygon3DElement;
+    if (!Ctor || !state.mapReady || !state.maps3dLib) return null;
+
+    for (const mode of modes) {
+      try {
+        const sourceOuter = opts.outerCoordinates || points;
+        const path = normalizePolygonPath(sourceOuter, mode, opts);
+        if (path.length < 3) {
+          sanitizePolygonWarning(featureType, mode, 'insufficient_points');
+          return null;
+        }
+        const polygon = new Ctor({
+          altitudeMode: mode,
+          drawsOccludedSegments: !!opts.drawsOccludedSegments,
+          extruded: !!opts.extruded && isAbsoluteLikeMode(mode),
+          fillColor: opts.fillColor ?? 'rgba(0,224,255,0.2)',
+          geodesic: true,
+          outerCoordinates: path,
+          innerCoordinates: (opts.innerCoordinates || opts.innerPaths || []).map((h) => normalizePolygonPath(h, mode, opts)).filter((h) => h.length >= 3),
+          strokeColor: opts.strokeColor ?? 'rgba(255,255,255,0.2)',
+          strokeWidth: opts.strokeWidth ?? 0.6,
+          zIndex: opts.zIndex || 1,
+        });
+        globeEl.append(polygon);
+        return polygon;
+      } catch (error) {
+        sanitizePolygonWarning(featureType, mode, error?.name || 'create_failed');
+      }
+    }
+    return null;
+  }
+
+  function createCloudPolygonElement(shellSpec, interactive = false) {
+    return appendPolygon3D(shellSpec.outerCoordinates, {
+      type: shellSpec.extruded ? 'elevated' : 'elevated',
+      featureType: `cloud-${shellSpec.role || 'shell'}`,
+      interactive,
+      drawsOccludedSegments: true,
+      extruded: shellSpec.extruded,
+      fillColor: shellSpec.fillColor,
+      innerCoordinates: shellSpec.innerCoordinates || [],
+      strokeColor: shellSpec.strokeColor,
+      strokeWidth: shellSpec.strokeWidth,
+      zIndex: shellSpec.zIndex || 1,
+    });
+  }
+
+  function appendCloudPolygon(shellSpec, interactive = false) {
+    const poly = createCloudPolygonElement(shellSpec, interactive);
+    if (!poly) return null;
+    if (interactive) {
+      poly.addEventListener('gmp-click', () => {
+        setHudMessage(`Storm ${shellSpec.meta?.tile_id || 'cell'} • importance ${Math.round((shellSpec.meta?.importance || 0) * 100)}%`);
+      });
+      state.cloudInteractivePolygons.push(poly);
+    } else {
+      state.cloudPolygons.push(poly);
+    }
+    return poly;
+  }
+
+  function renderCloudTilePolygons(tile, lod, sun) {
+    for (const band of ['low', 'mid', 'high']) {
+      if (cloudTileDensity(tile, band) < (band === 'high' ? 0.06 : 0.09)) continue;
+      const specs = buildCloudPolygonSpecs(tile, band, lod, sun);
+      specs.forEach((spec) => appendCloudPolygon(spec, !!spec.interactive));
+    }
+  }
+
+  async function renderCloudVolumesLegacy() {
+    clearCloudPolygons();
+    if (!state.feature.clouds || !state.mapReady || !state.cloudTiles.length || !state.maps3dLib) return;
+    const sun = getSunState();
+    const lod = cloudLodProfile();
+    const tiles = [...state.cloudTiles].sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0)).slice(0, lod.tileLimit);
+    let budget = 0;
+    for (const tile of tiles) {
+      if (budget >= lod.cloudPartBudget) break;
+      const before = state.cloudPolygons.length + state.cloudInteractivePolygons.length;
+      renderCloudTilePolygons(tile, lod, sun);
+      const after = state.cloudPolygons.length + state.cloudInteractivePolygons.length;
+      budget += (after - before);
+      if (budget > lod.cloudPartBudget) break;
+    }
+  }
+
+  async function renderRainShaftsLegacy() {
+
+    clearRainMarkers();
+    clearHailAndLightning();
+    if (!state.feature.rain || !state.mapReady || !state.cloudTiles.length || !state.maps3dLib || !state.markerLib) return;
+
+    const lod = cloudLodProfile();
+    const stormTiles = state.cloudTiles
+      .filter((t) => Number(t.precipitation_factor || t.precip || 0) > 0.16)
+      .sort((a, b) => Number(b.precipitation_factor || b.precip || 0) - Number(a.precipitation_factor || a.precip || 0))
+      .slice(0, Math.min(lod.tileLimit, 220));
+
+    let rainCount = 0;
+    for (const tile of stormTiles) {
+      const precip = Number(tile.precipitation_factor || tile.precip || 0);
+      const bandHighTop = Number(tile.bands?.high?.top_altitude_m ?? NaN);
+      const bandMidTop = Number(tile.bands?.mid?.top_altitude_m ?? NaN);
+      const topAlt = Math.max(
+        Number.isFinite(bandHighTop) ? bandHighTop : 0,
+        Number.isFinite(bandMidTop) ? bandMidTop : 0,
+        Number(tile.altitude_high || 8500),
+        Number(tile.altitude_mid || 4500),
+      );
+      const baseLat = Number(tile.bounds?.lat_center || 0);
+      const baseLon = Number(tile.bounds?.lon_center || 0);
+      if (!Number.isFinite(baseLat) || !Number.isFinite(baseLon)) continue;
+
+      const columns = Math.max(1, Math.min(8, Math.round(1 + precip * 7)));
+      for (let c = 0; c < columns; c += 1) {
+        const key = `${tile.tile_id || 'tile'}:rain:${c}:${tile.seed || 0}`;
+        const colLat = baseLat + seededRange(`${key}:lat`, -0.18, 0.18);
+        const colLon = baseLon + seededRange(`${key}:lon`, -0.18, 0.18);
+        const particles = Math.max(4, Math.min(14, Math.round(5 + precip * 10)));
+
+        for (let p = 0; p < particles; p += 1) {
+          if (rainCount > lod.rainCap) break;
+          const phase = p / Math.max(1, particles - 1);
+          const altitude = Math.max(0, topAlt * (1 - phase));
+          const rainParticle = {
+            precip,
+            scale: 0.24 + precip * 0.24,
+            opacity: Math.max(0.18, Math.min(0.86, 0.22 + precip * 0.6 - phase * 0.22)),
+          };
+          const pin = buildRainSpherePin(state.markerLib, rainParticle);
+          const marker = new state.maps3dLib.Marker3DInteractiveElement({
+            position: { lat: clampLat(colLat), lng: wrapLon(colLon), altitude },
+          });
+          marker.append(pin);
+          globeEl.append(marker);
+          state.rainMarkers.push(marker);
+          rainCount += 1;
+        }
+      }
+      if (rainCount > lod.rainCap) break;
+    }
+    renderHailAndLightningLegacy(lod);
+  }
+
+
+  function buildStormRing(lat, lon, scale, keyBase) {
+    const points = [];
+    const n = 10;
+    for (let i = 0; i < n; i += 1) {
+      const a = (Math.PI * 2 * i) / n;
+      points.push({ lat: lat + Math.sin(a) * scale * seededRange(`${keyBase}:s:${i}`, 0.7, 1.2), lng: lon + Math.cos(a) * scale * seededRange(`${keyBase}:w:${i}`, 0.7, 1.3) });
+    }
+    return ensureClosedRing(points);
+  }
+
+  function appendSimplePolygon(path, fillColor, strokeColor, zIndex, targetArray, interactive = false, title = '', featureType = 'surface', extruded = true) {
+    const poly = appendPolygon3D(path, {
+      type: featureType,
+      featureType,
+      interactive,
+      extruded,
+      fillColor,
+      strokeColor,
+      strokeWidth: 0.5,
+      zIndex,
+      drawsOccludedSegments: true,
+    });
+    if (!poly) return null;
+    if (interactive) poly.addEventListener('gmp-click', () => setHudMessage(title || 'Severe storm cell'));
+    targetArray.push(poly);
+    return poly;
+  }
+
+  function renderHailAndLightningLegacy(lod) {
+    const severe = state.cloudTiles.filter((t) => (t.regime === 'deep_convection' || Number(t.convection_factor || t.convection || 0) > 0.62) && Number(t.importance || 0) > 0.42).slice(0, Math.min(90, lod.tileLimit));
+    for (const tile of severe) {
+      const lat = Number(tile.bounds?.lat_center || 0);
+      const lon = Number(tile.bounds?.lon_center || 0);
+      const key = `${tile.tile_id || 'tile'}:${tile.seed || tile.updated_at || 0}`;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const hailRing = buildStormRing(lat, lon, seededRange(`${key}:hs`, 0.03, 0.08), `${key}:hail`);
+      appendSimplePolygon(buildAltitudePath(hailRing, Number(tile.bands?.mid?.base_altitude_m || 2400)), 'rgba(216,252,255,0.20)', 'rgba(238,255,255,0.35)', 80, state.hailCorePolygons, Number(tile.importance || 0) > 0.75, `Hail core ${tile.tile_id || ''}`, 'elevated', true);
+
+      const flashRing = buildStormRing(lat, lon, seededRange(`${key}:ls`, 0.05, 0.11), `${key}:lightning`);
+      appendSimplePolygon(buildAltitudePath(flashRing, Number(tile.bands?.high?.base_altitude_m || 6500)), 'rgba(255,242,160,0.14)', 'rgba(255,232,120,0.36)', 92, state.lightningPolygons, false, '', 'elevated', false);
+
+      const hailDrops = Math.max(6, Math.min(22, Math.round(8 + Number(tile.convection_factor || tile.convection || 0) * 20)));
+      for (let i = 0; i < hailDrops; i += 1) {
+        const pLat = lat + seededRange(`${key}:hp:${i}:lat`, -0.08, 0.08);
+        const pLon = lon + seededRange(`${key}:hp:${i}:lon`, -0.08, 0.08);
+        const alt = Number(tile.bands?.high?.top_altitude_m || 9000) * seededRange(`${key}:hp:${i}:a`, 0.18, 0.95);
+        const pin = buildRainSpherePin(state.markerLib, { precip: 0.4, scale: 0.34, opacity: 0.9 });
+        const marker = new state.maps3dLib.Marker3DInteractiveElement({ position: { lat: clampLat(pLat), lng: wrapLon(pLon), altitude: alt } });
+        marker.append(pin);
+        globeEl.append(marker);
+        state.hailMarkers.push(marker);
+      }
+    }
+  }
+
+  async function renderJetBalloonsLegacy() {
+    clearJetMarkers();
+    if (!state.feature.jet || !state.mapReady || !state.maps3dLib || !state.markerLib) return;
+
+    seedJetBalloons(state.jetSeedCount);
+    const now = Date.now();
+    const lod = cloudLodProfile();
+    const cap = Math.min(state.jetBalloons.length, lod.jetCap);
+
+    for (let i = 0; i < cap; i += 1) {
+      const balloon = state.jetBalloons[i];
+      advectJetBalloon(balloon, now);
+
+      const pin = buildJetBalloonPin(state.markerLib, balloon);
+      const marker = new state.maps3dLib.Marker3DInteractiveElement({
+        position: { lat: balloon.lat, lng: balloon.lon, altitude: balloon.altitude_m },
+        title: `${balloon.mph.toFixed(1)} mph • ${balloon.heading.toFixed(0)}°`,
+      });
+      marker.append(pin);
+      marker.addEventListener('gmp-click', () => {
+        setHudMessage(`Jet ${balloon.id}: ${balloon.mph.toFixed(1)} mph @ ${balloon.heading.toFixed(0)}°`);
+      });
+
+      globeEl.append(marker);
+      state.jetMarkers.push(marker);
+    }
+  }
+
+
+  function makeWeatherCtx() {
+    return {
+      state,
+      globeEl,
+      setHudMessage,
+      setStatus,
+      cloudLodProfile,
+      getSunState,
+      clearCloudPolygons,
+      clearRainMarkers,
+      clearHailAndLightning,
+      clearJetMarkers,
+      wrapLon,
+      clampLat,
+      seededRange,
+      buildAltitudePath,
+      buildAltitudeInnerPaths,
+      appendPolygon3D,
+      appendSimplePolygon,
+      buildRainSpherePin,
+      buildStormRing,
+      renderHailAndLightningLegacy,
+      renderJetBalloonsLegacy,
+    };
+  }
+
+  async function renderCloudVolumes() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderCloudVolumes) {
+      await window.LFTRWeather.renderCloudVolumes(ctx);
+      return;
+    }
+    await renderCloudVolumesLegacy();
+  }
+
+  async function renderRainShafts() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderRainShafts) {
+      await window.LFTRWeather.renderRainShafts(ctx);
+      return;
+    }
+    await renderRainShaftsLegacy();
+  }
+
+  async function renderLightning() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderHailAndLightning) {
+      await window.LFTRWeather.renderHailAndLightning(ctx, cloudLodProfile());
+      return;
+    }
+    renderHailAndLightningLegacy(cloudLodProfile());
+  }
+
+  async function renderJetBalloons() {
+    const ctx = makeWeatherCtx();
+    if (window.LFTRWeather?.renderJetLayer) {
+      await window.LFTRWeather.renderJetLayer(ctx);
+    } else {
+      await renderJetBalloonsLegacy();
+    }
+  }
+
+  async function renderBaitLayer() {
+    await renderBaitPolygons();
+    state.renderStats.fishMarkersRendered = state.mapMarkers.length;
+  }
+
+  async function renderSstLayer() {
+    clearSstLayer();
+    if (!state.feature.sst || !state.mapReady || !state.maps3dLib) return;
+    const sst = (state.weatherPayload?.scene?.sst || []);
+    if (!Array.isArray(sst) || !sst.length) return;
+    const sample = sst.slice(0, 220);
+    for (const f of sample) {
+      const center = f?.center || f?.centroid || {};
+      const lat = Number(center.lat);
+      const lon = Number(center.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const tK = Number(f.temperature_k ?? f.value ?? f.temp_k);
+      const tC = Number.isFinite(tK) ? (tK - 273.15) : null;
+      const warm = Number.isFinite(tC) ? Math.max(0, Math.min(1, (tC + 2) / 30)) : 0.5;
+      const fill = `rgba(${Math.round(255 * warm)}, ${Math.round(140 + 70 * (1 - warm))}, ${Math.round(255 * (1 - warm))}, 0.18)`;
+      const ring = buildStormRing(lat, lon, 8 + warm * 12, 18);
+      appendSimplePolygon(ring, fill, 'rgba(255,200,140,0.25)', 52, state.sstPolygons, false, '', 'surface', false);
+    }
+  }
+
+  async function renderSwellLayer() {
+    clearSwellLayer();
+    if (!state.feature.swell || !state.mapReady) return;
+    if (window.LFTRWeather?.renderOceanSwell) {
+      try {
+        window.LFTRWeather.renderOceanSwell(makeWeatherCtx());
+      } catch (err) {
+        console.warn('[gfs] swell layer refresh failed', err);
+      }
+      return;
+    }
+    console.warn('[gfs] ocean swell plugin unavailable');
+    const swell = (state.weatherPayload?.scene?.swell || []);
+    if (!Array.isArray(swell) || !swell.length || !state.maps3dLib) return;
+    for (const f of swell.slice(0, 140)) {
+      const c = f?.center || f?.centroid || {};
+      const lat = Number(c.lat);
+      const lon = Number(c.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const ring = buildStormRing(lat, lon, 12, 16);
+      appendSimplePolygon(ring, 'rgba(96,165,250,0.10)', 'rgba(147,197,253,0.22)', 51, state.swellPolygons, false, '', 'surface', false);
+    }
+  }
+
+
+  async function renderWeatherLayers() {
+    const faults = [];
+    try {
+      await layerManager.refresh('clouds');
+    } catch (e) {
+      layerManager.clear('clouds');
+      faults.push(`clouds:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('rain');
+    } catch (e) {
+      layerManager.clear('rain');
+      faults.push(`rain:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('lightning');
+    } catch (e) {
+      layerManager.clear('lightning');
+      faults.push(`lightning:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('jet');
+    } catch (e) {
+      layerManager.clear('jet');
+      faults.push(`jet:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('bait');
+    } catch (e) {
+      layerManager.clear('bait');
+      faults.push(`bait:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('sst');
+    } catch (e) {
+      layerManager.clear('sst');
+      faults.push(`sst:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('swell');
+    } catch (e) {
+      layerManager.clear('swell');
+      faults.push(`swell:${e.message}`);
+    }
+    const lod = cloudLodProfile();
+    const suffix = faults.length ? ` • layer warnings:${faults.length}` : '';
+    const cloudCount = state.cloudPolygons.length + state.cloudInteractivePolygons.length;
+    const precipCount = state.rainMarkers.length + state.rainColumns.length;
+    const lightningCount = state.hailMarkers.length + state.hailCorePolygons.length + state.lightningPolygons.length;
+    state.renderStats.cloudTiles = state.cloudTiles.length;
+    state.renderStats.cloudPolygonsRendered = state.cloudPolygons.length;
+    state.renderStats.cloudInteractiveRendered = state.cloudInteractivePolygons.length;
+    state.renderStats.rainRendered = precipCount;
+    state.renderStats.lightningRendered = lightningCount;
+    setStatus(`Weather ${lod.label} • clouds:${cloudCount} rain:${precipCount} lightning:${lightningCount} jet:${state.jetMarkers.length} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"}${suffix}`, faults.length > 0);
+    if (!faults.length) console.info('[gfs] cloud/rain/lightning/jet layers ready');
+  }
+
+
+  function tileKey(z, x, y) { return `${z}/${x}/${y}`; }
+
+  function rangeToTileZoom(rangeM) {
+    if (rangeM > 4500000) return 2;
+    if (rangeM > 2600000) return 3;
+    if (rangeM > 1400000) return 4;
+    if (rangeM > 700000) return 5;
+    return 6;
+  }
+
+  function parseGlobeCenterAndRange() {
+    const centerRaw = String(globeEl?.getAttribute('center') || '34.2,-120,120');
+    const rangeRaw = Number(globeEl?.getAttribute('range') || 1800000);
+    const headingRaw = Number(globeEl?.getAttribute('heading') || 0);
+    const tiltRaw = Number(globeEl?.getAttribute('tilt') || 0);
+    const parts = centerRaw.split(',').map((v) => Number(v));
+    const lat = Number.isFinite(parts[0]) ? parts[0] : 34.2;
+    const lon = Number.isFinite(parts[1]) ? parts[1] : -120;
+    return {
+      lat,
+      lon,
+      range: Number.isFinite(rangeRaw) ? rangeRaw : 1800000,
+      heading: Number.isFinite(headingRaw) ? headingRaw : 0,
+      tilt: Number.isFinite(tiltRaw) ? tiltRaw : 0,
+    };
+  }
+
+  function latLonToTile(lat, lon, z) {
+    const n = Math.pow(2, z);
+    const x = Math.floor(((lon + 180) / 360) * n);
+    const latRad = lat * Math.PI / 180;
+    const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+    return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+  }
+
+  function tileToLatLonCenter(z, x, y) {
+    const n = Math.pow(2, z);
+    const lon = (x + 0.5) / n * 360 - 180;
+    const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n)));
+    return { lat: latRad * 180 / Math.PI, lon };
+  }
+
+  function angularDistanceDeg(aLat, aLon, bLat, bLon) {
+    const p1 = aLat * Math.PI / 180;
+    const p2 = bLat * Math.PI / 180;
+    const dp = (bLat - aLat) * Math.PI / 180;
+    const dl = (bLon - aLon) * Math.PI / 180;
+    const q = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+    return (2 * Math.atan2(Math.sqrt(q), Math.sqrt(Math.max(0, 1 - q)))) * 180 / Math.PI;
+  }
+
+  function normalizeDeltaLon(lon) {
+    let out = lon;
+    while (out > 180) out -= 360;
+    while (out < -180) out += 360;
+    return out;
+  }
+
+  function visibleTilesFromView() {
+    const view = parseGlobeCenterAndRange();
+    const z = rangeToTileZoom(view.range);
+    const n = Math.pow(2, z);
+    const centerTile = latLonToTile(view.lat, view.lon, z);
+    const ring = z <= 3 ? 2 : 3;
+    const preloadRing = view.range > 2000000 ? 1 : 2;
+    const horizonDeg = Math.min(128, 70 + (view.range / 6500000) * 40);
+    const headingRad = view.heading * Math.PI / 180;
+    const forward = { x: Math.sin(headingRad), y: Math.cos(headingRad) };
+    const coneDeg = Math.max(95, 168 - Math.min(60, view.tilt * 0.8));
+    const tiles = [];
+    for (let dy = -(ring + preloadRing); dy <= (ring + preloadRing); dy += 1) {
+      for (let dx = -(ring + preloadRing); dx <= (ring + preloadRing); dx += 1) {
+        const tx = centerTile.x + dx;
+        const ty = centerTile.y + dy;
+        if (tx < 0 || tx >= n || ty < 0 || ty >= n) continue;
+        const c = tileToLatLonCenter(z, tx, ty);
+        const distDeg = angularDistanceDeg(view.lat, view.lon, c.lat, c.lon);
+        if (distDeg > horizonDeg) continue; // horizon rejection
+        const dLon = normalizeDeltaLon(c.lon - view.lon);
+        const dLat = c.lat - view.lat;
+        const vMag = Math.hypot(dLon, dLat) || 1;
+        const dot = ((dLon / vMag) * forward.x) + ((dLat / vMag) * forward.y);
+        const angleDeg = Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
+        const inCone = angleDeg <= coneDeg;
+        const inPreload = Math.abs(dx) <= preloadRing && Math.abs(dy) <= preloadRing;
+        if (!inCone && !inPreload) continue;
+        tiles.push({ z, x: tx, y: ty, key: tileKey(z, tx, ty) });
+      }
+    }
+    return tiles;
+  }
+
+  function tileAncestors(tile, zooms) {
+    const out = [];
+    for (const z of zooms) {
+      if (z > tile.z) continue;
+      const scale = 2 ** (tile.z - z);
+      out.push({ z, x: Math.floor(tile.x / scale), y: Math.floor(tile.y / scale), key: tileKey(z, Math.floor(tile.x / scale), Math.floor(tile.y / scale)) });
+    }
+    return out;
+  }
+
+  function progressiveTileTargets() {
+    const visible = visibleTilesFromView();
+    const camera = parseGlobeCenterAndRange();
+    const base = camera.range > 4500000 ? [2, 4] : camera.range > 1600000 ? [3, 5] : [4, 6, 8];
+    const uniq = new Map();
+    for (const t of visible) {
+      for (const a of tileAncestors(t, base.concat([t.z]))) uniq.set(a.key, a);
+    }
+    return [...uniq.values()];
+  }
+
+  async function fetchAggregateTile(t) {
+    const url = `/gfs/tile?z=${t.z}&x=${t.x}&y=${t.y}`;
+    return json(url);
+  }
+
+  async function fetchLayerTile(layer, t) {
+    const debugFlag = state.tileDebug ? '?debug=1' : '';
+    const url = `/gfs/tile/${encodeURIComponent(layer)}/${t.z}/${t.x}/${t.y}${debugFlag}`;
+    try {
+      const payload = await json(url);
+      return payload;
+    } catch (err) {
+      console.warn('[gfs] tile request failed', { url, layer, z: t.z, x: t.x, y: t.y, message: err?.message || String(err) });
+      throw err;
+    }
+  }
+
+  async function runWithConcurrency(tasks, limit = 8) {
+    const out = [];
+    if (!Array.isArray(tasks) || !tasks.length) return out;
+    let idx = 0;
+    const workers = new Array(Math.max(1, limit)).fill(0).map(async () => {
+      while (idx < tasks.length) {
+        const current = idx;
+        idx += 1;
+        try {
+          out[current] = await tasks[current]();
+        } catch (_) {
+          out[current] = null;
+        }
+      }
+    });
+    await Promise.all(workers);
+    return out;
+  }
+
+  function collectTileFeatures(layer) {
+    const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
+    const all = [];
+    m.forEach((v, k) => {
+      if (!state.activeTileKeys.has(k)) return;
+      if (!v || !Array.isArray(v.features)) return;
+      for (const f of v.features) all.push(f);
+    });
+    return all;
+  }
+
+  function applyTileAggregates() {
+    const clouds = collectTileFeatures('clouds');
+    const precip = collectTileFeatures('precip');
+    const lightning = collectTileFeatures('lightning');
+    const fish = collectTileFeatures('fish');
+    const sst = collectTileFeatures('sst');
+    const swell = collectTileFeatures('swell');
+    state.cloudTiles = clouds;
+    state.weatherPayload = state.weatherPayload || {};
+    state.weatherPayload.precip_columns = precip;
+    state.weatherPayload.lightning_events = lightning;
+    if (fish.length) {
+      state.fish = fish;
+    }
+    state.weatherPayload.scene = state.weatherPayload.scene || {};
+    state.weatherPayload.scene.sst = sst;
+    state.weatherPayload.scene.swell = swell;
+  }
+
+  async function refreshVisibleTiles() {
+    if (!state.tileMode || !state.mapReady || state.tileFetchInFlight) return;
+    state.tileFetchInFlight = true;
+    try {
+      const allTiles = progressiveTileTargets();
+      const tiles = state.initialTileWarmupDone ? allTiles : allTiles.slice(0, Math.min(allTiles.length, 10));
+      state.activeTileKeys = new Set(tiles.map((t) => t.key));
+      const layerPlan = [
+        ['clouds', !!state.feature.clouds],
+        ['precip', !!state.feature.rain],
+        ['lightning', !!state.feature.lightning],
+        ['wind', !!state.feature.jet],
+        ['swell', !!state.feature.swell],
+        ['sst', !!state.feature.sst],
+        ['fish', !!state.feature.markers],
+      ];
+      const requests = [];
+      let tileFailures = 0;
+      const aggregateRequests = [];
+      for (const [layer, enabled] of layerPlan) {
+        if (!enabled) continue;
+        for (const t of tiles) {
+          if (layer === "clouds") {
+            aggregateRequests.push(fetchAggregateTile(t).then((ag)=>{
+              const cm = state.layerTileData.clouds || (state.layerTileData.clouds = new Map());
+              const pm = state.layerTileData.precip || (state.layerTileData.precip = new Map());
+              const wm = state.layerTileData.wind || (state.layerTileData.wind = new Map());
+              cm.set(t.key, { features: Array.isArray(ag.clouds) ? ag.clouds : [] });
+              pm.set(t.key, { features: Array.isArray(ag.precipitation) ? ag.precipitation : [] });
+              wm.set(t.key, { features: Array.isArray(ag.wind_vectors) ? ag.wind_vectors : [] });
+            }).catch(()=>{}));
+          }
+          const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
+          if (m.has(t.key)) continue;
+          requests.push(async () => {
+            try {
+              const payload = await fetchLayerTile(layer, t);
+              m.set(t.key, payload);
+              console.info('[gfs] loaded tile', layer, t.key);
+            } catch (err) {
+              tileFailures += 1;
+              console.warn('[gfs] tile load failed', { layer, key: t.key, url: `/gfs/tile/${layer}/${t.z}/${t.x}/${t.y}`, message: err?.message || String(err) });
+            }
+          });
+        }
+      }
+      if (requests.length) await runWithConcurrency(requests, state.tileMaxConcurrent);
+      if (aggregateRequests.length) await runWithConcurrency(aggregateRequests.map((p) => () => p), Math.max(2, Math.floor(state.tileMaxConcurrent / 2)));
+
+      // prune stale tile entries
+      for (const layer of Object.keys(state.layerTileData)) {
+        const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
+        for (const key of [...m.keys()]) {
+          if (!state.activeTileKeys.has(key)) {
+            m.delete(key);
+            console.info('[gfs] removed tile', layer, key);
+          }
+        }
+      }
+
+      applyTileAggregates();
+
+      const cloudMap = state.layerTileData.clouds || new Map();
+      const firstCloudTile = [...cloudMap.values()].find((v) => v && v.status && v.meta);
+      if (firstCloudTile) {
+        state.weatherSource = 'gfs_tile';
+        state.weatherPayloadState = String(firstCloudTile.status.mode || 'unknown');
+        state.weatherConfidence = firstCloudTile.meta.heuristic ? 'estimated' : 'model';
+        state.weatherQualityNote = `tile mode z/x/y: ${firstCloudTile.meta.z}/${firstCloudTile.meta.x}/${firstCloudTile.meta.y}`;
+      }
+
+      state.tileFailureCount += tileFailures;
+      if (tileFailures > 0) {
+        state.tileFailureStreak += 1;
+        console.warn('[gfs] tile manager partial mode active', { tileFailures, streak: state.tileFailureStreak });
+      } else {
+        state.tileFailureStreak = 0;
+      }
+      if (state.tileFailureStreak >= 3) {
+        state.tileMode = false;
+        state.weatherQualityNote = 'tile errors repeated; scene fallback active';
+        console.warn('[gfs] disabling tile mode after repeated failures');
+      }
+      state.initialTileWarmupDone = true;
+    } finally {
+      state.tileFetchInFlight = false;
+    }
+  }
+
+  async function loadClouds(force = false) {
+    if (!force && Date.now() - state.cloudFetchedAt < 75000 && state.cloudTiles.length) {
+      await refreshVisibleTiles().catch(() => {});
+      await renderWeatherLayers();
+      return;
+    }
+    const lod = cloudLodProfile();
+    const started = performance.now();
+    if (state.tileMode && state.mapReady) {
+      await refreshVisibleTiles();
+      if (state.cloudTiles.length || (state.weatherPayload?.precip_columns || []).length || (state.weatherPayload?.lightning_events || []).length) {
+        state.cloudFetchedAt = Date.now();
+        setStatus(`Tile mode active • clouds:${state.cloudTiles.length} precip:${(state.weatherPayload?.precip_columns || []).length} lightning:${(state.weatherPayload?.lightning_events || []).length}`);
+        await renderWeatherLayers();
+        if (state.fish.length) await renderMapMarkers().catch(() => {});
+        return;
+      }
+      state.weatherQualityNote = 'tile mode empty; using scene fallback';
+      console.warn('[gfs] tile mode returned empty, falling back to scene endpoint');
+    }
+    const payload = await json(`/gfs/api/scene?limit=${encodeURIComponent(lod.tileLimit)}&compact=1`);
+    state.weatherPayload = payload || null;
+    const cloudItems = Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.scene?.clouds) ? payload.scene.clouds : [];
+    state.cloudTiles = cloudItems;
+    if (!Array.isArray(payload?.items) && Array.isArray(payload?.scene?.clouds)) console.info('[gfs] using scene.clouds compatibility adapter');
+    state.cloudFetchedAt = Date.now();
+    state.weatherSource = String(payload.source || 'unknown');
+    state.weatherPayloadState = String(payload.payload_state || (payload.source === 'gfs_nomads' ? 'live' : 'synthetic'));
+    const fetchMs = Math.round(performance.now() - started);
+    state.weatherQualityNote = String(payload.quality_note || '');
+    state.weatherConfidence = String(payload.confidence || 'unknown');
+    const sourceLabel = state.weatherPayloadState === 'live' ? 'live real GFS/NOMADS' : state.weatherPayloadState === 'cached' ? 'cached real payload' : 'synthetic fallback';
+    console.info('[gfs] payload loaded', { clouds: state.cloudTiles.length, precip: (payload?.scene?.precip || payload?.precip_columns || []).length, lightning: (payload?.scene?.lightning || payload?.lightning_events || []).length, fish: (payload?.scene?.fish || []).length });
+    setStatus(`Cloud feed ${state.cloudTiles.length} tiles • ${fetchMs}ms • ${sourceLabel}${state.weatherQualityNote ? ` • ${state.weatherQualityNote}` : ''}`);
+    await renderWeatherLayers();
+  }
+
+  function registerLayers() {
+    layerManager.register('clouds', {
+      refresh: async () => {
+        if (!state.feature.clouds) return layerManager.clear('clouds');
+        await renderCloudVolumes();
+      },
+      clear: () => clearCloudPolygons(),
+    });
+    layerManager.register('rain', {
+      refresh: async () => {
+        if (!state.feature.rain) return layerManager.clear('rain');
+        await renderRainShafts();
+      },
+      clear: () => { clearRainMarkers(); clearHailAndLightning(); },
+    });
+    layerManager.register('lightning', {
+      refresh: async () => {
+        if (!state.feature.lightning) return layerManager.clear('lightning');
+        await renderLightning();
+      },
+      clear: () => clearHailAndLightning(),
+    });
+    layerManager.register('jet', {
+      refresh: async () => {
+        if (!state.feature.jet) return layerManager.clear('jet');
+        await renderJetBalloons();
+      },
+      clear: () => clearJetMarkers(),
+    });
+    layerManager.register('fish', {
+      refresh: async () => {
+        if (!state.feature.markers) return layerManager.clear('fish');
+        await renderMapMarkers();
+      },
+      clear: () => { clearMapMarkers(); },
+    });
+    layerManager.register('bait', {
+      refresh: async () => {
+        if (!state.feature.bait) return layerManager.clear('bait');
+        await renderBaitLayer();
+      },
+      clear: () => clearBaitPolygons(),
+    });
+    layerManager.register('sst', {
+      refresh: async () => {
+        if (!state.feature.sst) return layerManager.clear('sst');
+        await renderSstLayer();
+      },
+      clear: () => clearSstLayer(),
+    });
+    layerManager.register('swell', {
+      refresh: async () => {
+        if (!state.feature.swell) return layerManager.clear('swell');
+        await renderSwellLayer();
+      },
+      clear: () => clearSwellLayer(),
+    });
+  }
+
+
+  function hasGoogleMapsApiLoaded() {
+    return !!(window.google && window.google.maps && window.google.maps.importLibrary);
+  }
+
+  function ensureGoogleMapsBootstrap() {
+    if (!state.mapsApiKey) return Promise.reject(new Error('missing Google Maps API key'));
+    if (hasGoogleMapsApiLoaded()) return Promise.resolve();
+    if (state.mapsScriptLoading) return state.mapsScriptLoading;
+
+    console.info('[gfs] loading Google Maps JS API');
+    state.mapsScriptLoading = new Promise((resolve, reject) => {
+      const existingApiScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
+      if (existingApiScript && !existingApiScript.dataset.gmapsBootstrap) {
+        const started = Date.now();
+        const tick = () => {
+          if (hasGoogleMapsApiLoaded()) {
+            console.info('[gfs] Google Maps JS API loaded');
+            resolve();
+            return;
+          }
+          if (Date.now() - started > 8000) {
+            reject(new Error('Google Maps JS API script present but importLibrary unavailable'));
+            return;
+          }
+          setTimeout(tick, 120);
+        };
+        tick();
+        return;
+      }
+
+      ((g) => {
+        let h;
+        let a;
+        let k;
+        const p = 'The Google Maps JavaScript API';
+        const c = 'google';
+        const l = 'importLibrary';
+        const q = '__ib__';
+        const m = document;
+        let b = window;
+        b = b[c] || (b[c] = {});
+        const d = b.maps || (b.maps = {});
+        const r = new Set();
+        const e = new URLSearchParams();
+        const u = () => h || (h = new Promise(async (f, n) => {
+          await (a = m.createElement('script'));
+          e.set('libraries', [...r] + '');
+          for (k in g) e.set(k.replace(/[A-Z]/g, (t) => '_' + t[0].toLowerCase()), g[k]);
+          e.set('callback', c + '.maps.' + q);
+          a.src = `https://maps.${c}apis.com/maps/api/js?` + e;
+          a.async = true;
+          a.defer = true;
+          a.dataset.gmapsBootstrap = '1';
+          d[q] = () => {
+            console.info('[gfs] Google Maps JS API loaded');
+            f();
+          };
+          a.onerror = () => n(Error(p + ' could not load.'));
+          m.head.append(a);
+        }));
+        if (d[l]) {
+          resolve();
+          return;
+        }
+        d[l] = (f, ...n) => r.add(f) && u().then(() => d[l](f, ...n));
+        u().then(resolve).catch(reject);
+      })({ key: state.mapsApiKey, v: 'beta' });
+    });
+
+    return state.mapsScriptLoading;
+  }
+
+  async function loadGoogleMapsLibraries() {
+    await ensureGoogleMapsBootstrap();
+    if (!hasGoogleMapsApiLoaded()) {
+      throw new Error('Maps JS API did not initialize');
+    }
+    if (!state.maps3dLib) state.maps3dLib = await window.google.maps.importLibrary('maps3d');
+    if (!state.markerLib) state.markerLib = await window.google.maps.importLibrary('marker');
+  }
+
+  function markerIntensityClass(p) {
+    const intensity = p?.bait?.intensity;
+    if (intensity === 'high') return 'high';
+    if (intensity === 'medium') return 'medium';
+    return 'low';
+  }
+
+  function markerLabelText(p) {
+    const source = (p?.name || p?.location_key || 'fish').trim();
+    return source.length > 20 ? `${source.slice(0, 20)}…` : source;
+  }
+
+  function buildFishPin(point, markerState) {
+    const intensity = markerIntensityClass(point);
+    const baseScale = intensity === 'high' ? 1.25 : intensity === 'medium' ? 1.12 : 1.02;
+    const hoverBoost = markerState?.hover ? 0.1 : 0;
+    const activeBoost = markerState?.active ? 0.18 : 0;
+    const bright = markerState?.active ? '#4ade80' : markerState?.hover ? '#34d399' : '#22c55e';
+    return createStyledPin(state.markerLib, {
+      scale: baseScale + hoverBoost + activeBoost,
+      background: bright,
+      borderColor: markerState?.active ? '#f0fdf4' : '#dcfce7',
+      glyphColor: '#ecfff1',
+    });
+  }
+
+  function refreshFishPin(markerState) {
+    if (!markerState?.marker) return;
+    try {
+      if (markerState.pin) markerState.marker.removeChild(markerState.pin);
+    } catch (_) {}
+    const pin = buildFishPin(markerState.point, markerState);
+    markerState.pin = pin;
+    markerState.marker.append(pin);
+  }
+
+  function setMarkerVisualHover(markerState, hover) {
+    if (!markerState) return;
+    markerState.hover = !!hover;
+    refreshFishPin(markerState);
+  }
+
+  function setMarkerVisualActive(markerState, active) {
+    if (!markerState) return;
+    markerState.active = !!active;
+    refreshFishPin(markerState);
+  }
+
+  function scheduleHudHide() {
+    clearTimeout(state.hudHideTimer);
+    state.hudHideTimer = setTimeout(() => {
+      if (!state.hudLocked && !state.hudHover) hideHud(false);
+    }, 220);
+  }
+
+  function setHudLocked(locked) {
+    state.hudLocked = !!locked;
+    hud.classList.toggle('locked', state.hudLocked);
+    pinHudBtn.textContent = state.hudLocked ? 'Unpin' : 'Pin';
+    hudMode.textContent = state.hudLocked ? 'Pinned target' : 'Hover target';
+  }
+
+  function hideHud(force) {
+    if (!force && (state.hudLocked || state.hudHover)) return;
+    hud.classList.remove('show');
+    if (force) {
+      state.selected = null;
+      state.hoverTarget = null;
+      setHudLocked(false);
+      setActiveMarkerByKey(null);
+      renderFishMetadata(null);
+    } else if (!state.hudLocked) {
+      setActiveMarkerByKey(null);
+      renderFishMetadata(null);
+    }
+  }
+
+  function setActiveMarkerByKey(locationKey) {
+    state.markerStates.forEach((markerState, key) => {
+      setMarkerVisualActive(markerState, !!locationKey && key === locationKey);
+    });
+  }
+
+
+  function makeEllipseRing(lat, lon, rLat, rLon, keyBase) {
+    const pts = [];
+    const n = 12;
+    for (let i = 0; i < n; i += 1) {
+      const a = (Math.PI * 2 * i) / n;
+      pts.push({ lat: lat + Math.sin(a) * rLat * seededRange(`${keyBase}:rl:${i}`, 0.82, 1.2), lng: lon + Math.cos(a) * rLon * seededRange(`${keyBase}:rw:${i}`, 0.82, 1.2) });
+    }
+    return ensureClosedRing(pts);
+  }
+
+  async function renderBaitPolygons() {
+    clearBaitPolygons();
+    if (!state.feature.bait || !state.mapReady || !state.maps3dLib || !state.fish.length) return;
+    for (const fish of state.fish) {
+      const lat = Number(fish.lat);
+      const lon = Number(fish.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const intensity = fish?.bait?.intensity === 'high' ? 1 : fish?.bait?.intensity === 'medium' ? 0.68 : 0.42;
+      const key = `${fish.location_key || fish.name || 'fish'}:${fish?.bait?.confidence || 0}`;
+      const zoneRing = makeEllipseRing(lat, lon, 0.06 + intensity * 0.05, 0.09 + intensity * 0.07, `${key}:zone`);
+      appendSimplePolygon(zoneRing, `rgba(62,220,188,${0.08 + intensity * 0.12})`, 'rgba(106,255,228,0.30)', 65, state.baitPolygons, false, '', 'surface', false);
+      const laneRing = makeEllipseRing(lat + seededRange(`${key}:dlat`, -0.03, 0.03), lon + seededRange(`${key}:dlon`, -0.04, 0.04), 0.026 + intensity * 0.03, 0.12 + intensity * 0.07, `${key}:lane`);
+      appendSimplePolygon(laneRing, `rgba(100,240,220,${0.05 + intensity * 0.1})`, 'rgba(160,255,245,0.18)', 66, state.baitPolygons, false, '', 'surface', false);
+    }
+  }
+
+  async function renderMapMarkers() {
+    clearMapMarkers();
+    state.renderStats.fishItems = state.fish.length;
+    state.renderStats.fishMarkersRendered = 0;
+    if (!state.mapReady || !state.feature.markers || !state.maps3dLib || !state.markerLib) return;
+
+    state.fish.forEach((p) => {
+      const lat = Number(p.lat);
+      const lon = Number(p.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      const marker = new state.maps3dLib.Marker3DInteractiveElement({
+        position: { lat, lng: lon, altitude: 10 },
+        title: p.name || p.location_key || 'Fish marker',
+      });
+
+      const markerState = { marker, point: p, active: false, hover: false, pin: null };
+      const pin = buildFishPin(p, markerState);
+      marker.append(pin);
+      markerState.pin = pin;
+      state.markerStates.set(p.location_key, markerState);
+
+      const hoverOpen = () => {
+        setMarkerVisualHover(markerState, true);
+        setActiveMarkerByKey(p.location_key);
+        openHud(p, false).catch((e) => setHudMessage(e.message));
+      };
+
+      const lockedOpen = () => {
+        setActiveMarkerByKey(p.location_key);
+        openHud(p, true).catch((e) => setHudMessage(e.message));
+      };
+
+      const hoverLeave = () => {
+        if (!state.hudLocked) {
+          setMarkerVisualHover(markerState, false);
+          setActiveMarkerByKey(state.selected?.location_key || null);
+          scheduleHudHide();
+        }
+      };
+
+      marker.addEventListener('gmp-click', lockedOpen);
+      marker.addEventListener('click', lockedOpen);
+      marker.addEventListener('mouseenter', hoverOpen);
+      marker.addEventListener('mouseover', hoverOpen);
+      marker.addEventListener('pointerenter', hoverOpen);
+      marker.addEventListener('mouseleave', hoverLeave);
+      marker.addEventListener('mouseout', hoverLeave);
+      marker.addEventListener('pointerleave', hoverLeave);
+
+      globeEl.append(marker);
+      state.mapMarkers.push(marker);
+    });
+    await renderBaitPolygons();
+    state.renderStats.fishMarkersRendered = state.mapMarkers.length;
+  }
+
+  async function loadFish() {
+    const payload = await json('/gfs/api/fish');
+    state.fish = payload.items || [];
+    await renderMapMarkers();
+    console.info('[gfs] fish markers loaded', state.fish.length);
+  }
+
+  function renderVideos(uploads) {
+    videoList.innerHTML = '';
+    (uploads || []).forEach((u) => {
+      const a = document.createElement('a');
+      a.href = u.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `${u.filename || 'video'} (${new Date(u.uploaded_at || Date.now()).toLocaleString()})`;
+      videoList.append(a);
+    });
+  }
+
+  function normalizeMediaUrl(url) {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    if (url.startsWith('/')) return `${location.origin}${url}`;
+    return `${location.origin}/${url.replace(/^\/+/, '')}`;
+  }
+
+  function isVideoUrl(url) {
+    return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url || '');
+  }
+
+  function mountPlayer({ live, uploads }) {
+    mediaPlayerPane.innerHTML = '';
+    const safeLiveUrl = normalizeMediaUrl(live?.stream_url || '');
+    const firstUpload = (uploads || [])[0];
+    const uploadUrl = normalizeMediaUrl(firstUpload?.url || '');
+
+    if (live?.active && safeLiveUrl) {
+      if (isVideoUrl(safeLiveUrl)) {
+        const v = document.createElement('video');
+        v.controls = true;
+        v.autoplay = true;
+        v.muted = true;
+        v.playsInline = true;
+        v.src = safeLiveUrl;
+        mediaPlayerPane.append(v);
+      } else {
+        const frame = document.createElement('iframe');
+        frame.src = safeLiveUrl;
+        frame.allow = 'autoplay; camera; microphone; fullscreen; clipboard-write';
+        frame.loading = 'lazy';
+        mediaPlayerPane.append(frame);
+      }
+      return;
+    }
+
+    if (uploadUrl) {
+      const v = document.createElement('video');
+      v.controls = true;
+      v.src = uploadUrl;
+      v.playsInline = true;
+      mediaPlayerPane.append(v);
+      return;
+    }
+
+    const empty = document.createElement('div');
+    empty.className = 'player-empty';
+    empty.textContent = 'No media yet for this location. Start a live session or upload a video.';
+    mediaPlayerPane.append(empty);
+  }
+
+  function updateLiveBadge(live) {
+    const isLive = !!(live && live.active && live.stream_url);
+    liveBadge.textContent = isLive ? 'Live now' : 'Offline';
+    liveBadge.classList.toggle('live', isLive);
+    liveBadge.classList.toggle('offline', !isLive);
+  }
+
+  function feedingWindowLabel(bait) {
+    const fw = bait?.feeding_window;
+    if (typeof fw === 'string' && fw.trim()) return fw;
+    if (fw && typeof fw === 'object' && typeof fw.label === 'string' && fw.label.trim()) return fw.label;
+    return 'unknown';
+  }
+
+  function renderIntel(payload) {
+    const bait = payload.bait || {};
+    const weather = payload.weather || {};
+    const feedWindow = feedingWindowLabel(bait);
+    const bestBait = bait?.recommendation?.best_bait || 'n/a';
+    const depthZone = Array.isArray(bait?.recommendation?.best_depth_zone_ft)
+      ? `${bait.recommendation.best_depth_zone_ft[0]}-${bait.recommendation.best_depth_zone_ft[1]} ft`
+      : 'n/a';
+    const boils = Number.isFinite(bait?.surface_boils_likelihood) ? `${Math.round(bait.surface_boils_likelihood * 100)}%` : 'n/a';
+    intel.textContent = [
+      `Bait signal: ${bait.intensity || 'n/a'} (confidence ${bait.confidence ?? 'n/a'}%)`,
+      `Bite window: ${feedWindow}`,
+      `School summary: ${bait.school_summary || 'n/a'}`,
+      `Weather: ${weather.summary || 'n/a'}`,
+      `Water context: ${weather.water_context || 'n/a'}`,
+      `Best bait: ${bestBait} • Depth: ${depthZone}`,
+      `Surface boils: ${boils}`,
+    ].join('\n');
+  }
+
+  function metaValue(point, key, fallback = 'n/a') {
+    const val = point?.[key];
+    if (val === null || val === undefined || String(val).trim() === '') return fallback;
+    return String(val);
+  }
+
+  function renderFishMetadata(point) {
+    if (!fishMeta) return;
+    if (!point) {
+      fishMeta.innerHTML = '<div class="meta-row"><div class="meta-k">status</div><div class="meta-v">No fish marker selected.</div></div>';
+      return;
+    }
+
+    const rows = [];
+    rows.push(['name', metaValue(point, 'name')]);
+    rows.push(['location_key', metaValue(point, 'location_key')]);
+    rows.push(['latitude', metaValue(point, 'lat')]);
+    rows.push(['longitude', metaValue(point, 'lon')]);
+    rows.push(['bait_intensity', metaValue(point.bait || {}, 'intensity')]);
+    rows.push(['confidence', metaValue(point.bait || {}, 'confidence')]);
+
+    const commonFields = ['species', 'type', 'source', 'timestamp', 'zone', 'area', 'description', 'intent', 'notes'];
+    commonFields.forEach((k) => {
+      const value = point[k] ?? point.meta?.[k];
+      if (value !== undefined && value !== null && String(value).trim() !== '') rows.push([k, String(value)]);
+    });
+
+    if (point.meta && typeof point.meta === 'object') {
+      Object.entries(point.meta).forEach(([k, v]) => {
+        if (v === null || v === undefined || String(v).trim() === '') return;
+        if (rows.some(([rk]) => rk === k)) return;
+        rows.push([k, String(v)]);
+      });
+    }
+
+    fishMeta.innerHTML = rows
+      .map(([k, v]) => `<div class="meta-row"><div class="meta-k">${k}</div><div class="meta-v">${v}</div></div>`)
+      .join('');
+  }
+
+  async function refreshLocationContext() {
+    if (!state.selected) return;
+    const payload = await json(`/gfs/api/location_media?location_key=${encodeURIComponent(state.selected.location_key)}`);
+    reportText.value = payload.report_text || '';
+    renderFishMetadata(state.selected);
+    renderVideos(payload.uploads || []);
+    renderIntel(payload);
+    const live = payload.live || { active: false, stream_url: '' };
+    liveUrl.value = live.stream_url || '';
+    updateLiveBadge(live);
+    mountPlayer({ live, uploads: payload.uploads || [] });
+    setHudMessage(live.active ? `Live active: ${live.stream_url || '(no URL)'}` : baitText(state.selected));
+  }
+
+  function startHudPolling() {
+    if (state.hudPollId) clearInterval(state.hudPollId);
+    state.hudPollId = setInterval(() => {
+      if (hud.classList.contains('show') && state.selected) {
+        refreshLocationContext().catch((e) => setHudMessage(e.message));
+      }
+    }, 8000);
+  }
+
+  function stopHudPolling() {
+    if (state.hudPollId) clearInterval(state.hudPollId);
+    state.hudPollId = null;
+  }
+
+  async function openHud(point, lockIt) {
+    if (!state.feature.popups || !point) return;
+    clearTimeout(state.hudHideTimer);
+    state.hoverTarget = point;
+    state.selected = point;
+    hudTitle.textContent = point.name;
+    hudKey.textContent = `location_key: ${point.location_key} • ${point.lat}, ${point.lon}`;
+    hud.classList.add('show');
+    if (lockIt) setHudLocked(true);
+    else if (!state.hudLocked) setHudLocked(false);
+    setActiveMarkerByKey(point.location_key);
+
+    const key = `${point.location_key}:${lockIt ? 'lock' : 'hover'}`;
+    if (state.lastHudLoadedKey === key && !lockIt) return;
+    state.lastHudLoadedKey = key;
+
+    startHudPolling();
+    await refreshLocationContext();
+  }
+
+  async function saveReport() {
+    if (!state.selected || !state.feature.reports) return;
+    await json('/gfs/api/report/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location_key: state.selected.location_key,
+        report_text: reportText.value || '',
+      }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Report saved.');
+  }
+
+  async function uploadVideo() {
+    if (!state.selected) return;
+    const file = videoFile.files && videoFile.files[0];
+    if (!file) {
+      setHudMessage('Select a video file first.');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('location_key', state.selected.location_key);
+    fd.append('file', file);
+    await json('/gfs/api/upload_video', { method: 'POST', body: fd });
+    videoFile.value = '';
+    await refreshLocationContext();
+    setHudMessage('Video uploaded.');
+  }
+
+  async function updateLiveUrl() {
+    if (!state.selected) return;
+    await json('/gfs/api/live/upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location_key: state.selected.location_key,
+        active: true,
+        stream_url: (liveUrl.value || '').trim(),
+      }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Live URL updated.');
+  }
+
+  async function startLiveSession() {
+    if (!state.selected) return;
+    await json('/gfs/api/live/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key }),
+    });
+    await refreshLocationContext();
+    setHudMessage(`Live session started for ${state.selected.location_key}.`);
+  }
+
+  async function stopLiveSession() {
+    if (!state.selected) return;
+    await json('/gfs/api/live/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location_key: state.selected.location_key }),
+    });
+    await refreshLocationContext();
+    setHudMessage('Live session stopped.');
+  }
+
+  function setFreshness(nowTs) {
+    const stale = Date.now() - nowTs > 18000;
+    setStatus(stale ? 'Feed stale' : 'Feed fresh', stale);
+  }
+
+  function connectLiveUpdates() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(`${proto}${location.host}/gfs/ws/updates`);
+    ws.onopen = () => {
+      state.wsConnected = true;
+      setStatus('Feed connected');
+    };
+    ws.onmessage = () => {
+      state.lastUpdateAt = Date.now();
+      setFreshness(state.lastUpdateAt);
+      if (state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet) {
+        refreshVisibleTiles().then(() => loadClouds()).catch((e) => setStatus(e.message, true));
+      }
+    };
+    ws.onerror = () => { setStatus('WS updates unavailable • HTTP weather active', true); };
+    ws.onclose = () => {
+      state.wsConnected = false;
+      setStatus('WS disconnected • retrying live updates', true);
+      setTimeout(connectLiveUpdates, 1800);
+    };
+  }
+
+  function showGlobeFallback(show) {
+    globeFallback.classList.toggle('show', !!show);
+  }
+
+  function applyGlobeAttributes() {
+    globeEl.setAttribute('mode', 'hybrid');
+    globeEl.setAttribute('center', '34.2000,-120.0000,120');
+    globeEl.setAttribute('range', '1800000');
+    globeEl.setAttribute('tilt', '42');
+    globeEl.setAttribute('heading', '7.5');
+    globeEl.setAttribute('default-ui-hidden', '');
+  }
+
+
+  async function waitForGlobeSteadyState(timeoutMs = 4000) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (reason) => {
+        if (done) return;
+        done = true;
+        clearTimeout(tid);
+        globeEl.removeEventListener('gmp-steadystate', onSteady);
+        resolve(reason);
+      };
+      const onSteady = (ev) => {
+        if (ev?.isSteady === false) return;
+        finish('steady');
+      };
+      const tid = setTimeout(() => finish('timeout'), timeoutMs);
+      globeEl.addEventListener('gmp-steadystate', onSteady);
+    });
+  }
+
+  async function loadGoogleMapScript() {
+    if (!state.mapsApiKey) {
+      showGlobeFallback(true);
+      setStatus('Google Maps key missing — hover HUD remains available after config', true);
+      return;
+    }
+
+    try {
+      await loadGoogleMapsLibraries();
+      await customElements.whenDefined('gmp-map-3d');
+
+      globeEl = document.getElementById('globe');
+      applyGlobeAttributes();
+
+      showGlobeFallback(false);
+      setStatus('Photorealistic globe connected');
+      const readyReason = await waitForGlobeSteadyState(4200);
+      console.info('[gfs] globe steady state', readyReason);
+      state.mapReady = true;
+      try { await renderMapMarkers(); } catch (err) { console.error('[gfs] renderMapMarkers failed', err); }
+      try { await loadClouds(true); } catch (err) { console.error('[gfs] weather bootstrap failed', err); }
+    } catch (err) {
+      console.error('[gfs] unable to load Google 3D globe', err);
+      state.mapReady = false;
+      showGlobeFallback(true);
+      setStatus('Unable to load Maps API script', true);
+    }
+  }
+
+  async function loadRuntimeConfig() {
+    const cfg = await json('/gfs/api/config');
+    state.mapsApiKey = (cfg.google_maps_api_key || cfg.mapsApiKey || '').trim();
+
+    if (!cfg.maps3d_available) {
+      showGlobeFallback(true);
+      setStatus('Maps3D unavailable until GOOGLE_MAPS_API_KEY is configured', true);
+    }
+  }
+
+  hud.addEventListener('mouseenter', () => {
+    state.hudHover = true;
+    clearTimeout(state.hudHideTimer);
+  });
+
+  hud.addEventListener('mouseleave', () => {
+    state.hudHover = false;
+    if (!state.hudLocked) scheduleHudHide();
+  });
+
+  document.getElementById('saveReportBtn').addEventListener('click', () => {
+    saveReport().catch((e) => setHudMessage(e.message));
+  });
+
+  document.getElementById('refreshContextBtn').addEventListener('click', () => {
+    refreshLocationContext().catch((e) => setHudMessage(e.message));
+  });
+
+  document.getElementById('uploadBtn').addEventListener('click', () => {
+    uploadVideo().catch((e) => setHudMessage(e.message));
+  });
+
+  document.getElementById('connectLiveBtn').addEventListener('click', () => {
+    updateLiveUrl().catch((e) => setHudMessage(e.message));
+  });
+
+  document.getElementById('startLiveBtn').addEventListener('click', () => {
+    startLiveSession().catch((e) => setHudMessage(e.message));
+  });
+
+  document.getElementById('stopLiveBtn').addEventListener('click', () => {
+    stopLiveSession().catch((e) => setHudMessage(e.message));
+  });
+
+  document.getElementById('pinHudBtn').addEventListener('click', () => {
+    setHudLocked(!state.hudLocked);
+    if (!state.hudLocked) scheduleHudHide();
+  });
+
+  document.getElementById('closeHud').addEventListener('click', () => {
+    stopHudPolling();
+    hideHud(true);
+  });
+
+  async function bootGfsConsole() {
+    registerLayers();
+    console.info('[gfs] layer manager ready');
+    try { await loadRuntimeConfig(); } catch (e) { setStatus(`Config load failed: ${e.message}`, true); }
+    try { await loadGoogleMapScript(); } catch (e) { setStatus(`Globe bootstrap failed: ${e.message}`, true); }
+    try { await loadHealth(); } catch (e) { setStatus(e.message, true); }
+    try { await loadFish(); } catch (e) { setStatus(`Fish load failed: ${e.message}`, true); }
+    try { await loadClouds(); } catch (e) { setStatus(`Weather load failed: ${e.message}`, true); }
+
+    setInterval(() => {
+      if ((state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet || state.feature.markers || state.feature.sst || state.feature.swell || state.feature.bait) && state.mapReady) {
+        refreshVisibleTiles().then(() => renderWeatherLayers()).catch((err) => console.warn('[gfs] periodic layer/tile refresh failed', err));
+      }
+    }, 12000);
+
+    connectLiveUpdates();
+  }
+
+  bootGfsConsole().catch((e) => setStatus(`Boot failed: ${e.message}`, true));
+})();
+</script>
+</body>
+</html>
