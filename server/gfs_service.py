@@ -79,6 +79,11 @@ WEATHER_REFRESH_TTL_SECONDS = 45
 SCENE_REFRESH_TTL_SECONDS = 30
 SCENE_DOWNSAMPLE_STRIDE = 3
 SCALAR_DOWNSAMPLE_STRIDE = 6
+PREFER_LIVE_REAL_DATA = os.getenv("PREFER_LIVE_REAL_DATA", "true").strip().lower() in {"1", "true", "yes", "on"}
+ALLOW_STALE_CACHE_BLEND = os.getenv("ALLOW_STALE_CACHE_BLEND", "false").strip().lower() in {"1", "true", "yes", "on"}
+ALLOW_SYNTHETIC_FALLBACK = os.getenv("ALLOW_SYNTHETIC_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
+SYNTHETIC_FALLBACK_OFFSET_DEGREES = float(os.getenv("SYNTHETIC_FALLBACK_OFFSET_DEGREES", "17.5"))
+REQUIRE_MATCHING_GRID_FOR_CACHE = os.getenv("REQUIRE_MATCHING_GRID_FOR_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 SURFACE_VARIABLES = ["PRATE", "APCP", "TCDC", "CAPE", "CIN", "PRMSL", "TMP", "RH", "GUST", "UGRD", "VGRD"]
 AGL_VARIABLES = ["TMP", "RH", "UGRD", "VGRD", "TCDC"]
@@ -1464,10 +1469,18 @@ class GFSService:
         else:
             intensity = "low"
 
-        dominant_baits = history.get("dominant_baits") or []
-        bait_candidates = dominant_baits[:]
-        if not bait_candidates:
-            bait_candidates = ["anchovy", "sardine", "mackerel"] if cloud < 0.65 else ["sardine", "squid", "smelt"]
+        dominant_baits = [str(x).lower() for x in (history.get("dominant_baits") or []) if x]
+        target_species = str(env.get("target_species") or history.get("top_species") or "").lower()
+        trout_bias = any(tok in target_species for tok in ("trout", "steelhead", "salmonid")) or (float(env.get("water_temp_c") or 0) <= 16 and float(env.get("salinity_psu") or 0) < 8)
+        trout_primary = ["nightcrawlers", "mealworms", "wax worms", "salmon eggs", "power bait"]
+        trout_secondary = ["red worms", "trout worms", "inline spinners", "small spoons", "crickets"]
+        general_primary = ["nightcrawlers", "minnows", "shiners", "red worms", "crawlers"]
+        general_secondary = ["mealworms", "wax worms", "inline spinners", "small spoons", "power bait", "squid", "anchovy", "sardine"]
+        bait_candidates = [*dominant_baits]
+        seed = trout_primary + trout_secondary if trout_bias else general_primary + general_secondary
+        for b in seed:
+            if b not in bait_candidates:
+                bait_candidates.append(b)
 
         dominant_rigs = history.get("dominant_rigs") or []
         best_rig = dominant_rigs[0] if dominant_rigs else ("flyline" if presence > 0.6 else "dropper loop")
@@ -1514,6 +1527,10 @@ class GFSService:
                 "best_depth_zone_ft": depth,
                 "best_rig": best_rig,
                 "best_line_class": line_class,
+                "primary_baits": bait_candidates[:5],
+                "secondary_baits": bait_candidates[5:10],
+                "target_species": ["trout", "bass", "catfish", "panfish", "walleye"],
+                "confidence_reason": f"{feeding_label}; wind {wind:.1f}kt, cloud {int(round(cloud*100))}%, precip factor {precip:.2f}",
             },
         }
 
@@ -1997,9 +2014,12 @@ class GFSService:
         high_occ = np.clip(((high if high is not None else 30.0) / 100.0), 0.0, 1.0)
         if tcdc is not None:
             tcdc_n = np.clip(tcdc / 100.0, 0.0, 1.0)
-            low_occ = np.clip(low_occ * 0.7 + tcdc_n * 0.3, 0.0, 1.0)
-            mid_occ = np.clip(mid_occ * 0.75 + tcdc_n * 0.25, 0.0, 1.0)
-            high_occ = np.clip(high_occ * 0.78 + tcdc_n * 0.22, 0.0, 1.0)
+            if tuple(tcdc_n.shape) == tuple(low_occ.shape):
+                low_occ = np.clip(low_occ * 0.7 + tcdc_n * 0.3, 0.0, 1.0)
+                mid_occ = np.clip(mid_occ * 0.75 + tcdc_n * 0.25, 0.0, 1.0)
+                high_occ = np.clip(high_occ * 0.78 + tcdc_n * 0.22, 0.0, 1.0)
+            else:
+                log.warning("[gfs] skipping TCDC blend due to shape mismatch tcdc=%s low=%s", tuple(tcdc_n.shape), tuple(low_occ.shape))
         alt = self.estimate_cloud_base_top(isobaric_ds)
         return {"low": low_occ, "mid": mid_occ, "high": high_occ, "alt": alt}
 
@@ -2172,8 +2192,8 @@ class GFSService:
     def bbox_cache_key(self, bbox: dict[str, float]) -> str:
         return f"{bbox.get('west')}:{bbox.get('south')}:{bbox.get('east')}:{bbox.get('north')}"
 
-    def payload_cache_key(self, cycle: str, forecast_hour: int, bbox: dict[str, float]) -> str:
-        return f"gfs_payload:v2:{cycle}:{forecast_hour}:{self.bbox_cache_key(bbox)}"
+    def payload_cache_key(self, cycle: str, forecast_hour: int, bbox: dict[str, float], grid_tag: str = "na") -> str:
+        return f"gfs_payload:v3:{cycle}:{forecast_hour}:{grid_tag}:{self.bbox_cache_key(bbox)}"
 
     def read_cached_payload(self, key: str) -> Any:
         if self.disk_cache is None:
@@ -2199,6 +2219,33 @@ class GFSService:
             tile["bands"][b]["wind"]["v"] = round(float(v), 3)
         return enrich_cloud_tile_geometry(tile)
 
+    def _grid_tag_from_shape(self, shape: tuple[int, ...] | None) -> str:
+        if not shape or len(shape) < 2:
+            return "na"
+        return f"{int(shape[0])}x{int(shape[1])}"
+
+    def _shape_of(self, arr: Any) -> tuple[int, ...] | None:
+        if arr is None or np is None:
+            return None
+        try:
+            a = np.asarray(arr)
+            return tuple(a.shape)
+        except Exception:
+            return None
+
+    def _coerce_to_shape(self, arr: Any, target_shape: tuple[int, ...], field_name: str) -> Any:
+        if arr is None or np is None:
+            return None
+        try:
+            a = np.asarray(arr, dtype=float)
+        except Exception:
+            log.warning("[gfs] dropping field=%s due to non-numeric data", field_name)
+            return None
+        if tuple(a.shape) == tuple(target_shape):
+            return a
+        log.warning("[gfs] dropping field=%s due to shape mismatch arr_shape=%s canonical=%s", field_name, tuple(a.shape), tuple(target_shape))
+        return None
+
     def _derive_real_source_fields(self, groups: dict[str, Any]) -> dict[str, Any]:
         precip = self.extract_precip_rate_mm_hr(groups)
         hagl = groups.get("10m")
@@ -2220,9 +2267,17 @@ class GFSService:
         if lat2d is None or lon2d is None:
             raise RuntimeError("missing lat lon grid")
 
-        high = cloud_layers.get("high")
-        low = cloud_layers.get("low")
-        mid = cloud_layers.get("mid")
+        canonical_shape = tuple(np.asarray(precip).shape)
+        log.info("[gfs] canonical live grid selected shape=%s", canonical_shape)
+        high = self._coerce_to_shape(cloud_layers.get("high"), canonical_shape, "cloud_high")
+        low = self._coerce_to_shape(cloud_layers.get("low"), canonical_shape, "cloud_low")
+        mid = self._coerce_to_shape(cloud_layers.get("mid"), canonical_shape, "cloud_mid")
+        if high is None:
+            high = np.zeros(canonical_shape, dtype=float)
+        if low is None:
+            low = np.zeros(canonical_shape, dtype=float)
+        if mid is None:
+            mid = np.zeros(canonical_shape, dtype=float)
         conv = np.clip((precip / 30.0) * 0.6 + high * 0.4, 0.0, 1.0)
         humidity = self._extract_scalar_field(groups, [("isobaricInhPa", ["r", "RH"]), ("surface", ["r", "RH"])])
         wind_u = self._extract_scalar_field(groups, [("10m", ["u", "UGRD"]), ("isobaricInhPa", ["u", "UGRD"]), ("surface", ["u", "UGRD"])])
@@ -2234,6 +2289,14 @@ class GFSService:
         lat2d = self._downsample_2d(lat2d, SCENE_DOWNSAMPLE_STRIDE)
         lon2d = self._downsample_2d(lon2d, SCENE_DOWNSAMPLE_STRIDE)
         precip = self._downsample_2d(precip, SCENE_DOWNSAMPLE_STRIDE)
+        canonical_ds_shape = tuple(np.asarray(precip).shape)
+        lat2d = self._coerce_to_shape(lat2d, canonical_ds_shape, "lat2d")
+        lon2d = self._coerce_to_shape(lon2d, canonical_ds_shape, "lon2d")
+        if lat2d is None or lon2d is None:
+            yy = np.linspace(-90.0, 90.0, canonical_ds_shape[0])
+            xx = np.linspace(-180.0, 180.0, canonical_ds_shape[1])
+            lat2d, lon2d = np.meshgrid(yy, xx, indexing="ij")
+            log.warning("[gfs] lat/lon shape mismatch; using canonical synthetic grid for processing only")
         low = self._downsample_2d(low, SCENE_DOWNSAMPLE_STRIDE)
         mid = self._downsample_2d(mid, SCENE_DOWNSAMPLE_STRIDE)
         high = self._downsample_2d(high, SCENE_DOWNSAMPLE_STRIDE)
@@ -2510,8 +2573,12 @@ class GFSService:
             self._store_scalar_fields(fields)
             tiles = self._derive_real_cloud_tiles(fields, fetch.cycle, fetch.forecast_hour)
             hazards = self._derive_real_hazard_payloads(groups, fields)
+            grid_shape = self._shape_of(fields.get("precip"))
+            grid_tag = self._grid_tag_from_shape(grid_shape)
             payload = {
                 "source": "gfs_nomads",
+                "grid_shape": list(grid_shape) if grid_shape else None,
+                "grid_tag": grid_tag,
                 "cycle": fetch.cycle,
                 "forecast_hour": fetch.forecast_hour,
                 "valid_time": fetch.valid_time,
@@ -2566,6 +2633,25 @@ class GFSService:
         cloud["balloons"] = {"items": [], "count": 0}
         cloud["decode_backend"] = "none"
         cloud["data_source_mode"] = "heuristic"
+        cloud["fallback_offset_degrees"] = SYNTHETIC_FALLBACK_OFFSET_DEGREES
+        cloud["layer_sources"] = {"clouds": "synthetic_fallback", "rain": "synthetic_fallback", "hail": "synthetic_fallback", "lightning": "synthetic_fallback", "wind": "synthetic_fallback"}
+        try:
+            for item in cloud.get("items") or cloud.get("tiles") or []:
+                if isinstance(item, dict):
+                    if "lat" in item:
+                        item["lat"] = float(item.get("lat", 0.0)) + SYNTHETIC_FALLBACK_OFFSET_DEGREES
+                    if "lon" in item:
+                        item["lon"] = float(item.get("lon", 0.0)) + SYNTHETIC_FALLBACK_OFFSET_DEGREES
+                    b = item.get("bounds")
+                    if isinstance(b, dict):
+                        for k in ("north", "south", "lat_center"):
+                            if k in b:
+                                b[k] = float(b[k]) + SYNTHETIC_FALLBACK_OFFSET_DEGREES
+                        for k in ("east", "west", "lon_center"):
+                            if k in b:
+                                b[k] = float(b[k]) + SYNTHETIC_FALLBACK_OFFSET_DEGREES
+        except Exception:
+            log.exception("[gfs] failed applying synthetic fallback offset")
         return self._annotate_weather_payload(
             cloud,
             bbox=bbox,
@@ -2585,7 +2671,7 @@ class GFSService:
         newest_ts = 0.0
         try:
             for k in self.disk_cache.iterkeys():
-                if not str(k).startswith('gfs_payload:v2:'):
+                if not str(k).startswith('gfs_payload:v'):
                     continue
                 row = self.disk_cache.get(k)
                 if not isinstance(row, dict):
@@ -2608,13 +2694,14 @@ class GFSService:
         bbox = self._normalize_bbox(bbox)
         try:
             payload = self.generate_real_gfs_payload(bbox)
-            key = self.payload_cache_key(payload.get("cycle", "na"), int(payload.get("forecast_hour", 0)), bbox or {})
+            key = self.payload_cache_key(payload.get("cycle", "na"), int(payload.get("forecast_hour", 0)), bbox or {}, str(payload.get("grid_tag") or "na"))
             self.write_cached_payload(key, payload)
             return payload
         except Exception as exc:
-            print(f"[gfs] real nomads path failed in generate_weather_payload/generate_real_gfs_payload; trying cached real payload first: {type(exc).__name__}: {exc}")
+            log.warning("[gfs] live real payload generation failed err=%s", exc)
             cached = self.read_most_recent_cached_real_payload(max_age_seconds=5400)
             if isinstance(cached, dict):
+                log.warning("[gfs] using cached real payload due to live failure grid_tag=%s", cached.get("grid_tag"))
                 cached_payload = self._annotate_weather_payload(
                     dict(cached),
                     bbox=bbox,
@@ -2625,6 +2712,9 @@ class GFSService:
                     confidence="medium",
                 )
                 return cached_payload
+            if not ALLOW_SYNTHETIC_FALLBACK:
+                raise
+            log.warning("[gfs] activating synthetic fallback payload")
             fb = self.generate_fallback_payload(bbox)
             return fb
 

@@ -2596,6 +2596,9 @@
       ? `${bait.recommendation.best_depth_zone_ft[0]}-${bait.recommendation.best_depth_zone_ft[1]} ft`
       : 'n/a';
     const boils = Number.isFinite(bait?.surface_boils_likelihood) ? `${Math.round(bait.surface_boils_likelihood * 100)}%` : 'n/a';
+    const primary = Array.isArray(bait?.recommendation?.primary_baits) ? bait.recommendation.primary_baits.join(', ') : 'n/a';
+    const secondary = Array.isArray(bait?.recommendation?.secondary_baits) ? bait.recommendation.secondary_baits.join(', ') : 'n/a';
+    const reason = bait?.recommendation?.confidence_reason || 'n/a';
     intel.textContent = [
       `Bait signal: ${bait.intensity || 'n/a'} (confidence ${bait.confidence ?? 'n/a'}%)`,
       `Bite window: ${feedWindow}`,
@@ -2603,6 +2606,9 @@
       `Weather: ${weather.summary || 'n/a'}`,
       `Water context: ${weather.water_context || 'n/a'}`,
       `Best bait: ${bestBait} • Depth: ${depthZone}`,
+      `Primary baits: ${primary}`,
+      `Secondary baits: ${secondary}`,
+      `Reason: ${reason}`,
       `Surface boils: ${boils}`,
     ].join('\n');
   }

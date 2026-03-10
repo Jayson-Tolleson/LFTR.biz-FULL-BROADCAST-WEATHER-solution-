@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 from collections import defaultdict
 from dataclasses import asdict
@@ -17,6 +19,7 @@ from server.utils import now_ms
 
 
 log = logging.getLogger("server.broadcast.routes")
+STT_SOURCE_LITERAL = {"source": "stt"}
 
 
 class RoomRegistry:
@@ -111,9 +114,12 @@ async def _chat_emit(room_id: str, payload: dict[str, Any]) -> None:
     await registry.broadcast_room(room_id, {"type": "chat", "room": room_id, **payload, "ts": now_ms()})
 
 
-async def _handle_chat_text(state: AppState, room_id: str, client_id: str, role: str, text: str) -> None:
+async def _handle_chat_text(state: AppState, room_id: str, client_id: str, role: str, text: str, source: str | None = None) -> None:
     room = state.ensure_room(room_id)
-    await _chat_emit(room_id, {"user": role, "clientId": client_id, "text": text})
+    base_payload = {"user": role, "clientId": client_id, "text": text}
+    if source:
+        base_payload["source"] = source
+    await _chat_emit(room_id, base_payload)
     if not room.settings.ai_enabled:
         return
     await _set_ai_status(state, room_id, "active")
@@ -165,10 +171,14 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         client_id = f"chat:{id(ws)}"
         role = "participant"
         joined = False
-        log.info("watch socket connected room=%s client=%s", room_id, client_id)
+        log.info("chat socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
-                payload = await websocket.receive_json()
+                try:
+                    payload = await websocket.receive_json()
+                except Exception as exc:
+                    log.info("/ws/chat receive closed room=%s client=%s reason=%s", room_id, client_id, exc.__class__.__name__)
+                    break
                 kind = payload.get("type", "chat")
                 data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 if kind == "join":
@@ -206,18 +216,35 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     attachment = data.get("attachment") or {}
                     await registry.broadcast_room(room_id, {"type": "attachment", "room": room_id, "user": role, "clientId": client_id, "attachment": attachment, "ts": now_ms()})
                 elif kind == "audio_chunk":
-                    if room.settings.stt_enabled:
-                        b64_data = str(data.get("data") or "")
-                        mime = str(data.get("mime") or "audio/webm")
-                        import base64
+                    if not room.settings.stt_enabled:
+                        continue
+                    b64_data = str(data.get("data") or "")
+                    if len(b64_data) > 2_000_000:
+                        await ws.send_json({"type": "error", "room": room_id, "message": "audio_chunk_too_large", "ts": now_ms()})
+                        continue
+                    mime = str(data.get("mime") or "audio/webm")
+                    try:
+                        chunk = base64.b64decode(b64_data, validate=True)
+                    except (ValueError, binascii.Error):
+                        log.warning("invalid audio_chunk payload room=%s client=%s", room_id, client_id)
+                        chunk = b""
+                    except Exception:
+                        log.exception("audio chunk decode failed room=%s client=%s", room_id, client_id)
+                        chunk = b""
+
+                    transcribe_fn = getattr(ai, "transcribe_track", None)
+                    if not callable(transcribe_fn):
+                        log.warning("transcribe_track missing room=%s client=%s", room_id, client_id)
+                        continue
+                    text = ""
+                    if chunk:
                         try:
-                            chunk = base64.b64decode(b64_data)
+                            text = str(await transcribe_fn([chunk], mime=mime) or "").strip()
                         except Exception:
-                            chunk = b""
-                        text = await ai.transcribe_track([chunk], mime=mime) if chunk else ""
-                        if text:
-                            await registry.broadcast_room(room_id, {"type": "chat", "room": room_id, "user": role, "source": "stt", "clientId": client_id, "text": text, "ts": now_ms()})
-                            await _handle_chat_text(state, room_id, client_id, role, text)
+                            log.exception("stt failed room=%s client=%s", room_id, client_id)
+                            text = ""
+                    if text:
+                        await _handle_chat_text(state, room_id, client_id, role, text, source="stt")
         finally:
             if joined:
                 registry.unregister(room_id, "chat", ws)
@@ -229,10 +256,14 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         room_id = state.default_room
         client_id = f"broadcaster:{id(ws)}"
         joined = False
-        log.info("watch socket connected room=%s client=%s", room_id, client_id)
+        log.info("broadcast socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
-                payload = await websocket.receive_json()
+                try:
+                    payload = await websocket.receive_json()
+                except Exception as exc:
+                    log.info("/ws/broadcast receive closed room=%s client=%s reason=%s", room_id, client_id, exc.__class__.__name__)
+                    break
                 kind = payload.get("type", "ping")
                 data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 if kind == "join":
@@ -262,15 +293,16 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "offer"
                     if sdp:
-                        answer = await rtc.start_broadcaster_from_offer(room_id, client_id, sdp, sdp_type)
+                        answer = await rtc.start_broadcaster_from_offer(room_id, client_id, sdp, sdp_type) if rtc is not None else {"sdp": None, "type": "answer"}
                         room.media.live_active = True
                         room.media.mode = "live"
                         await ws.send_json({"type": "webrtc_answer", "room": room_id, "clientId": client_id, "sdp": answer.get("sdp"), "answerType": answer.get("type", "answer"), "ts": now_ms()})
                         await registry.broadcast_room(room_id, {"type": "stage_state", "payload": _stage_payload(room_id, room)})
                         await _broadcast_presence(state, room_id)
                 elif kind in {"webrtc_ice", "watch_ice"}:
-                    cand = rtc.parse_ice(data or {})
-                    await rtc.add_broadcaster_ice_candidate(room_id, client_id, cand)
+                    if rtc is not None:
+                        cand = rtc.parse_ice(data or {})
+                        await rtc.add_broadcaster_ice_candidate(room_id, client_id, cand)
                 elif kind == "toggle_state":
                     _merge_room_state(room, data.get("state") or {})
                     await _broadcast_presence(state, room_id)
@@ -307,7 +339,11 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         log.info("watch socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
-                payload = await websocket.receive_json()
+                try:
+                    payload = await websocket.receive_json()
+                except Exception as exc:
+                    log.info("/ws/watch receive closed room=%s client=%s reason=%s", room_id, client_id, exc.__class__.__name__)
+                    break
                 kind = payload.get("type", "join")
                 data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 if kind in {"join", "watch_join"}:
@@ -325,8 +361,11 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                     else:
                         log.info("watch signaling started room=%s client=%s", room_id, client_id)
-                        offer = await rtc.start_viewer_offer(room_id, client_id)
-                        await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                        if rtc is None:
+                            await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
+                        else:
+                            offer = await rtc.start_viewer_offer(room_id, client_id)
+                            await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                     await ws.send_json({"type": "stage_state", "payload": _stage_payload(room_id, state.ensure_room(room_id))})
                     continue
 
@@ -340,16 +379,21 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
                         await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                         continue
-                    offer = await rtc.start_viewer_offer(room_id, client_id)
-                    await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                    if rtc is None:
+                        await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
+                    else:
+                        offer = await rtc.start_viewer_offer(room_id, client_id)
+                        await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                 elif kind in {"watch_answer", "webrtc_answer"}:
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "answer"
                     if sdp:
-                        await rtc.set_viewer_answer(room_id, client_id, sdp, sdp_type)
+                        if rtc is not None:
+                            await rtc.set_viewer_answer(room_id, client_id, sdp, sdp_type)
                 elif kind in {"webrtc_ice", "watch_ice"}:
-                    cand = rtc.parse_ice(data or {})
-                    await rtc.add_viewer_ice_candidate(room_id, client_id, cand)
+                    if rtc is not None:
+                        cand = rtc.parse_ice(data or {})
+                        await rtc.add_viewer_ice_candidate(room_id, client_id, cand)
                 elif kind == "chat":
                     text = str(data.get("text") or "").strip()
                     if text:
