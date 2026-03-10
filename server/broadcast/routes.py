@@ -125,6 +125,9 @@ async def _handle_chat_text(state: AppState, room_id: str, client_id: str, role:
         if room.settings.hear_ai_voice and room.settings.tts_enabled:
             payload["voice"] = synthesize_voice(final_text)
         await registry.broadcast_room(room_id, payload)
+    except Exception as exc:
+        log.exception("ai chat generation failed")
+        await registry.broadcast_room(room_id, {"type": "chat", "room": room_id, "user": "assistant", "text": f"AI unavailable: {exc}", "ts": now_ms()})
     finally:
         await _set_ai_status(state, room_id, "idle")
 
@@ -184,6 +187,14 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 room = state.ensure_room(room_id)
                 if kind == "ping":
                     await ws.send_json({"type": "pong", "room": room_id, "ts": now_ms()})
+                elif kind == "request_stream":
+                    room = state.ensure_room(room_id)
+                    if room.broadcaster_sid is None:
+                        await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
+                        await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
+                        continue
+                    offer = await rtc.start_viewer_offer(room_id, client_id)
+                    await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                 elif kind == "chat":
                     text = str(data.get("text") or "").strip()
                     if text:
@@ -210,7 +221,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                             chunk = b""
                         text = await ai.transcribe_track([chunk], mime=mime) if chunk else ""
                         if text:
-                            await registry.broadcast_room(room_id, {"type": "transcript", "room": room_id, "user": role, "text": text, "ts": now_ms()})
+                            await registry.broadcast_room(room_id, {"type": "chat", "room": room_id, "user": role, "source": "stt", "clientId": client_id, "text": text, "ts": now_ms()})
                             await _handle_chat_text(state, room_id, client_id, role, text)
         finally:
             if joined:
@@ -251,6 +262,14 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 room = state.ensure_room(room_id)
                 if kind == "ping":
                     await ws.send_json({"type": "pong", "room": room_id, "ts": now_ms()})
+                elif kind == "request_stream":
+                    room = state.ensure_room(room_id)
+                    if room.broadcaster_sid is None:
+                        await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
+                        await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
+                        continue
+                    offer = await rtc.start_viewer_offer(room_id, client_id)
+                    await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                 elif kind == "webrtc_offer":
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "offer"
@@ -309,13 +328,26 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     state.ensure_room(room_id).viewers[client_id] = True
                     await ws.send_json({"type": "state_sync", "room": room_id, "state": state.room_state_payload(room_id), "ts": now_ms()})
                     await _broadcast_presence(state, room_id)
-                    offer = await rtc.start_viewer_offer(room_id, client_id)
-                    await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                    room = state.ensure_room(room_id)
+                    if room.broadcaster_sid is None:
+                        await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
+                        await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
+                    else:
+                        offer = await rtc.start_viewer_offer(room_id, client_id)
+                        await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                     await ws.send_json({"type": "stage_state", "payload": _stage_payload(room_id, state.ensure_room(room_id))})
                     continue
 
                 if kind == "ping":
                     await ws.send_json({"type": "pong", "room": room_id, "ts": now_ms()})
+                elif kind == "request_stream":
+                    room = state.ensure_room(room_id)
+                    if room.broadcaster_sid is None:
+                        await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
+                        await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
+                        continue
+                    offer = await rtc.start_viewer_offer(room_id, client_id)
+                    await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
                 elif kind in {"watch_answer", "webrtc_answer"}:
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "answer"

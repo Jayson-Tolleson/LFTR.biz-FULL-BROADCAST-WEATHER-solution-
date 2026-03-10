@@ -49,3 +49,10 @@ def test_chat_supports_web_search_and_attachment_message_types():
     assert 'web_search_result' in src
     assert 'attachment_uploaded' in src
     assert 'attachment' in src
+
+
+def test_watch_request_stream_and_audio_chunk_contracts_present():
+    src = Path('server/broadcast/routes.py').read_text(encoding='utf-8')
+    assert 'request_stream' in src
+    assert 'audio_chunk' in src
+    assert '"source": "stt"' in src or "'source': 'stt'" in src

@@ -25,39 +25,72 @@
     }
   }
 
-  function send(type, extra = {}) {
+  function sendJson(type, extra = {}) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type, room, clientId, role: 'viewer', ...extra }));
   }
 
-  async function ensurePc(force = false) {
+  function requestStream() {
+    sendJson('request_stream');
+  }
+
+  async function ensureViewerPeerConnection(force = false) {
     if (pc && !force) return pc;
     if (pc && force) { try { pc.close(); } catch {} }
     pc = new RTCPeerConnection({ iceServers: await iceServers() });
     pc.ontrack = (ev) => {
-      v.srcObject = ev.streams[0];
+      const stream = ev.streams && ev.streams[0] ? ev.streams[0] : new MediaStream([ev.track]);
+      v.srcObject = stream;
+      v.playsInline = true;
+      v.autoplay = true;
+      v.muted = false;
+      v.play().catch(() => {});
       standby.style.display = 'none';
       mode.textContent = 'LIVE';
     };
-    pc.onicecandidate = (e) => { if (e.candidate) send('webrtc_ice', { candidate: e.candidate }); };
+    pc.onicecandidate = (e) => { if (e.candidate) sendJson('webrtc_ice', { candidate: e.candidate }); };
     return pc;
   }
 
-  async function handleMessage(raw) {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+  function applyPresence(presence) {
+    conn.textContent = `watchers ${presence.viewer_count ?? 0}`;
+    if (presence.broadcaster_present === false && mode.textContent !== 'LIVE') {
+      mode.textContent = 'STANDBY';
+      standby.style.display = 'block';
+    }
+  }
 
+  function updateAiStatus(status) {
+    ai.textContent = `AI ${status || 'idle'}`;
+  }
+
+  async function handleWatchSocketMessage(msg) {
     if (msg.type === 'state_sync') {
       const st = msg.state || {};
-      ai.textContent = st.settings?.ai_status ? `AI ${st.settings.ai_status}` : (st.settings?.ai_enabled ? 'AI on' : 'AI off');
+      updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
       return;
     }
-
+    if (msg.type === 'state_update') {
+      const st = msg.state || {};
+      updateAiStatus(st.settings?.ai_status || 'idle');
+      return;
+    }
     if (msg.type === 'presence') {
-      conn.textContent = `watchers ${msg.viewer_count ?? 0}`;
+      applyPresence(msg);
+      if (msg.broadcaster_present) requestStream();
       return;
     }
-
+    if (msg.type === 'ai_status') {
+      updateAiStatus(msg.status || 'idle');
+      return;
+    }
+    if (msg.type === 'error') {
+      if (msg.message === 'no_broadcaster') {
+        mode.textContent = 'OFFLINE';
+        standby.style.display = 'block';
+      }
+      return;
+    }
     if (msg.type === 'stage_state') {
       const p = msg.payload || {};
       label.textContent = p.label || 'PUBLIC ACCESS';
@@ -70,23 +103,27 @@
       }
       return;
     }
-
-    if (msg.type === 'watch_offer' && msg.payload?.sdp) {
-      const c = await ensurePc(true);
+    if ((msg.type === 'watch_offer' || msg.type === 'webrtc_offer') && msg.payload?.sdp) {
+      const c = await ensureViewerPeerConnection(true);
       await c.setRemoteDescription(msg.payload);
       const answer = await c.createAnswer();
       await c.setLocalDescription(answer);
-      send('watch_answer', { sdp: answer.sdp, type: answer.type });
+      sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
       return;
     }
-
+    if (msg.type === 'webrtc_ice' && msg.candidate && pc) {
+      try { await pc.addIceCandidate(msg.candidate); } catch {}
+      return;
+    }
     if (msg.type === 'webrtc_state' && msg.payload?.state !== 'connected' && mode.textContent === 'LIVE') {
       mode.textContent = 'STANDBY';
       standby.style.display = 'block';
+      return;
     }
+    if (msg.type === 'pong') return;
   }
 
-  function connect() {
+  function connectWatchSocket() {
     const url = `${wsBase}/ws/watch`;
     console.info('[watch] websocket connect', { url, room });
     ws = new WebSocket(url);
@@ -94,17 +131,22 @@
     ws.onopen = () => {
       retryDelayMs = 1000;
       conn.textContent = 'connected';
-      send('join');
+      sendJson('join');
+      requestStream();
     };
-    ws.onmessage = (ev) => handleMessage(ev.data);
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      handleWatchSocketMessage(msg).catch((err) => console.warn('[watch] message handling failed', err));
+    };
     ws.onerror = (err) => console.warn('[watch] websocket error', { url, room, err });
     ws.onclose = (ev) => {
       conn.textContent = 'reconnecting';
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
-      setTimeout(connect, retryDelayMs);
+      setTimeout(connectWatchSocket, retryDelayMs);
       retryDelayMs = Math.min(15000, Math.round(retryDelayMs * 1.6));
     };
   }
 
-  connect();
+  connectWatchSocket();
 })();
