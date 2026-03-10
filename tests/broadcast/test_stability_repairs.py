@@ -77,7 +77,7 @@ def test_static_file_rejects_static_path_that_is_not_directory(monkeypatch, tmp_
         routes_module._static_file("index.html")
 
 
-def test_indexgfs_uses_single_loader_and_polygon_coordinate_options():
+def test_indexgfs_loader_and_polygon_api_usage():
     html = Path("static/indexgfs.html").read_text(encoding="utf-8")
 
     assert "ensureGoogleMapsBootstrap" in html
@@ -85,11 +85,32 @@ def test_indexgfs_uses_single_loader_and_polygon_coordinate_options():
     assert "importLibrary('maps3d')" in html
     assert "maps/api/js?key=" not in html
 
-    # Polygon3D constructor should use current coordinate option names.
     start = html.index("const polygon = new Ctor({")
     end = html.index("});", start)
     polygon_ctor = html[start:end]
-    assert "outerCoordinates:" in polygon_ctor
-    assert "innerCoordinates:" in polygon_ctor
-    assert "\n          path," not in polygon_ctor
-    assert "\n          innerPaths:" not in polygon_ctor
+    assert "path:" in polygon_ctor
+    assert "innerPaths:" in polygon_ctor
+    assert "outerCoordinates:" not in polygon_ctor
+    assert "innerCoordinates:" not in polygon_ctor
+
+
+def test_indexgfs_polygon_validation_and_budget_guards_present():
+    html = Path("static/indexgfs.html").read_text(encoding="utf-8")
+
+    assert "function sanitizeRing(" in html
+    assert "function sanitizeHoles(" in html
+    assert "function crossesAntimeridian(" in html
+    assert "function validatePolygonSpec(" in html
+    assert "function allowPolygonByBudget(" in html
+    assert "maxPolygonsPerTileLayer" in html
+    assert "maxVerticesPerPolygon" in html
+    assert "maxTotalVerticesPerPass" in html
+
+
+def test_indexgfs_single_altitude_mode_policy_present():
+    html = Path("static/indexgfs.html").read_text(encoding="utf-8")
+    assert "const map = {" in html
+    assert "cloud: AltitudeMode.ABSOLUTE" in html
+    assert "rain: AltitudeMode.RELATIVE_TO_GROUND" in html
+    assert "surface: AltitudeMode.CLAMP_TO_GROUND" in html
+    assert "modeFallback" not in html
