@@ -277,9 +277,19 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         except Exception:
             pad = 0.18
         debug = str(request.args.get("debug", "0")).strip().lower() in {"1", "true", "yes", "on"}
-        payload = gfs.layer_tile_payload(layer, z, x, y, pad_deg=max(0.0, min(1.2, pad)), debug=debug)
-        status = 200 if (payload.get("status") or {}).get("ok", True) else 400
-        return jsonify(payload), status
+        req_url = request.path + (("?" + request.query_string.decode("utf-8", errors="ignore")) if request.query_string else "")
+        try:
+            payload = gfs.layer_tile_payload(layer, z, x, y, pad_deg=max(0.0, min(1.2, pad)), debug=debug)
+            status = 200 if (payload.get("status") or {}).get("ok", True) else 400
+            return jsonify(payload), status
+        except Exception as exc:
+            app.logger.exception("[gfs] layer tile request failed url=%s layer=%s z=%s x=%s y=%s", req_url, layer, z, x, y)
+            return jsonify({
+                "status": {"ok": False, "mode": "error", "errors": [str(exc)], "warnings": [], "partial": False},
+                "meta": {"layer": layer, "z": z, "x": x, "y": y, "url": req_url},
+                "features": [],
+                "summary": {"count": 0},
+            }), 500
 
 
     @app.get("/gfs/tile")

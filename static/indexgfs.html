@@ -470,9 +470,12 @@
     hudHover: false,
     hudHideTimer: null,
     lastHudLoadedKey: '',
-    flags: { enableOceanSwell: false },
     tileDebug: false,
     lightningRegistry: new Map(),
+    tileFailureCount: 0,
+    tileFailureStreak: 0,
+    tileMaxConcurrent: 12,
+    initialTileWarmupDone: false,
   };
 
   const layerManager = {
@@ -524,7 +527,7 @@
   function setStatus(msg, isStale = false) {
     const mapState = state.mapReady ? 'ready' : 'fallback';
     const modeFlag = state.tileMode ? 'tile' : 'scene';
-    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • C:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} R:${state.rainMarkers.length + state.hailMarkers.length} J:${state.jetMarkers.length} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • fish:${state.fish.length} markers:${state.mapMarkers.length} cloudTiles:${state.cloudTiles.length} cloudPolys:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} tileFail:${state.tileFailureCount} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
     statusLine.classList.toggle('stale', !!isStale);
   }
 
@@ -1858,8 +1861,32 @@
   async function fetchLayerTile(layer, t) {
     const debugFlag = state.tileDebug ? '?debug=1' : '';
     const url = `/gfs/tile/${encodeURIComponent(layer)}/${t.z}/${t.x}/${t.y}${debugFlag}`;
-    const payload = await json(url);
-    return payload;
+    try {
+      const payload = await json(url);
+      return payload;
+    } catch (err) {
+      console.warn('[gfs] tile request failed', { url, layer, z: t.z, x: t.x, y: t.y, message: err?.message || String(err) });
+      throw err;
+    }
+  }
+
+  async function runWithConcurrency(tasks, limit = 8) {
+    const out = [];
+    if (!Array.isArray(tasks) || !tasks.length) return out;
+    let idx = 0;
+    const workers = new Array(Math.max(1, limit)).fill(0).map(async () => {
+      while (idx < tasks.length) {
+        const current = idx;
+        idx += 1;
+        try {
+          out[current] = await tasks[current]();
+        } catch (_) {
+          out[current] = null;
+        }
+      }
+    });
+    await Promise.all(workers);
+    return out;
   }
 
   function collectTileFeatures(layer) {
@@ -1896,7 +1923,8 @@
     if (!state.tileMode || !state.mapReady || state.tileFetchInFlight) return;
     state.tileFetchInFlight = true;
     try {
-      const tiles = progressiveTileTargets();
+      const allTiles = progressiveTileTargets();
+      const tiles = state.initialTileWarmupDone ? allTiles : allTiles.slice(0, Math.min(allTiles.length, 10));
       state.activeTileKeys = new Set(tiles.map((t) => t.key));
       const layerPlan = [
         ['clouds', !!state.feature.clouds],
@@ -1925,21 +1953,20 @@
           }
           const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
           if (m.has(t.key)) continue;
-          requests.push(
-            fetchLayerTile(layer, t)
-              .then((payload) => {
-                m.set(t.key, payload);
-                console.info('[gfs] loaded tile', layer, t.key);
-              })
-              .catch((err) => {
-                tileFailures += 1;
-                console.warn('[gfs] tile load failed', layer, t.key, err?.message || err);
-              }),
-          );
+          requests.push(async () => {
+            try {
+              const payload = await fetchLayerTile(layer, t);
+              m.set(t.key, payload);
+              console.info('[gfs] loaded tile', layer, t.key);
+            } catch (err) {
+              tileFailures += 1;
+              console.warn('[gfs] tile load failed', { layer, key: t.key, url: `/gfs/tile/${layer}/${t.z}/${t.x}/${t.y}`, message: err?.message || String(err) });
+            }
+          });
         }
       }
-      if (requests.length) await Promise.all(requests);
-      if (aggregateRequests.length) await Promise.all(aggregateRequests);
+      if (requests.length) await runWithConcurrency(requests, state.tileMaxConcurrent);
+      if (aggregateRequests.length) await runWithConcurrency(aggregateRequests.map((p) => () => p), Math.max(2, Math.floor(state.tileMaxConcurrent / 2)));
 
       // prune stale tile entries
       for (const layer of Object.keys(state.layerTileData)) {
@@ -1963,7 +1990,19 @@
         state.weatherQualityNote = `tile mode z/x/y: ${firstCloudTile.meta.z}/${firstCloudTile.meta.x}/${firstCloudTile.meta.y}`;
       }
 
-      if (tileFailures > 0) console.warn('[gfs] tile manager partial mode active', { tileFailures });
+      state.tileFailureCount += tileFailures;
+      if (tileFailures > 0) {
+        state.tileFailureStreak += 1;
+        console.warn('[gfs] tile manager partial mode active', { tileFailures, streak: state.tileFailureStreak });
+      } else {
+        state.tileFailureStreak = 0;
+      }
+      if (state.tileFailureStreak >= 3) {
+        state.tileMode = false;
+        state.weatherQualityNote = 'tile errors repeated; scene fallback active';
+        console.warn('[gfs] disabling tile mode after repeated failures');
+      }
+      state.initialTileWarmupDone = true;
     } finally {
       state.tileFetchInFlight = false;
     }
