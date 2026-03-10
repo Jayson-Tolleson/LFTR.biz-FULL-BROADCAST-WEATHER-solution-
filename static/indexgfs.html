@@ -85,9 +85,12 @@
     .feature.on .light { animation: blink 1.15s linear infinite; }
     .feature[data-kind="clouds"].on .light { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
     .feature[data-kind="rain"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
+    .feature[data-kind="lightning"].on .light { background: #fef08a; box-shadow: 0 0 10px #fef08a; }
     .feature[data-kind="jet"].on .light { background: var(--pink); box-shadow: 0 0 10px var(--pink); }
     .feature[data-kind="markers"].on .light { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
     .feature[data-kind="bait"].on .light { background: var(--teal); box-shadow: 0 0 10px var(--teal); }
+    .feature[data-kind="sst"].on .light { background: #fb923c; box-shadow: 0 0 10px #fb923c; }
+    .feature[data-kind="swell"].on .light { background: #60a5fa; box-shadow: 0 0 10px #60a5fa; }
     .feature[data-kind="popups"].on .light { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
     .feature[data-kind="reports"].on .light { background: #e879f9; box-shadow: 0 0 10px #e879f9; }
     @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .28; } }
@@ -423,6 +426,8 @@
       jet: true,
       markers: true,
       bait: true,
+      sst: true,
+      swell: false,
       popups: true,
       reports: true,
     },
@@ -437,6 +442,9 @@
     hailCorePolygons: [],
     lightningPolygons: [],
     baitPolygons: [],
+    sstPolygons: [],
+    sstMarkers: [],
+    swellPolygons: [],
     jetMarkers: [],
     jetBalloons: [],
     jetSeedCount: 80,
@@ -444,7 +452,7 @@
     weatherPayload: null,
     tileMode: true,
     tileFetchInFlight: false,
-    layerTileData: { clouds: new Map(), precip: new Map(), lightning: new Map(), wind: new Map(), swell: new Map(), fish: new Map() },
+    layerTileData: { clouds: new Map(), precip: new Map(), lightning: new Map(), wind: new Map(), swell: new Map(), sst: new Map(), fish: new Map() },
     activeTileKeys: new Set(),
     cloudFetchedAt: 0,
     weatherSource: 'unknown',
@@ -516,7 +524,7 @@
   function setStatus(msg, isStale = false) {
     const mapState = state.mapReady ? 'ready' : 'fallback';
     const modeFlag = state.tileMode ? 'tile' : 'scene';
-    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • C:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} R:${state.rainMarkers.length + state.hailMarkers.length} J:${state.jetMarkers.length} • ${msg}`;
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • C:${state.cloudPolygons.length + state.cloudInteractivePolygons.length} R:${state.rainMarkers.length + state.hailMarkers.length} J:${state.jetMarkers.length} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
     statusLine.classList.toggle('stale', !!isStale);
   }
 
@@ -527,6 +535,17 @@
   }
 
   async function onFeatureToggle(kind) {
+    const layerByKind = {
+      clouds: 'clouds',
+      rain: 'rain',
+      lightning: 'lightning',
+      jet: 'jet',
+      markers: 'fish',
+      bait: 'bait',
+      sst: 'sst',
+      swell: 'swell',
+    };
+
     if (kind === 'markers') {
       state.mapMarkers.forEach((m) => {
         try { m.style.display = state.feature.markers ? '' : 'none'; } catch (_) {}
@@ -534,6 +553,7 @@
       if (!state.feature.markers) {
         hideHud(true);
         setActiveMarkerByKey(null);
+        clearMapMarkers();
       } else {
         await renderMapMarkers();
       }
@@ -554,17 +574,21 @@
       setHudMessage(baitText(state.selected));
     }
 
-    if (['clouds', 'rain', 'lightning', 'jet'].includes(kind)) {
+    const layerName = layerByKind[kind];
+    if (layerName) {
+      if (state.feature[kind]) {
+        layerManager.enable(layerName);
+        await layerManager.refresh(layerName);
+      } else {
+        layerManager.disable(layerName);
+      }
+      if (state.mapReady) {
+        await refreshVisibleTiles().catch(() => {});
+      }
       await renderWeatherLayers();
     }
-
-    if (kind === 'clouds') { if (!state.feature.clouds) layerManager.disable('clouds'); else layerManager.enable('clouds'); }
-    if (kind === 'rain') { if (!state.feature.rain) layerManager.disable('rain'); else layerManager.enable('rain'); }
-    if (kind === 'lightning') { if (!state.feature.lightning) layerManager.disable('lightning'); else layerManager.enable('lightning'); }
-    if (kind === 'jet') { if (!state.feature.jet) layerManager.disable('jet'); else layerManager.enable('jet'); }
-    if (kind === 'markers') { if (!state.feature.markers) layerManager.disable('fish'); else layerManager.enable('fish'); }
-    if (kind === 'bait') await renderBaitPolygons();
   }
+
 
   function mkFeature(kind, label) {
     const btn = document.createElement('button');
@@ -588,6 +612,8 @@
     ['jet', 'Jet balloons'],
     ['markers', 'Fish markers'],
     ['bait', 'Bait layer'],
+    ['sst', 'SST'],
+    ['swell', 'Ocean swell'],
     ['popups', 'Hover HUD'],
     ['reports', 'Reports'],
   ].forEach(([k, l]) => featuresEl.appendChild(mkFeature(k, l)));
@@ -644,6 +670,16 @@
   function clearBaitPolygons() {
     state.baitPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
     state.baitPolygons = [];
+  }
+  function clearSstLayer() {
+    state.sstPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.sstPolygons = [];
+    state.sstMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+    state.sstMarkers = [];
+  }
+  function clearSwellLayer() {
+    state.swellPolygons.forEach((p) => { try { p.remove(); } catch (_) {} });
+    state.swellPolygons = [];
   }
   function clearJetMarkers() { state.jetMarkers.forEach((m) => { try { m.remove(); } catch (_) {} }); state.jetMarkers = []; }
 
@@ -1596,8 +1632,53 @@
     } else {
       await renderJetBalloonsLegacy();
     }
+  }
+
+  async function renderBaitLayer() {
+    await renderBaitPolygons();
+  }
+
+  async function renderSstLayer() {
+    clearSstLayer();
+    if (!state.feature.sst || !state.mapReady || !state.maps3dLib) return;
+    const sst = (state.weatherPayload?.scene?.sst || []);
+    if (!Array.isArray(sst) || !sst.length) return;
+    const sample = sst.slice(0, 220);
+    for (const f of sample) {
+      const center = f?.center || f?.centroid || {};
+      const lat = Number(center.lat);
+      const lon = Number(center.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const tK = Number(f.temperature_k ?? f.value ?? f.temp_k);
+      const tC = Number.isFinite(tK) ? (tK - 273.15) : null;
+      const warm = Number.isFinite(tC) ? Math.max(0, Math.min(1, (tC + 2) / 30)) : 0.5;
+      const fill = `rgba(${Math.round(255 * warm)}, ${Math.round(140 + 70 * (1 - warm))}, ${Math.round(255 * (1 - warm))}, 0.18)`;
+      const ring = buildStormRing(lat, lon, 8 + warm * 12, 18);
+      appendSimplePolygon(ring, fill, 'rgba(255,200,140,0.25)', 52, state.sstPolygons, false, '', 'surface', false);
+    }
+  }
+
+  async function renderSwellLayer() {
+    clearSwellLayer();
+    if (!state.feature.swell || !state.mapReady) return;
     if (window.LFTRWeather?.renderOceanSwell) {
-      try { window.LFTRWeather.renderOceanSwell(ctx); } catch (err) { console.warn('[gfs] swell layer failed', err); }
+      try {
+        window.LFTRWeather.renderOceanSwell(makeWeatherCtx());
+      } catch (err) {
+        console.warn('[gfs] swell layer refresh failed', err);
+      }
+      return;
+    }
+    console.warn('[gfs] ocean swell plugin unavailable');
+    const swell = (state.weatherPayload?.scene?.swell || []);
+    if (!Array.isArray(swell) || !swell.length || !state.maps3dLib) return;
+    for (const f of swell.slice(0, 140)) {
+      const c = f?.center || f?.centroid || {};
+      const lat = Number(c.lat);
+      const lon = Number(c.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const ring = buildStormRing(lat, lon, 12, 16);
+      appendSimplePolygon(ring, 'rgba(96,165,250,0.10)', 'rgba(147,197,253,0.22)', 51, state.swellPolygons, false, '', 'surface', false);
     }
   }
 
@@ -1628,12 +1709,30 @@
       layerManager.clear('jet');
       faults.push(`jet:${e.message}`);
     }
+    try {
+      await layerManager.refresh('bait');
+    } catch (e) {
+      layerManager.clear('bait');
+      faults.push(`bait:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('sst');
+    } catch (e) {
+      layerManager.clear('sst');
+      faults.push(`sst:${e.message}`);
+    }
+    try {
+      await layerManager.refresh('swell');
+    } catch (e) {
+      layerManager.clear('swell');
+      faults.push(`swell:${e.message}`);
+    }
     const lod = cloudLodProfile();
     const suffix = faults.length ? ` • layer warnings:${faults.length}` : '';
     const cloudCount = state.cloudPolygons.length + state.cloudInteractivePolygons.length;
     const precipCount = state.rainMarkers.length + state.rainColumns.length;
     const lightningCount = state.hailMarkers.length + state.hailCorePolygons.length + state.lightningPolygons.length;
-    setStatus(`Weather ${lod.label} • clouds:${cloudCount} rain:${precipCount} lightning:${lightningCount} jet:${state.jetMarkers.length}${suffix}`, faults.length > 0);
+    setStatus(`Weather ${lod.label} • clouds:${cloudCount} rain:${precipCount} lightning:${lightningCount} jet:${state.jetMarkers.length} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"}${suffix}`, faults.length > 0);
     if (!faults.length) console.info('[gfs] cloud/rain/lightning/jet layers ready');
   }
 
@@ -1764,7 +1863,7 @@
   }
 
   function collectTileFeatures(layer) {
-    const m = state.layerTileData[layer] || new Map();
+    const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
     const all = [];
     m.forEach((v, k) => {
       if (!state.activeTileKeys.has(k)) return;
@@ -1780,6 +1879,7 @@
     const lightning = collectTileFeatures('lightning');
     const fish = collectTileFeatures('fish');
     const sst = collectTileFeatures('sst');
+    const swell = collectTileFeatures('swell');
     state.cloudTiles = clouds;
     state.weatherPayload = state.weatherPayload || {};
     state.weatherPayload.precip_columns = precip;
@@ -1787,10 +1887,9 @@
     if (fish.length) {
       state.fish = fish;
     }
-    if (sst.length) {
-      state.weatherPayload.scene = state.weatherPayload.scene || {};
-      state.weatherPayload.scene.sst = sst;
-    }
+    state.weatherPayload.scene = state.weatherPayload.scene || {};
+    state.weatherPayload.scene.sst = sst;
+    state.weatherPayload.scene.swell = swell;
   }
 
   async function refreshVisibleTiles() {
@@ -1804,8 +1903,8 @@
         ['precip', !!state.feature.rain],
         ['lightning', !!state.feature.lightning],
         ['wind', !!state.feature.jet],
-        ['swell', !!state.flags.enableOceanSwell],
-        ['sst', true],
+        ['swell', !!state.feature.swell],
+        ['sst', !!state.feature.sst],
         ['fish', !!state.feature.markers],
       ];
       const requests = [];
@@ -1816,15 +1915,15 @@
         for (const t of tiles) {
           if (layer === "clouds") {
             aggregateRequests.push(fetchAggregateTile(t).then((ag)=>{
-              const cm = state.layerTileData.clouds;
-              const pm = state.layerTileData.precip;
-              const wm = state.layerTileData.wind;
+              const cm = state.layerTileData.clouds || (state.layerTileData.clouds = new Map());
+              const pm = state.layerTileData.precip || (state.layerTileData.precip = new Map());
+              const wm = state.layerTileData.wind || (state.layerTileData.wind = new Map());
               cm.set(t.key, { features: Array.isArray(ag.clouds) ? ag.clouds : [] });
               pm.set(t.key, { features: Array.isArray(ag.precipitation) ? ag.precipitation : [] });
               wm.set(t.key, { features: Array.isArray(ag.wind_vectors) ? ag.wind_vectors : [] });
             }).catch(()=>{}));
           }
-          const m = state.layerTileData[layer];
+          const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
           if (m.has(t.key)) continue;
           requests.push(
             fetchLayerTile(layer, t)
@@ -1844,7 +1943,7 @@
 
       // prune stale tile entries
       for (const layer of Object.keys(state.layerTileData)) {
-        const m = state.layerTileData[layer];
+        const m = state.layerTileData[layer] || (state.layerTileData[layer] = new Map());
         for (const key of [...m.keys()]) {
           if (!state.activeTileKeys.has(key)) {
             m.delete(key);
@@ -1943,15 +2042,29 @@
       },
       clear: () => { clearMapMarkers(); },
     });
+    layerManager.register('bait', {
+      refresh: async () => {
+        if (!state.feature.bait) return layerManager.clear('bait');
+        await renderBaitLayer();
+      },
+      clear: () => clearBaitPolygons(),
+    });
+    layerManager.register('sst', {
+      refresh: async () => {
+        if (!state.feature.sst) return layerManager.clear('sst');
+        await renderSstLayer();
+      },
+      clear: () => clearSstLayer(),
+    });
     layerManager.register('swell', {
       refresh: async () => {
-        if (window.LFTRWeather?.renderOceanSwell) {
-          try { window.LFTRWeather.renderOceanSwell(makeWeatherCtx()); } catch (err) { console.warn('[gfs] swell layer refresh failed', err); }
-        }
+        if (!state.feature.swell) return layerManager.clear('swell');
+        await renderSwellLayer();
       },
-      clear: () => {},
+      clear: () => clearSwellLayer(),
     });
   }
+
 
   async function ensureMapLibraries() {
     if (!window.google || !window.google.maps || !window.google.maps.importLibrary) return;
@@ -2427,7 +2540,7 @@
       }
 
       const s = document.createElement('script');
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.mapsApiKey)}&v=beta&libraries=maps3d,marker`;
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.mapsApiKey)}&v=beta&libraries=maps3d,marker&loading=async`;
       s.async = true;
       s.defer = true;
       s.dataset.gmaps3d = '1';
@@ -2570,7 +2683,7 @@
     try { await loadClouds(); } catch (e) { setStatus(`Weather load failed: ${e.message}`, true); }
 
     setInterval(() => {
-      if ((state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet || state.feature.markers || state.flags.enableOceanSwell) && state.mapReady) {
+      if ((state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet || state.feature.markers || state.feature.sst || state.feature.swell || state.feature.bait) && state.mapReady) {
         refreshVisibleTiles().then(() => renderWeatherLayers()).catch((err) => console.warn('[gfs] periodic layer/tile refresh failed', err));
       }
     }, 12000);
