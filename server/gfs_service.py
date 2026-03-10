@@ -75,6 +75,10 @@ INGEST_FALLBACK_CYCLE_DEPTH = 4
 INGEST_PREFERRED_FORECAST_HOUR = 0
 INGEST_CACHE_MIN_BYTES = 2000
 INGEST_MIN_INTERVAL_SECONDS = 600
+WEATHER_REFRESH_TTL_SECONDS = 45
+SCENE_REFRESH_TTL_SECONDS = 30
+SCENE_DOWNSAMPLE_STRIDE = 3
+SCALAR_DOWNSAMPLE_STRIDE = 6
 
 SURFACE_VARIABLES = ["PRATE", "APCP", "TCDC", "CAPE", "CIN", "PRMSL", "TMP", "RH", "GUST", "UGRD", "VGRD"]
 AGL_VARIABLES = ["TMP", "RH", "UGRD", "VGRD", "TCDC"]
@@ -659,7 +663,10 @@ class GFSService:
         self.gfs_client = GFSNomadsClient(DEFAULT_GFS_CACHE_DIR)
         self.disk_cache = DiskCache(str(DEFAULT_GFS_CACHE_DIR / "payloads")) if DiskCache else None
         self._ingest_lock = threading.Lock()
+        self._scene_refresh_lock = threading.Lock()
+        self._weather_refresh_lock = threading.Lock()
         self._decode_cache: Dict[str, Dict[str, Any]] = {}
+        self._weather_payload_cache: Dict[str, Any] = {"ts": 0, "payload": None}
 
     def _now_ms(self) -> int:
         return int(time.time() * 1000)
@@ -877,27 +884,14 @@ class GFSService:
 
     def open_all_valid_groups(self, grib_path: Path) -> tuple[dict[str, Any], str]:
         """Open available GRIB groups with cfgrib primary and pygrib fallback."""
-        try:
-            stat = grib_path.stat()
-            cache_key = f"{grib_path}:{int(stat.st_mtime)}:{int(stat.st_size)}"
-        except Exception:
-            cache_key = str(grib_path)
-        now_ms = self._now_ms()
-        row = self._decode_cache.get(cache_key)
-        if row and (now_ms - int(row.get("ts") or 0)) <= 1_000:
-            return row.get("groups") or {}, str(row.get("backend") or "none")
-
         groups = self._open_all_valid_groups_cfgrib(grib_path)
         if groups:
             loaded = ", ".join([k for k in ["surface", "2m", "10m", "isobaric", "meanSea"] if (k in groups or (k == "isobaric" and "isobaricInhPa" in groups))])
             print(f"[gfs] datasets loaded: {loaded}")
-            self._decode_cache = {cache_key: {"ts": now_ms, "groups": groups, "backend": "cfgrib"}}
             return groups, "cfgrib"
         groups = self._open_all_valid_groups_pygrib(grib_path)
         if groups:
-            self._decode_cache = {cache_key: {"ts": now_ms, "groups": groups, "backend": "pygrib"}}
             return groups, "pygrib"
-        self._decode_cache = {cache_key: {"ts": now_ms, "groups": {}, "backend": "none"}}
         return {}, "none"
 
 
@@ -2236,6 +2230,21 @@ class GFSService:
         wind_speed = np.sqrt(np.square(wind_u) + np.square(wind_v)) if wind_u is not None and wind_v is not None else (np.sqrt(np.square(vectors[0]["u"]) + np.square(vectors[0]["v"])) if vectors else np.zeros_like(precip))
         temp_k = self._extract_scalar_field(groups, [("surface", ["t", "TMP", "tmp"]), ("2m", ["t", "TMP", "tmp"])])
         pressure_pa = self._extract_scalar_field(groups, [("meanSea", ["prmsl", "PRMSL"]), ("surface", ["prmsl", "PRMSL"])])
+
+        lat2d = self._downsample_2d(lat2d, SCENE_DOWNSAMPLE_STRIDE)
+        lon2d = self._downsample_2d(lon2d, SCENE_DOWNSAMPLE_STRIDE)
+        precip = self._downsample_2d(precip, SCENE_DOWNSAMPLE_STRIDE)
+        low = self._downsample_2d(low, SCENE_DOWNSAMPLE_STRIDE)
+        mid = self._downsample_2d(mid, SCENE_DOWNSAMPLE_STRIDE)
+        high = self._downsample_2d(high, SCENE_DOWNSAMPLE_STRIDE)
+        conv = self._downsample_2d(conv, SCENE_DOWNSAMPLE_STRIDE)
+        humidity = self._downsample_2d(humidity, SCENE_DOWNSAMPLE_STRIDE) if humidity is not None else None
+        wind_u = self._downsample_2d(wind_u, SCENE_DOWNSAMPLE_STRIDE) if wind_u is not None else None
+        wind_v = self._downsample_2d(wind_v, SCENE_DOWNSAMPLE_STRIDE) if wind_v is not None else None
+        wind_speed = self._downsample_2d(wind_speed, SCENE_DOWNSAMPLE_STRIDE) if wind_speed is not None else None
+        temp_k = self._downsample_2d(temp_k, SCENE_DOWNSAMPLE_STRIDE) if temp_k is not None else None
+        pressure_pa = self._downsample_2d(pressure_pa, SCENE_DOWNSAMPLE_STRIDE) if pressure_pa is not None else None
+
         return {
             "precip": precip,
             "cloud_layers": cloud_layers,
@@ -2274,6 +2283,18 @@ class GFSService:
                 continue
         return None
 
+    def _downsample_2d(self, arr: Any, stride: int) -> Any:
+        if np is None or arr is None:
+            return arr
+        try:
+            a = np.asarray(arr, dtype=float)
+        except Exception:
+            return arr
+        if a.ndim != 2:
+            return arr
+        step = max(1, int(stride))
+        return a[::step, ::step]
+
     def _store_scalar_fields(self, fields: dict[str, Any]) -> None:
         if np is None:
             return
@@ -2286,8 +2307,10 @@ class GFSService:
             lon_arr = np.asarray(lon2d, dtype=float)
         except Exception:
             return
+        lat_arr = self._downsample_2d(lat_arr, SCALAR_DOWNSAMPLE_STRIDE)
+        lon_arr = self._downsample_2d(lon_arr, SCALAR_DOWNSAMPLE_STRIDE)
         scalar_fields: dict[str, dict[str, Any]] = {}
-        for key in ("cloud_density", "precip_rate", "wind_speed", "temperature_k", "pressure_pa", "humidity", "wind_u", "wind_v"):
+        for key in ("cloud_density", "precip_rate", "temperature_k", "pressure_pa"):
             val = fields.get(key)
             if val is None:
                 continue
@@ -2297,10 +2320,11 @@ class GFSService:
                 continue
             if arr.ndim != 2:
                 continue
+            arr = self._downsample_2d(arr, SCALAR_DOWNSAMPLE_STRIDE)
             scalar_fields[key] = {
-                "lat": lat_arr.tolist(),
-                "lon": lon_arr.tolist(),
-                "values": arr.tolist(),
+                "lat": lat_arr.astype(np.float32).tolist(),
+                "lon": lon_arr.astype(np.float32).tolist(),
+                "values": arr.astype(np.float32).tolist(),
                 "updated_at": self._now_ms(),
             }
         self.state.scalar_fields = scalar_fields
@@ -2551,7 +2575,7 @@ class GFSService:
             return None
         return newest
 
-    def generate_weather_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+    def _generate_weather_payload_uncached(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
         bbox = self._normalize_bbox(bbox)
         try:
             payload = self.generate_real_gfs_payload(bbox)
@@ -2574,6 +2598,36 @@ class GFSService:
                 return cached_payload
             fb = self.generate_fallback_payload(bbox)
             return fb
+
+    def generate_weather_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        refresh_bbox = self._default_bbox()
+        ttl_ms = max(10_000, WEATHER_REFRESH_TTL_SECONDS * 1000)
+        now_ms = self._now_ms()
+        row = self._weather_payload_cache or {}
+        cached_payload = row.get("payload") if isinstance(row.get("payload"), dict) else None
+        cached_ts = int(row.get("ts") or 0)
+        if cached_payload and (now_ms - cached_ts) <= ttl_ms:
+            return cached_payload
+
+        if not self._weather_refresh_lock.acquire(blocking=False):
+            if cached_payload:
+                return cached_payload
+            with self._weather_refresh_lock:
+                pass
+            row = self._weather_payload_cache or {}
+            if isinstance(row.get("payload"), dict):
+                return row["payload"]
+
+        try:
+            payload = self._generate_weather_payload_uncached(refresh_bbox)
+            self._weather_payload_cache = {"ts": self._now_ms(), "payload": payload}
+            return payload
+        except Exception:
+            if cached_payload:
+                return cached_payload
+            raise
+        finally:
+            self._weather_refresh_lock.release()
 
     def debug_real_gfs_cycle(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
         """Manual debug helper for cycle/hour/url/group visibility."""
@@ -3171,7 +3225,7 @@ class GFSService:
             "wind": scene.get("wind") or ((scene_payload.get("balloons") or {}).get("items") if isinstance(scene_payload.get("balloons"), dict) else []) or [],
             "swell": scene.get("swell") or [],
             "sst": scene.get("sst") or [],
-            "fish": self.fish_payload().get("items") or [],
+            "fish": (self.state.fish_points or self.load_fish()[0]) or [],
         }
         self.state.layer_feature_index = {}
         self.state.layer_feature_meta = {}
@@ -3238,7 +3292,7 @@ class GFSService:
 
     def _get_cached_scene_payload(self, bbox: dict[str, float]) -> tuple[dict[str, Any], dict[str, Any]]:
         now_ms = self._now_ms()
-        ttl_ms = max(10_000, int((getattr(self.state, "tile_cache_ttl_seconds", 30) or 30) * 1000))
+        ttl_ms = max(10_000, SCENE_REFRESH_TTL_SECONDS * 1000)
         key = self._scene_cache_key(bbox)
         row = self.state.tile_cache.get(key) or {}
         diag = {"scene_cache_key": key, "cache_hit": False, "cache_age_ms": None, "build_duration_ms": 0}
@@ -3246,19 +3300,42 @@ class GFSService:
             diag["cache_hit"] = True
             diag["cache_age_ms"] = now_ms - int(row.get("ts") or 0)
             return row["payload"], diag
+
+        if not self._scene_refresh_lock.acquire(blocking=False):
+            if isinstance(row.get("payload"), dict):
+                diag["cache_hit"] = True
+                diag["cache_age_ms"] = now_ms - int(row.get("ts") or 0)
+                return row["payload"], diag
+            with self._scene_refresh_lock:
+                pass
+            row = self.state.tile_cache.get(key) or {}
+            if isinstance(row.get("payload"), dict):
+                diag["cache_hit"] = True
+                diag["cache_age_ms"] = now_ms - int(row.get("ts") or 0)
+                return row["payload"], diag
+
         started = time.perf_counter()
         try:
             payload = self.cloud_tiles_payload(bbox)
         except Exception as exc:
             log.exception("[gfs] cached scene generation failed")
             payload = self._degraded_scene_payload(bbox, str(exc))
+        finally:
+            self._scene_refresh_lock.release()
+
         diag["build_duration_ms"] = int((time.perf_counter() - started) * 1000)
         self.state.tile_cache[key] = {"ts": now_ms, "payload": payload}
+        self.state.scene_cache = payload
+        self.state.scene_cache_ts = now_ms
         try:
             self._build_layer_feature_indexes(payload)
         except Exception:
             log.exception("[gfs] layer feature index build failed")
         return payload, diag
+
+    def get_scene_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:
+        payload, _ = self._get_cached_scene_payload(self._normalize_bbox(bbox))
+        return payload
 
     def layer_tile_payload(self, layer: str, z: int, x: int, y: int, pad_deg: float = 0.18, debug: bool = False) -> dict[str, Any]:
         layer_name = (layer or "").strip().lower()

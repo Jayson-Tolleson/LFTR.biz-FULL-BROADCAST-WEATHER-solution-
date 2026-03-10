@@ -162,7 +162,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
 
     @app.get("/api/gfs")
     async def api_gfs_scene_proxy():
-        payload = gfs.cloud_tiles_payload()
+        payload = gfs.get_scene_payload()
         return jsonify(payload)
 
     @app.get("/gfs/api/fish")
@@ -217,7 +217,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         limit = max(0, _qi("limit", 0))
         compact = (request.args.get("compact", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
-        payload = gfs.cloud_tiles_payload(bbox)
+        payload = gfs.get_scene_payload(bbox)
         items = payload.get("items") or []
         if limit > 0 and isinstance(items, list):
             items = sorted(items, key=lambda t: float((t or {}).get("importance", 0.0)), reverse=True)[:limit]

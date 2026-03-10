@@ -141,6 +141,17 @@ The `/gfs/api/cloud_tiles` payload explicitly carries source quality metadata (`
 
 The globe now prefers tile-mode weather loading and falls back to scene payload mode if tile requests are unavailable or empty.
 
+
+### GFS Refresh + Cache Model
+
+To prevent repeated cfgrib decode storms and high-memory overlap under endpoint load, the GFS path now uses a single-flight refresh model:
+
+- Weather decode/derivation is cached in-memory for a short TTL and reused across `/gfs/api/scene`, `/gfs/api/cloud_tiles`, `/gfs/api/fish`, and tile endpoints.
+- Scene payload generation is separately cached with a lock so only one scene refresh runs at a time.
+- While a refresh is in-flight or a decode fails, endpoints continue serving the last-known-good cached scene/payload.
+- Datasets are closed promptly after extraction and scene/scalar grids are downsampled before heavy feature generation to reduce memory pressure.
+
+
 ## Fish Location Data
 Fish locations are sourced from:
 
