@@ -10,6 +10,9 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 from quart import Response
 
+from server.ai.gemini import generate_ai_reply, provider_name
+from server.ai.speech import synthesize_voice
+
 
 log = logging.getLogger("server.ai")
 
@@ -23,22 +26,24 @@ async def handle_chat(payload: Dict[str, Any], fallback_text: str) -> Dict[str, 
     if not text:
         return {"ok": False, "provider": "none", "error": "missing_text", "message": "Please provide text.", "data": {"reply": "", "command": None}}
 
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not openai_key:
+    try:
+        reply = await asyncio.to_thread(lambda: generate_ai_reply(text)["text"])
+    except Exception as exc:
+        log.exception("chat provider request failed")
         return {
             "ok": False,
-            "provider": "none",
-            "error": "provider_unconfigured",
-            "message": "No chat provider configured. Set OPENAI_API_KEY to enable AI chat.",
+            "provider": provider_name(),
+            "error": "provider_request_failed",
+            "message": str(exc),
             "data": {"reply": fallback_text, "command": None},
         }
 
     return {
-        "ok": False,
-        "provider": "openai",
-        "error": "provider_not_wired",
-        "message": "OPENAI_API_KEY is present, but direct provider wiring is not enabled in this build.",
-        "data": {"reply": fallback_text, "command": None},
+        "ok": True,
+        "provider": provider_name(),
+        "error": None,
+        "message": "ok",
+        "data": {"reply": reply or fallback_text, "command": None},
     }
 
 
@@ -47,23 +52,12 @@ async def handle_tts(payload: Dict[str, Any]) -> Response:
     if not text:
         return _json_response({"ok": False, "provider": "none", "error": "missing_text", "message": "text is required", "data": None}, 400)
 
-    provider = os.getenv("TTS_PROVIDER", "").strip().lower()
-    if not provider:
-        return _json_response({
-            "ok": False,
-            "provider": "none",
-            "error": "provider_unconfigured",
-            "message": "TTS provider is not configured. Set TTS_PROVIDER and provider credentials.",
-            "data": None,
-        }, 503)
-
-    return _json_response({
-        "ok": False,
-        "provider": provider,
-        "error": "provider_not_wired",
-        "message": f"TTS provider '{provider}' is configured but not enabled in this build.",
-        "data": None,
-    }, 501)
+    try:
+        voice_url = await asyncio.to_thread(synthesize_voice, text)
+        return _json_response({"ok": True, "provider": provider_name(), "error": None, "message": "ok", "data": {"voice": voice_url}})
+    except Exception as exc:
+        log.exception("tts provider request failed")
+        return _json_response({"ok": False, "provider": provider_name(), "error": "provider_request_failed", "message": str(exc), "data": None}, 500)
 
 
 async def handle_websearch(payload: Dict[str, Any]) -> Dict[str, Any]:

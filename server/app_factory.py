@@ -6,6 +6,7 @@ from pathlib import Path
 from quart import Quart
 import socketio
 
+from server.ai.gemini import provider_name
 from server.config import load_settings
 from server.routes import register_routes
 from server.rtc import RTCManager
@@ -28,6 +29,7 @@ def _configure_logging(debug: bool) -> None:
 def create_quart_app() -> Quart:
     settings = load_settings()
     _configure_logging(settings.debug)
+    provider_name()
 
     app = Quart(
         __name__,

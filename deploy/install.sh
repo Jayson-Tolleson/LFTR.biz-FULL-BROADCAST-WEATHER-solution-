@@ -8,6 +8,9 @@ APP_DIR="${APP_DIR:-/home/${INSTALL_USER}/broadcast}"
 VENV_DIR="${APP_DIR}/venv"
 GOOGLE_PROJECT_ID="${GOOGLE_PROJECT_ID:-}"
 GCP_KEY="${GCP_KEY:-/etc/broadcast/gcp-key.json}"
+VERTEX_LOCATION="${VERTEX_LOCATION:-global}"
+VERTEX_MODEL="${VERTEX_MODEL:-gemini-2.5-flash}"
+AI_PROVIDER="${AI_PROVIDER:-vertex}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-admin@${DOMAIN}}"
 GOOGLE_CLOUD_REGION="global"
 
@@ -107,7 +110,11 @@ phase4_google_cloud() {
     echo "[INFO] Ensure firewall ports 80 and 443 are open in VPC rules"
   fi
 
-  if [ -f "$GCP_KEY" ]; then
+  if [ -f "/etc/broadcast/gcp-key.json" ]; then
+    export GOOGLE_APPLICATION_CREDENTIALS="/etc/broadcast/gcp-key.json"
+    GCP_KEY="/etc/broadcast/gcp-key.json"
+    echo "[INFO] GCP credentials loaded"
+  elif [ -f "$GCP_KEY" ]; then
     export GOOGLE_APPLICATION_CREDENTIALS="$GCP_KEY"
     echo "[INFO] GCP credentials loaded"
   else
@@ -125,6 +132,9 @@ MAPS_API_KEY=${MAPS_API_KEY:-}
 GOOGLE_MAPS_API_KEY=${MAPS_API_KEY:-}
 GOOGLE_CLOUD_REGION=global
 GCP_KEY=${GCP_KEY}
+VERTEX_LOCATION=${VERTEX_LOCATION}
+VERTEX_MODEL=${VERTEX_MODEL}
+AI_PROVIDER=${AI_PROVIDER}
 EOF
 
   if command -v gcloud >/dev/null 2>&1; then
@@ -137,7 +147,7 @@ EOF
       gcloud services enable \
         aiplatform.googleapis.com \
         speech.googleapis.com \
-        maps-backend.googleapis.com
+        texttospeech.googleapis.com
 
       echo "[INFO] Google APIs enabled"
 

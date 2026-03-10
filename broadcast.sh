@@ -40,6 +40,9 @@ GOOGLE_PROJECT_ID="$(prompt_default "Enter Google Cloud Project ID" "$DEFAULT_PR
 MAPS_API_KEY="$(prompt_default "Enter Google Maps JS API key" "$DEFAULT_MAPS_KEY")"
 EMAIL="$(prompt_default "Enter email for Let's Encrypt certificate" "admin@$DOMAIN")"
 GCP_KEY="$(prompt_default "Path to GCP service account key" "/etc/broadcast/gcp-key.json")"
+VERTEX_LOCATION="$(prompt_default "Vertex AI location" "global")"
+VERTEX_MODEL="$(prompt_default "Vertex AI model" "gemini-2.5-flash")"
+AI_PROVIDER="$(prompt_default "AI provider" "vertex")"
 
 mkdir -p /etc/broadcast
 cat > /etc/broadcast/install.env <<CFG
@@ -50,6 +53,9 @@ GOOGLE_MAPS_API_KEY=$MAPS_API_KEY
 GOOGLE_CLOUD_REGION=global
 EMAIL=$EMAIL
 GCP_KEY=$GCP_KEY
+VERTEX_LOCATION=$VERTEX_LOCATION
+VERTEX_MODEL=$VERTEX_MODEL
+AI_PROVIDER=$AI_PROVIDER
 CFG
 
 export DOMAIN
@@ -60,6 +66,9 @@ export GOOGLE_CLOUD_REGION="global"
 export EMAIL
 export CERTBOT_EMAIL="$EMAIL"
 export GCP_KEY
+export VERTEX_LOCATION
+export VERTEX_MODEL
+export AI_PROVIDER
 
 python3 - <<PYMAPS
 from pathlib import Path
