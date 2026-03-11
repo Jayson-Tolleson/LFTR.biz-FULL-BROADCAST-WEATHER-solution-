@@ -14,6 +14,8 @@
   let ws = null;
   let pc = null;
   let retryDelayMs = 1000;
+  let requestPending = false;
+  let broadcasterPresent = false;
 
   async function iceServers() {
     try {
@@ -31,6 +33,8 @@
   }
 
   function requestStream() {
+    if (!broadcasterPresent || requestPending) return;
+    requestPending = true;
     sendJson('request_stream');
   }
 
@@ -76,6 +80,7 @@
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
       const present = !!st.runtime?.broadcaster_present;
+      broadcasterPresent = present;
       if (present) requestStream();
       return;
     }
@@ -83,20 +88,24 @@
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || 'idle');
       const present = !!st.runtime?.broadcaster_present;
+      broadcasterPresent = present;
       if (present) requestStream();
       return;
     }
     if (msg.type === 'presence') {
       applyPresence(msg);
-      if (msg.broadcaster_present) requestStream();
+      broadcasterPresent = !!msg.broadcaster_present;
+      if (broadcasterPresent) requestStream();
+      else requestPending = false;
       return;
     }
     if (msg.type === 'ai_status') {
       updateAiStatus(msg.status || 'idle');
       return;
     }
-    if (msg.type === 'error') {
+    if (msg.type === 'waiting' || msg.type === 'error') {
       if (msg.message === 'no_broadcaster') {
+        requestPending = false;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
       }
@@ -120,6 +129,7 @@
       const answer = await c.createAnswer();
       await c.setLocalDescription(answer);
       sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+      requestPending = false;
       return;
     }
     if (msg.type === 'webrtc_ice' && pc) {
@@ -155,9 +165,10 @@
     ws.onerror = (err) => console.warn('[watch] websocket error', { url, room, err });
     ws.onclose = (ev) => {
       conn.textContent = 'reconnecting';
+      requestPending = false;
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
       setTimeout(connectWatchSocket, retryDelayMs);
-      retryDelayMs = Math.min(15000, Math.round(retryDelayMs * 1.6));
+      retryDelayMs = Math.min(20000, Math.round(retryDelayMs * 1.8));
     };
   }
 

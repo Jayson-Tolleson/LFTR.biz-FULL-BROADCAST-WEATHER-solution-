@@ -33,6 +33,7 @@ class RTCManager:
         self.disconnect_grace_seconds = 60
         self._pending_broadcaster_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
         self._pending_viewer_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
+        self.max_pending_ice = 64
 
     async def _emit_room(self, room_id: str, event: str, payload: Dict[str, Any]) -> None:
         emitter = getattr(self.state, "ws_emit_room", None)
@@ -251,15 +252,21 @@ class RTCManager:
         key = self._broadcaster_ice_key(room_id, sid)
         if not b or b.sid != sid:
             if candidate is not None:
-                self._pending_broadcaster_ice.setdefault(key, []).append(candidate)
-                log.info("queue broadcaster ICE (session pending) room=%s sid=%s count=%s", room_id, sid, len(self._pending_broadcaster_ice.get(key, [])))
+                q = self._pending_broadcaster_ice.setdefault(key, [])
+                q.append(candidate)
+                if len(q) > self.max_pending_ice:
+                    del q[:-self.max_pending_ice]
+                log.info("queue broadcaster ICE (session pending) room=%s sid=%s count=%s", room_id, sid, len(q))
             return
         if candidate is None:
             await b.pc.addIceCandidate(None)
             return
         if b.pc.remoteDescription is None:
-            self._pending_broadcaster_ice.setdefault(key, []).append(candidate)
-            log.info("queue broadcaster ICE (remoteDescription pending) room=%s sid=%s count=%s", room_id, sid, len(self._pending_broadcaster_ice.get(key, [])))
+            q = self._pending_broadcaster_ice.setdefault(key, [])
+            q.append(candidate)
+            if len(q) > self.max_pending_ice:
+                del q[:-self.max_pending_ice]
+            log.info("queue broadcaster ICE (remoteDescription pending) room=%s sid=%s count=%s", room_id, sid, len(q))
             return
         await b.pc.addIceCandidate(candidate)
 
@@ -268,15 +275,21 @@ class RTCManager:
         key = self._viewer_ice_key(room_id, sid)
         if not pc:
             if candidate is not None:
-                self._pending_viewer_ice.setdefault(key, []).append(candidate)
-                log.info("queue viewer ICE (session pending) room=%s sid=%s count=%s", room_id, sid, len(self._pending_viewer_ice.get(key, [])))
+                q = self._pending_viewer_ice.setdefault(key, [])
+                q.append(candidate)
+                if len(q) > self.max_pending_ice:
+                    del q[:-self.max_pending_ice]
+                log.info("queue viewer ICE (session pending) room=%s sid=%s count=%s", room_id, sid, len(q))
             return
         if candidate is None:
             await pc.addIceCandidate(None)
             return
         if pc.remoteDescription is None:
-            self._pending_viewer_ice.setdefault(key, []).append(candidate)
-            log.info("queue viewer ICE (remoteDescription pending) room=%s sid=%s count=%s", room_id, sid, len(self._pending_viewer_ice.get(key, [])))
+            q = self._pending_viewer_ice.setdefault(key, [])
+            q.append(candidate)
+            if len(q) > self.max_pending_ice:
+                del q[:-self.max_pending_ice]
+            log.info("queue viewer ICE (remoteDescription pending) room=%s sid=%s count=%s", room_id, sid, len(q))
             return
         await pc.addIceCandidate(candidate)
 

@@ -356,9 +356,9 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     await _broadcast_presence(state, room_id)
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
-                        log.info("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
+                        log.debug("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
                         await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
-                        await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
+                        await ws.send_json({"type": "waiting", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                     else:
                         log.info("watch signaling started room=%s client=%s", room_id, client_id)
                         if rtc is None:
@@ -375,9 +375,9 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     log.info("watch request_stream room=%s client=%s", room_id, client_id)
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
-                        log.info("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
+                        log.debug("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
                         await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
-                        await ws.send_json({"type": "error", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
+                        await ws.send_json({"type": "waiting", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                         continue
                     if rtc is None:
                         await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})

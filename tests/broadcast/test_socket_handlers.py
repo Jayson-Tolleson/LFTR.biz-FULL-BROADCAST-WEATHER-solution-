@@ -80,17 +80,18 @@ def test_watch_socket_stays_open_without_broadcaster():
             await ws.send_json({'type': 'join', 'room': 'default', 'clientId': 'viewer-test', 'role': 'viewer'})
             saw_waiting = False
             for _ in range(6):
-                msg = await ws.receive_json()
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=2)
                 if msg.get('type') == 'error' and msg.get('message') == 'no_broadcaster':
                     saw_waiting = True
                     break
                 if msg.get('type') == 'presence' and msg.get('broadcaster_present') is False:
                     saw_waiting = True
+                    break
             assert saw_waiting
             await ws.send_json({'type': 'ping', 'room': 'default', 'clientId': 'viewer-test'})
             got_pong = False
-            for _ in range(6):
-                msg = await ws.receive_json()
+            for _ in range(8):
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=2)
                 if msg.get('type') == 'pong':
                     got_pong = True
                     break

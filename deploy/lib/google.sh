@@ -18,12 +18,16 @@ MAPS_API_KEY=${maps_key}
 GOOGLE_MAPS_API_KEY=${maps_key}
 GOOGLE_CLOUD_PROJECT=${project_id}
 GOOGLE_CLOUD_LOCATION=${region}
-GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
 EOF
+
+  local creds="${GOOGLE_APPLICATION_CREDENTIALS:-}"
+  if [[ -n "$creds" && -f "$creds" ]]; then
+    echo "GOOGLE_APPLICATION_CREDENTIALS=$creds" >> "$google_env"
+  fi
   chmod 600 "$google_env"
   chown "$APP_USER:$APP_GROUP" "$google_env"
 
-  if [[ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
-    log_warn "Optional service account key missing: $GOOGLE_APPLICATION_CREDENTIALS"
+  if [[ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" && ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
+    log_warn "Optional service account key missing: $GOOGLE_APPLICATION_CREDENTIALS (ADC will be used if available)"
   fi
 }
