@@ -2330,6 +2330,14 @@ class GFSService:
 
         canonical_shape = tuple(np.asarray(precip).shape)
         log.info("[gfs] canonical live grid selected shape=%s", canonical_shape)
+        source_shapes = {
+            "lat2d": tuple(np.asarray(lat2d).shape),
+            "lon2d": tuple(np.asarray(lon2d).shape),
+            "precip": tuple(np.asarray(precip).shape),
+            "cloud_low": self._shape_of(cloud_layers.get("low")),
+            "cloud_mid": self._shape_of(cloud_layers.get("mid")),
+            "cloud_high": self._shape_of(cloud_layers.get("high")),
+        }
         high = self._coerce_to_shape(cloud_layers.get("high"), canonical_shape, "cloud_high")
         low = self._coerce_to_shape(cloud_layers.get("low"), canonical_shape, "cloud_low")
         mid = self._coerce_to_shape(cloud_layers.get("mid"), canonical_shape, "cloud_mid")
@@ -2339,7 +2347,25 @@ class GFSService:
             low = np.zeros(canonical_shape, dtype=float)
         if mid is None:
             mid = np.zeros(canonical_shape, dtype=float)
-        conv = np.clip((precip / 30.0) * 0.6 + high * 0.4, 0.0, 1.0)
+        lat2d_live = self.ensure_same_grid(lat2d, canonical_shape, "hazard_lat2d")
+        lon2d_live = self.ensure_same_grid(lon2d, canonical_shape, "hazard_lon2d")
+        precip_live = self.ensure_same_grid(precip, canonical_shape, "hazard_precip_mm_hr")
+        low_live = self.ensure_same_grid(low, canonical_shape, "hazard_cloud_low")
+        mid_live = self.ensure_same_grid(mid, canonical_shape, "hazard_cloud_mid")
+        high_live = self.ensure_same_grid(high, canonical_shape, "hazard_cloud_high")
+
+        realigned_fields = [
+            name for name, shape in source_shapes.items()
+            if shape and len(shape) >= 2 and (int(shape[0]), int(shape[1])) != canonical_shape
+        ]
+        if realigned_fields:
+            log.warning(
+                "[gfs] hazard fields resampled once from source shapes=%s to canonical=%s",
+                {k: v for k, v in source_shapes.items() if k in realigned_fields},
+                canonical_shape,
+            )
+
+        conv = np.clip((precip_live / 30.0) * 0.6 + high_live * 0.4, 0.0, 1.0)
         humidity = self._extract_scalar_field(groups, [("isobaricInhPa", ["r", "RH"]), ("surface", ["r", "RH"])])
         wind_u = self._extract_scalar_field(groups, [("10m", ["u", "UGRD"]), ("isobaricInhPa", ["u", "UGRD"]), ("surface", ["u", "UGRD"])])
         wind_v = self._extract_scalar_field(groups, [("10m", ["v", "VGRD"]), ("isobaricInhPa", ["v", "VGRD"]), ("surface", ["v", "VGRD"])])
@@ -2351,9 +2377,9 @@ class GFSService:
         temp_k = self.ensure_same_grid(temp_k, canonical_shape, "temperature_k") if temp_k is not None else None
         pressure_pa = self.ensure_same_grid(pressure_pa, canonical_shape, "pressure_pa") if pressure_pa is not None else None
 
-        lat2d = self._downsample_2d(lat2d, SCENE_DOWNSAMPLE_STRIDE)
-        lon2d = self._downsample_2d(lon2d, SCENE_DOWNSAMPLE_STRIDE)
-        precip = self._downsample_2d(precip, SCENE_DOWNSAMPLE_STRIDE)
+        lat2d = self._downsample_2d(lat2d_live, SCENE_DOWNSAMPLE_STRIDE)
+        lon2d = self._downsample_2d(lon2d_live, SCENE_DOWNSAMPLE_STRIDE)
+        precip = self._downsample_2d(precip_live, SCENE_DOWNSAMPLE_STRIDE)
         canonical_ds_shape = tuple(np.asarray(precip).shape)
         lat2d = self._coerce_to_shape(lat2d, canonical_ds_shape, "lat2d")
         lon2d = self._coerce_to_shape(lon2d, canonical_ds_shape, "lon2d")
@@ -2362,9 +2388,9 @@ class GFSService:
             xx = np.linspace(-180.0, 180.0, canonical_ds_shape[1])
             lat2d, lon2d = np.meshgrid(yy, xx, indexing="ij")
             log.warning("[gfs] lat/lon shape mismatch; using canonical synthetic grid for processing only")
-        low = self._downsample_2d(low, SCENE_DOWNSAMPLE_STRIDE)
-        mid = self._downsample_2d(mid, SCENE_DOWNSAMPLE_STRIDE)
-        high = self._downsample_2d(high, SCENE_DOWNSAMPLE_STRIDE)
+        low = self._downsample_2d(low_live, SCENE_DOWNSAMPLE_STRIDE)
+        mid = self._downsample_2d(mid_live, SCENE_DOWNSAMPLE_STRIDE)
+        high = self._downsample_2d(high_live, SCENE_DOWNSAMPLE_STRIDE)
         conv = self._downsample_2d(conv, SCENE_DOWNSAMPLE_STRIDE)
         humidity = self._downsample_2d(humidity, SCENE_DOWNSAMPLE_STRIDE) if humidity is not None else None
         wind_u = self._downsample_2d(wind_u, SCENE_DOWNSAMPLE_STRIDE) if wind_u is not None else None
@@ -2398,6 +2424,18 @@ class GFSService:
             "humidity": humidity,
             "wind_u": wind_u,
             "wind_v": wind_v,
+            "hazard_inputs": {
+                "lat2d": lat2d_live,
+                "lon2d": lon2d_live,
+                "precip": precip_live,
+                "cloud_layers": {
+                    "low": low_live,
+                    "mid": mid_live,
+                    "high": high_live,
+                },
+                "source_shapes": source_shapes,
+                "canonical_shape": tuple(canonical_shape),
+            },
         }
 
     def _assert_same_shape(self, label: str, *arrays: Any) -> None:
@@ -2630,18 +2668,23 @@ class GFSService:
 
     def _derive_real_hazard_payloads(self, groups: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
         warned: set[str] = set()
-        precip = np.asarray(fields["precip"], dtype=float)
-        cloud_layers = fields["cloud_layers"] if isinstance(fields.get("cloud_layers"), dict) else {}
-        canonical_shape = self._select_hazard_canonical_shape(fields, cloud_layers, tuple(precip.shape))
+        hazard_inputs = fields.get("hazard_inputs") if isinstance(fields.get("hazard_inputs"), dict) else {}
+        precip = np.asarray(hazard_inputs.get("precip", fields["precip"]), dtype=float)
+        cloud_layers = hazard_inputs.get("cloud_layers") if isinstance(hazard_inputs.get("cloud_layers"), dict) else (fields["cloud_layers"] if isinstance(fields.get("cloud_layers"), dict) else {})
+        canonical_shape = self._select_hazard_canonical_shape(
+            {**fields, "canonical_shape": hazard_inputs.get("canonical_shape", fields.get("canonical_shape")), "lat2d": hazard_inputs.get("lat2d", fields.get("lat2d"))},
+            cloud_layers,
+            tuple(precip.shape),
+        )
         log.info("[gfs] hazard canonical target shape=%s", canonical_shape)
 
-        lat2d = self._coerce_field_to_canonical_grid(fields["lat2d"], canonical_shape, "hazard_lat2d", warned)
-        lon2d = self._coerce_field_to_canonical_grid(fields["lon2d"], canonical_shape, "hazard_lon2d", warned)
-        precip = self._coerce_field_to_canonical_grid(precip, canonical_shape, "hazard_precip_mm_hr", warned)
+        lat2d = self.ensure_same_grid(hazard_inputs.get("lat2d", fields["lat2d"]), canonical_shape, "hazard_lat2d")
+        lon2d = self.ensure_same_grid(hazard_inputs.get("lon2d", fields["lon2d"]), canonical_shape, "hazard_lon2d")
+        precip = self.ensure_same_grid(precip, canonical_shape, "hazard_precip_mm_hr")
         cloud_layers = {
-            "low": self._coerce_field_to_canonical_grid(cloud_layers.get("low", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_low", warned),
-            "mid": self._coerce_field_to_canonical_grid(cloud_layers.get("mid", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_mid", warned),
-            "high": self._coerce_field_to_canonical_grid(cloud_layers.get("high", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_high", warned),
+            "low": self.ensure_same_grid(cloud_layers.get("low", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_low"),
+            "mid": self.ensure_same_grid(cloud_layers.get("mid", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_mid"),
+            "high": self.ensure_same_grid(cloud_layers.get("high", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_high"),
         }
 
         self._assert_same_shape(

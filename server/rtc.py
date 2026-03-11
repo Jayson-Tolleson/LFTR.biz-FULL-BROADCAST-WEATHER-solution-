@@ -33,6 +33,9 @@ class RTCManager:
         self.disconnect_grace_seconds = 60
         self._pending_broadcaster_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
         self._pending_viewer_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
+        self._pending_broadcaster_ice_seen: Dict[tuple[str, str], set[str]] = {}
+        self._pending_viewer_ice_seen: Dict[tuple[str, str], set[str]] = {}
+        self._ice_queue_started: set[tuple[str, str, str]] = set()
         self.max_pending_ice = 64
 
     async def _emit_room(self, room_id: str, event: str, payload: Dict[str, Any]) -> None:
@@ -92,6 +95,55 @@ class RTCManager:
 
 
 
+
+    def _candidate_key(self, candidate: Any) -> str:
+        if candidate is None:
+            return "<none>"
+        foundation = getattr(candidate, "foundation", None)
+        component = getattr(candidate, "component", None)
+        protocol = getattr(candidate, "protocol", None)
+        ip = getattr(candidate, "ip", None)
+        port = getattr(candidate, "port", None)
+        sdp_mid = getattr(candidate, "sdpMid", None)
+        sdp_mline = getattr(candidate, "sdpMLineIndex", None)
+        if any(v is not None for v in (foundation, component, protocol, ip, port, sdp_mid, sdp_mline)):
+            return f"{foundation}|{component}|{protocol}|{ip}|{port}|{sdp_mid}|{sdp_mline}"
+        return repr(candidate)
+
+    def _queue_ice_candidate(
+        self,
+        queue: Dict[tuple[str, str], list[RTCIceCandidate]],
+        seen_map: Dict[tuple[str, str], set[str]],
+        role: str,
+        reason: str,
+        room_id: str,
+        sid: str,
+        candidate: RTCIceCandidate,
+    ) -> None:
+        key = (room_id, sid)
+        seen = seen_map.setdefault(key, set())
+        cand_key = self._candidate_key(candidate)
+        if cand_key in seen:
+            return
+        seen.add(cand_key)
+        q = queue.setdefault(key, [])
+        q.append(candidate)
+        dropped = 0
+        if len(q) > self.max_pending_ice:
+            dropped = len(q) - self.max_pending_ice
+            removed = q[:-self.max_pending_ice]
+            del q[:-self.max_pending_ice]
+            removed_keys = {self._candidate_key(item) for item in removed}
+            seen.difference_update(removed_keys)
+        started_key = (role, room_id, sid)
+        if started_key not in self._ice_queue_started:
+            self._ice_queue_started.add(started_key)
+            log.info("%s ICE queue started room=%s sid=%s reason=%s", role, room_id, sid, reason)
+        elif dropped == 0:
+            log.debug("%s ICE queued room=%s sid=%s count=%s reason=%s", role, room_id, sid, len(q), reason)
+        if dropped > 0:
+            log.warning("%s ICE queue capped room=%s sid=%s dropped=%s", role, room_id, sid, dropped)
+
     def _broadcaster_ice_key(self, room_id: str, sid: str) -> tuple[str, str]:
         return room_id, sid
 
@@ -101,8 +153,10 @@ class RTCManager:
     async def _flush_broadcaster_ice(self, room_id: str, sid: str, pc: RTCPeerConnection) -> None:
         key = self._broadcaster_ice_key(room_id, sid)
         queued = self._pending_broadcaster_ice.pop(key, [])
+        self._pending_broadcaster_ice_seen.pop(key, None)
+        self._ice_queue_started.discard(("broadcaster", room_id, sid))
         if queued:
-            log.info("flush broadcaster ICE room=%s sid=%s count=%s", room_id, sid, len(queued))
+            log.info("broadcaster ICE queue flushed room=%s sid=%s count=%s", room_id, sid, len(queued))
         for cand in queued:
             try:
                 await pc.addIceCandidate(cand)
@@ -112,8 +166,10 @@ class RTCManager:
     async def _flush_viewer_ice(self, room_id: str, sid: str, pc: RTCPeerConnection) -> None:
         key = self._viewer_ice_key(room_id, sid)
         queued = self._pending_viewer_ice.pop(key, [])
+        self._pending_viewer_ice_seen.pop(key, None)
+        self._ice_queue_started.discard(("viewer", room_id, sid))
         if queued:
-            log.info("flush viewer ICE room=%s sid=%s count=%s", room_id, sid, len(queued))
+            log.info("viewer ICE queue flushed room=%s sid=%s count=%s", room_id, sid, len(queued))
         for cand in queued:
             try:
                 await pc.addIceCandidate(cand)
@@ -146,6 +202,8 @@ class RTCManager:
         stale = [k for k in self._pending_broadcaster_ice.keys() if k[0] == room_id and k[1] != sid]
         for k in stale:
             self._pending_broadcaster_ice.pop(k, None)
+            self._pending_broadcaster_ice_seen.pop(k, None)
+            self._ice_queue_started.discard(("broadcaster", k[0], k[1]))
 
         if existing:
             pc = existing.pc
@@ -252,21 +310,29 @@ class RTCManager:
         key = self._broadcaster_ice_key(room_id, sid)
         if not b or b.sid != sid:
             if candidate is not None:
-                q = self._pending_broadcaster_ice.setdefault(key, [])
-                q.append(candidate)
-                if len(q) > self.max_pending_ice:
-                    del q[:-self.max_pending_ice]
-                log.info("queue broadcaster ICE (session pending) room=%s sid=%s count=%s", room_id, sid, len(q))
+                self._queue_ice_candidate(
+                    self._pending_broadcaster_ice,
+                    self._pending_broadcaster_ice_seen,
+                    "broadcaster",
+                    "session_pending",
+                    room_id,
+                    sid,
+                    candidate,
+                )
             return
         if candidate is None:
             await b.pc.addIceCandidate(None)
             return
         if b.pc.remoteDescription is None:
-            q = self._pending_broadcaster_ice.setdefault(key, [])
-            q.append(candidate)
-            if len(q) > self.max_pending_ice:
-                del q[:-self.max_pending_ice]
-            log.info("queue broadcaster ICE (remoteDescription pending) room=%s sid=%s count=%s", room_id, sid, len(q))
+            self._queue_ice_candidate(
+                self._pending_broadcaster_ice,
+                self._pending_broadcaster_ice_seen,
+                "broadcaster",
+                "remote_description_pending",
+                room_id,
+                sid,
+                candidate,
+            )
             return
         await b.pc.addIceCandidate(candidate)
 
@@ -275,21 +341,29 @@ class RTCManager:
         key = self._viewer_ice_key(room_id, sid)
         if not pc:
             if candidate is not None:
-                q = self._pending_viewer_ice.setdefault(key, [])
-                q.append(candidate)
-                if len(q) > self.max_pending_ice:
-                    del q[:-self.max_pending_ice]
-                log.info("queue viewer ICE (session pending) room=%s sid=%s count=%s", room_id, sid, len(q))
+                self._queue_ice_candidate(
+                    self._pending_viewer_ice,
+                    self._pending_viewer_ice_seen,
+                    "viewer",
+                    "session_pending",
+                    room_id,
+                    sid,
+                    candidate,
+                )
             return
         if candidate is None:
             await pc.addIceCandidate(None)
             return
         if pc.remoteDescription is None:
-            q = self._pending_viewer_ice.setdefault(key, [])
-            q.append(candidate)
-            if len(q) > self.max_pending_ice:
-                del q[:-self.max_pending_ice]
-            log.info("queue viewer ICE (remoteDescription pending) room=%s sid=%s count=%s", room_id, sid, len(q))
+            self._queue_ice_candidate(
+                self._pending_viewer_ice,
+                self._pending_viewer_ice_seen,
+                "viewer",
+                "remote_description_pending",
+                room_id,
+                sid,
+                candidate,
+            )
             return
         await pc.addIceCandidate(candidate)
 
@@ -302,7 +376,10 @@ class RTCManager:
                 await pc.close()
             except Exception:
                 log.exception("error closing viewer pc")
-        self._pending_viewer_ice.pop(self._viewer_ice_key(room_id, sid), None)
+        vkey = self._viewer_ice_key(room_id, sid)
+        self._pending_viewer_ice.pop(vkey, None)
+        self._pending_viewer_ice_seen.pop(vkey, None)
+        self._ice_queue_started.discard(("viewer", room_id, sid))
         self.state.remove_room_if_empty(room_id)
         await self._emit_status(room_id)
 
@@ -315,7 +392,10 @@ class RTCManager:
         except Exception:
             log.exception("error closing broadcaster pc")
         self.broadcasters.pop(room_id, None)
-        self._pending_broadcaster_ice.pop(self._broadcaster_ice_key(room_id, sid), None)
+        bkey = self._broadcaster_ice_key(room_id, sid)
+        self._pending_broadcaster_ice.pop(bkey, None)
+        self._pending_broadcaster_ice_seen.pop(bkey, None)
+        self._ice_queue_started.discard(("broadcaster", room_id, sid))
 
         room = self.state.ensure_room(room_id)
         room.broadcaster_sid = None

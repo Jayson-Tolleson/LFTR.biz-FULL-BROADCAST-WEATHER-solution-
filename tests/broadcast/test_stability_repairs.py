@@ -198,6 +198,13 @@ def test_hazard_payload_uses_live_canonical_shape_over_coarse_precip(monkeypatch
             "cloud_layers": cloud_layers,
             "lat2d": lat2d,
             "lon2d": lon2d,
+            "hazard_inputs": {
+                "canonical_shape": live_shape,
+                "precip": np.ones(live_shape, dtype=float),
+                "cloud_layers": cloud_layers,
+                "lat2d": np.zeros(live_shape, dtype=float),
+                "lon2d": np.zeros(live_shape, dtype=float),
+            },
         },
     )
 
@@ -223,3 +230,42 @@ def test_create_quart_app_fails_fast_when_static_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(app_factory_module, "STATIC_DIR", missing_static)
     with pytest.raises(RuntimeError, match="static directory missing at startup"):
         app_factory_module.create_quart_app()
+
+
+def test_hazard_payload_uses_prealigned_hazard_inputs_without_realign_warnings(monkeypatch, tmp_path, caplog):
+    svc = GFSService(str(tmp_path))
+    shape = (721, 1440)
+
+    fields = {
+        "canonical_shape": shape,
+        "precip": np.ones((241, 480), dtype=float),
+        "cloud_layers": {
+            "low": np.ones((241, 480), dtype=float) * 0.2,
+            "mid": np.ones((241, 480), dtype=float) * 0.3,
+            "high": np.ones((241, 480), dtype=float) * 0.4,
+        },
+        "lat2d": np.zeros((241, 480), dtype=float),
+        "lon2d": np.zeros((241, 480), dtype=float),
+        "hazard_inputs": {
+            "canonical_shape": shape,
+            "precip": np.ones(shape, dtype=float),
+            "cloud_layers": {
+                "low": np.ones(shape, dtype=float) * 0.2,
+                "mid": np.ones(shape, dtype=float) * 0.3,
+                "high": np.ones(shape, dtype=float) * 0.4,
+            },
+            "lat2d": np.zeros(shape, dtype=float),
+            "lon2d": np.zeros(shape, dtype=float),
+        },
+    }
+
+    monkeypatch.setattr(svc, "threshold_to_mask", lambda arr, _: np.asarray(arr) > 0.1)
+    monkeypatch.setattr(svc, "derive_hail_mask", lambda *args, **kwargs: np.ones(shape, dtype=bool))
+    monkeypatch.setattr(svc, "derive_lightning_mask", lambda *args, **kwargs: np.ones(shape, dtype=bool))
+    monkeypatch.setattr(svc, "connected_components_or_simple_cell_polygons", lambda *args, **kwargs: [{"ok": True}])
+
+    with caplog.at_level("WARNING", logger="server.gfs"):
+        out = svc._derive_real_hazard_payloads({}, fields)
+
+    assert out["rain"]["count"] == 1
+    assert "realigning field=hazard_" not in caplog.text
