@@ -2985,15 +2985,52 @@
       showGlobeFallback(false);
       setStatus('Photorealistic globe connected');
       const readyReason = await waitForGlobeSteadyState(4200);
+      console.info('[gfs] bootstrap stage: globe ready', { readyReason });
       console.info('[gfs] globe steady state', readyReason);
       state.mapReady = true;
-      try { await renderMapMarkers(); } catch (err) { console.error('[gfs] renderMapMarkers failed', err); }
-      try { await loadClouds(true); } catch (err) { console.error('[gfs] weather bootstrap failed', err); }
     } catch (err) {
       console.error('[gfs] unable to load Google 3D globe', err);
       state.mapReady = false;
       showGlobeFallback(true);
       setStatus('Unable to load Maps API script', true);
+    }
+  }
+
+  async function runBootStages() {
+    if (!state.mapReady) return;
+    const yieldFrame = () => new Promise((r) => setTimeout(r, 0));
+
+    console.info('[gfs] bootstrap stage: fish start');
+    try {
+      await loadFish();
+      await yieldFrame();
+      console.info('[gfs] bootstrap stage: fish ready', { fish: state.fish.length, markers: state.renderStats.fishMarkersRendered, clusters: state.renderStats.fishClustersRendered });
+    } catch (err) {
+      console.error('[gfs] bootstrap fish failed', err);
+      setStatus(`Fish load failed: ${err.message}`, true);
+    }
+
+    console.info('[gfs] bootstrap stage: balloons start');
+    try {
+      await renderJetBalloons();
+      await yieldFrame();
+      console.info('[gfs] bootstrap stage: balloons ready', { jet: state.jetMarkers.length });
+    } catch (err) {
+      console.error('[gfs] bootstrap balloons failed', err);
+      setStatus(`Balloon load failed: ${err.message}`, true);
+    }
+
+    console.info('[gfs] bootstrap stage: weather start');
+    try {
+      await loadClouds(true);
+      console.info('[gfs] bootstrap stage: weather ready', {
+        clouds: state.cloudTiles.length,
+        precip: (state.weatherPayload?.precip_columns || []).length,
+        lightning: (state.weatherPayload?.lightning_events || []).length,
+      });
+    } catch (err) {
+      console.error('[gfs] weather bootstrap failed, fish/balloons preserved', err);
+      setStatus(`Weather load failed: ${err.message}`, true);
     }
   }
 
@@ -3057,8 +3094,7 @@
     try { await loadRuntimeConfig(); } catch (e) { setStatus(`Config load failed: ${e.message}`, true); }
     try { await loadGoogleMapScript(); } catch (e) { setStatus(`Globe bootstrap failed: ${e.message}`, true); }
     try { await loadHealth(); } catch (e) { setStatus(e.message, true); }
-    try { await loadFish(); } catch (e) { setStatus(`Fish load failed: ${e.message}`, true); }
-    try { await loadClouds(); } catch (e) { setStatus(`Weather load failed: ${e.message}`, true); }
+    await runBootStages();
 
     setInterval(() => {
       if ((state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet || state.feature.markers || state.feature.sst || state.feature.swell || state.feature.bait) && state.mapReady) {

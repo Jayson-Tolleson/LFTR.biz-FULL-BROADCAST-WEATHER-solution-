@@ -10,6 +10,7 @@
   const mode = document.getElementById('mode');
   const ai = document.getElementById('ai');
   const label = document.getElementById('label');
+  const videoWrap = v?.closest('.videoWrap') || v?.parentElement;
 
   let ws = null;
   let pc = null;
@@ -17,6 +18,42 @@
   let requestPending = false;
   let broadcasterPresent = false;
   let needsStreamRequest = false;
+  let streamAttached = false;
+
+  const unmuteBtn = document.createElement('button');
+  unmuteBtn.type = 'button';
+  unmuteBtn.textContent = 'Tap for sound';
+  unmuteBtn.style.cssText = 'position:absolute;right:12px;bottom:12px;z-index:4;padding:8px 10px;border-radius:999px;border:1px solid #2f3b57;background:rgba(9,13,25,.82);color:#e8eefc;cursor:pointer;display:none';
+  if (videoWrap) {
+    const pos = getComputedStyle(videoWrap).position;
+    if (!pos || pos === 'static') videoWrap.style.position = 'relative';
+    videoWrap.appendChild(unmuteBtn);
+  }
+
+  function showUnmute(show) {
+    unmuteBtn.style.display = show ? 'inline-flex' : 'none';
+  }
+
+  async function playVideo(reason) {
+    try {
+      await v.play();
+    } catch (err) {
+      console.warn('[watch] video play blocked', { reason, message: err?.message || String(err) });
+    }
+  }
+
+  function setLiveMutedAutoplay() {
+    v.playsInline = true;
+    v.autoplay = true;
+    v.muted = true;
+    showUnmute(true);
+  }
+
+  unmuteBtn.addEventListener('click', async () => {
+    v.muted = false;
+    await playVideo('manual_unmute');
+    showUnmute(false);
+  });
 
   async function iceServers() {
     try {
@@ -34,7 +71,7 @@
   }
 
   function requestStream() {
-    if (!broadcasterPresent || requestPending) {
+    if (!broadcasterPresent || requestPending || (pc && pc.connectionState === 'connected')) {
       needsStreamRequest = !broadcasterPresent;
       return;
     }
@@ -45,10 +82,9 @@
   function attachRemoteTrack(event) {
     const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
     v.srcObject = stream;
-    v.playsInline = true;
-    v.autoplay = true;
-    v.muted = false;
-    v.play().catch(() => {});
+    streamAttached = true;
+    setLiveMutedAutoplay();
+    playVideo('remote_track_attach');
     standby.style.display = 'none';
     mode.textContent = 'LIVE';
   }
@@ -85,6 +121,10 @@
       updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
       const present = !!st.runtime?.broadcaster_present;
       broadcasterPresent = present;
+      if (present) {
+        needsStreamRequest = false;
+        requestStream();
+      }
       return;
     }
     if (msg.type === 'state_update') {
@@ -92,6 +132,10 @@
       updateAiStatus(st.settings?.ai_status || 'idle');
       const present = !!st.runtime?.broadcaster_present;
       broadcasterPresent = present;
+      if (present && !requestPending) {
+        needsStreamRequest = false;
+        requestStream();
+      }
       return;
     }
     if (msg.type === 'presence') {
@@ -123,9 +167,11 @@
       const p = msg.payload || {};
       label.textContent = p.label || 'PUBLIC ACCESS';
       if (p.mode === 'upload' && p.latestUploadUrl) {
+        streamAttached = false;
+        showUnmute(false);
         v.srcObject = null;
         v.src = p.latestUploadUrl;
-        v.play().catch(() => {});
+        playVideo('fallback_upload');
         standby.style.display = 'none';
         mode.textContent = 'LATEST UPLOAD';
       }
@@ -148,6 +194,9 @@
       return;
     }
     if (msg.type === 'webrtc_state' && msg.payload?.state !== 'connected' && mode.textContent === 'LIVE') {
+      if (msg.payload?.state === 'closed' || msg.payload?.state === 'failed' || msg.payload?.state === 'disconnected') {
+        streamAttached = false;
+      }
       mode.textContent = 'STANDBY';
       standby.style.display = 'block';
       return;
@@ -163,7 +212,10 @@
     ws.onopen = () => {
       retryDelayMs = 1000;
       conn.textContent = 'connected';
+      requestPending = false;
+      needsStreamRequest = true;
       sendJson('join');
+      if (broadcasterPresent) requestStream();
     };
     ws.onmessage = (ev) => {
       let msg;
