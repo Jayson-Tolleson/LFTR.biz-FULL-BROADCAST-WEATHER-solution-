@@ -31,7 +31,7 @@ def test_weather_and_clouds_route_json_shape():
     asyncio.run(_run())
 
 
-def test_health_route():
+def test_health_route_and_locations():
     async def _run():
         app = create_app()
         client = app.test_client()
@@ -41,14 +41,49 @@ def test_health_route():
         assert "providers" in payload
         assert "cache" in payload
 
+        loc_res = await client.get("/gfs/api/locations")
+        assert loc_res.status_code == 200
+        loc_payload = await loc_res.get_json()
+        assert isinstance(loc_payload.get("locations"), list)
+        assert loc_payload["locations"]
+
+    asyncio.run(_run())
+
+
+def test_location_reports_and_videos_flow(tmp_path, monkeypatch):
+    async def _run():
+        app = create_app()
+        client = app.test_client()
+        locs = await (await client.get("/gfs/api/locations")).get_json()
+        loc_id = locs["locations"][0]["id"]
+
+        save_report = await client.post(f"/gfs/api/location/{loc_id}/reports", json={"report": "fresh bite window"})
+        assert save_report.status_code == 200
+
+        reports = await client.get(f"/gfs/api/location/{loc_id}/reports")
+        r_payload = await reports.get_json()
+        assert any("fresh bite" in item for item in r_payload["reports"])
+
+        upload_res = await client.post(f"/gfs/api/location/{loc_id}/upload")
+        assert upload_res.status_code == 400
+
+        saved = app.extensions["gfs_media_store"].save_upload(location_id=loc_id, filename="clip.webm", raw=b"fake-video")
+        assert saved["url"].startswith("/static/fishvid/")
+
+        videos = await client.get(f"/gfs/api/location/{loc_id}/videos")
+        v_payload = await videos.get_json()
+        assert isinstance(v_payload["videos"], list)
+
     asyncio.run(_run())
 
 
 def test_provider_failure_returns_503(monkeypatch):
     async def _run():
         app = create_app()
+
         async def _fail(**kwargs):
             raise ProviderUnavailableError("upstream down", provider="thredds_gfs")
+
         app.extensions["gfs_engine"].atmospheric.fetch_subset = _fail
 
         client = app.test_client()
