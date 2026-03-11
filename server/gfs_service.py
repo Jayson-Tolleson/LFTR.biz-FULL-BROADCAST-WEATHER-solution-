@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import math
+import os
 import random
 import re
 import time
@@ -81,7 +82,7 @@ SCENE_DOWNSAMPLE_STRIDE = 3
 SCALAR_DOWNSAMPLE_STRIDE = 6
 PREFER_LIVE_REAL_DATA = os.getenv("PREFER_LIVE_REAL_DATA", "true").strip().lower() in {"1", "true", "yes", "on"}
 ALLOW_STALE_CACHE_BLEND = os.getenv("ALLOW_STALE_CACHE_BLEND", "false").strip().lower() in {"1", "true", "yes", "on"}
-ALLOW_SYNTHETIC_FALLBACK = os.getenv("ALLOW_SYNTHETIC_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
+ALLOW_SYNTHETIC_FALLBACK = os.getenv("ALLOW_SYNTHETIC_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
 SYNTHETIC_FALLBACK_OFFSET_DEGREES = float(os.getenv("SYNTHETIC_FALLBACK_OFFSET_DEGREES", "17.5"))
 REQUIRE_MATCHING_GRID_FOR_CACHE = os.getenv("REQUIRE_MATCHING_GRID_FOR_CACHE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -709,6 +710,10 @@ class GFSService:
         out["heuristic"] = bool(heuristic)
         out["quality_note"] = quality_note
         out["confidence"] = confidence
+        out.setdefault("data_source", "live_gfs_0p25" if payload_state in {"live", "cached"} else "synthetic_fallback")
+        out.setdefault("used_fallback", payload_state not in {"live", "cached"})
+        out.setdefault("fallback_reason", None)
+        out.setdefault("canonical_shape", out.get("grid_shape"))
         return out
 
     def _fish_csv_path(self) -> Path:
@@ -2246,6 +2251,13 @@ class GFSService:
         log.warning("[gfs] dropping field=%s due to shape mismatch arr_shape=%s canonical=%s", field_name, tuple(a.shape), tuple(target_shape))
         return None
 
+    def ensure_same_grid(self, field: Any, target_shape: tuple[int, int], field_name: str) -> Any:
+        out = self._coerce_to_shape(field, target_shape, field_name)
+        if out is None:
+            got = self._shape_of(field)
+            raise ValueError(f"live_grid_mismatch field={field_name} got={got} expected={target_shape}")
+        return out
+
     def _derive_real_source_fields(self, groups: dict[str, Any]) -> dict[str, Any]:
         precip = self.extract_precip_rate_mm_hr(groups)
         hagl = groups.get("10m")
@@ -2282,9 +2294,13 @@ class GFSService:
         humidity = self._extract_scalar_field(groups, [("isobaricInhPa", ["r", "RH"]), ("surface", ["r", "RH"])])
         wind_u = self._extract_scalar_field(groups, [("10m", ["u", "UGRD"]), ("isobaricInhPa", ["u", "UGRD"]), ("surface", ["u", "UGRD"])])
         wind_v = self._extract_scalar_field(groups, [("10m", ["v", "VGRD"]), ("isobaricInhPa", ["v", "VGRD"]), ("surface", ["v", "VGRD"])])
+        wind_u = self.ensure_same_grid(wind_u, canonical_shape, "wind_u") if wind_u is not None else None
+        wind_v = self.ensure_same_grid(wind_v, canonical_shape, "wind_v") if wind_v is not None else None
         wind_speed = np.sqrt(np.square(wind_u) + np.square(wind_v)) if wind_u is not None and wind_v is not None else (np.sqrt(np.square(vectors[0]["u"]) + np.square(vectors[0]["v"])) if vectors else np.zeros_like(precip))
         temp_k = self._extract_scalar_field(groups, [("surface", ["t", "TMP", "tmp"]), ("2m", ["t", "TMP", "tmp"])])
         pressure_pa = self._extract_scalar_field(groups, [("meanSea", ["prmsl", "PRMSL"]), ("surface", ["prmsl", "PRMSL"])])
+        temp_k = self.ensure_same_grid(temp_k, canonical_shape, "temperature_k") if temp_k is not None else None
+        pressure_pa = self.ensure_same_grid(pressure_pa, canonical_shape, "pressure_pa") if pressure_pa is not None else None
 
         lat2d = self._downsample_2d(lat2d, SCENE_DOWNSAMPLE_STRIDE)
         lon2d = self._downsample_2d(lon2d, SCENE_DOWNSAMPLE_STRIDE)
@@ -2713,9 +2729,12 @@ class GFSService:
                 )
                 return cached_payload
             if not ALLOW_SYNTHETIC_FALLBACK:
-                raise
-            log.warning("[gfs] activating synthetic fallback payload")
+                raise RuntimeError(f"live_only_mode_failed reason={exc}")
+            log.warning("[gfs] activating synthetic fallback payload reason=%s", exc)
             fb = self.generate_fallback_payload(bbox)
+            fb["fallback_reason"] = str(exc)
+            fb["used_fallback"] = True
+            fb["data_source"] = "synthetic_fallback"
             return fb
 
     def generate_weather_payload(self, bbox: dict[str, float] | None = None) -> dict[str, Any]:

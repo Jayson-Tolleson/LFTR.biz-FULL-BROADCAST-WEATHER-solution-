@@ -40,6 +40,9 @@
     fileInput: document.getElementById('file'),
   };
 
+  let chatRetryMs = 1200;
+  let signalRetryMs = 1200;
+
   const state = {
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
     clientId: `b-${Math.random().toString(36).slice(2, 10)}`,
@@ -275,6 +278,7 @@
     const ws = new WebSocket(`${wsBase}/ws/chat`);
     state.chatWs = ws;
     ws.onopen = () => {
+      chatRetryMs = 1200;
       updateConnectivity(true);
       sendJson(ws, 'join', { role: 'participant' });
       startSpeechCaptureFromMic().catch(() => {});
@@ -297,7 +301,8 @@
     ws.onclose = () => {
       updateConnectivity(false);
       stopSpeechCapture();
-      setTimeout(connectChat, 1500);
+      setTimeout(connectChat, chatRetryMs);
+      chatRetryMs = Math.min(15000, Math.round(chatRetryMs * 1.7));
     };
   }
 
@@ -305,6 +310,7 @@
     const ws = new WebSocket(`${wsBase}/ws/broadcast`);
     state.signalWs = ws;
     ws.onopen = async () => {
+      signalRetryMs = 1200;
       sendJson(ws, 'join', { role: 'broadcaster' });
       await syncTracks();
       await negotiate('initial');
@@ -317,7 +323,10 @@
       if (msg.type === 'presence') applyPresence(msg);
       if (msg.type === 'state_sync' || msg.type === 'state_update') applyRoomState(msg.state || {});
     };
-    ws.onclose = () => setTimeout(connectSignal, 1500);
+    ws.onclose = () => {
+      setTimeout(connectSignal, signalRetryMs);
+      signalRetryMs = Math.min(15000, Math.round(signalRetryMs * 1.7));
+    };
   }
 
   function announceState() {

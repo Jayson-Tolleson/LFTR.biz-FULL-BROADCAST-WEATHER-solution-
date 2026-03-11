@@ -8,6 +8,7 @@ from quart import Quart, jsonify, request, send_file, websocket
 
 from server import ai
 from server.ai.gemini import provider_name
+from server.ai import ai_status as get_ai_status
 from server.api import api_bp
 from server.config import Settings
 from server.gfs_service import GFSService
@@ -151,8 +152,16 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     @app.get("/ai_status")
     async def ai_status():
         ai_provider = provider_name()
+        auth = get_ai_status()
         ai_available = bool(settings.ai_enabled and ai_provider != "stub")
-        return jsonify({"ai_available": ai_available, "ai_enabled": settings.ai_enabled, "provider": ai_provider, "tts_available": ai_provider})
+        return jsonify({
+            "ai_available": ai_available,
+            "ai_enabled": settings.ai_enabled,
+            "provider": ai_provider,
+            "tts_available": ai_available,
+            "stt_available": bool(auth.get("stt_ready")),
+            "google_auth": auth,
+        })
 
     @app.post("/ai/chat")
     async def ai_chat():

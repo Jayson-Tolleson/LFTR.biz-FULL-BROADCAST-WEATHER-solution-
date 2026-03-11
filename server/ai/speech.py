@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from pathlib import Path
 from uuid import uuid4
+
+from .auth import maybe_apply_google_credentials_env, resolve_gcp_auth_mode
 
 
 log = logging.getLogger("server.ai.speech")
@@ -13,10 +14,8 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _credentials_ready() -> bool:
-    key_path = os.getenv("GCP_KEY", "").strip()
-    if key_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
-    return bool(os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() and os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip())
+    maybe_apply_google_credentials_env()
+    return resolve_gcp_auth_mode() in {"adc_ok", "explicit_key_ok"}
 
 
 def synthesize_voice(text: str) -> str:

@@ -9,6 +9,7 @@ from typing import Any, Dict, Sequence
 
 from .gemini import generate_ai_reply, provider_name
 from .speech import synthesize_voice, transcribe_audio_chunk
+from .auth import auth_status_payload, resolve_gcp_auth_mode
 
 log = logging.getLogger("server.ai.pkg")
 _WARNED_STT_UNAVAILABLE = False
@@ -53,6 +54,22 @@ async def handle_websearch(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "provider": "serpapi", "error": "provider_request_failed", "message": str(exc), "data": {"query": query, "results": []}}
 
 
+
+
+def stt_available() -> bool:
+    try:
+        from google.cloud import speech  # noqa: F401
+        return resolve_gcp_auth_mode() in {"adc_ok", "explicit_key_ok"}
+    except Exception:
+        return False
+
+
+def ai_status() -> dict[str, Any]:
+    status = auth_status_payload()
+    return {
+        **status,
+        "stt_ready": stt_available(),
+    }
 async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None) -> str:
     global _WARNED_STT_UNAVAILABLE
     if not chunks:
@@ -84,4 +101,6 @@ __all__ = [
     "handle_chat",
     "handle_websearch",
     "transcribe_track",
+    "stt_available",
+    "ai_status",
 ]
