@@ -5,7 +5,6 @@ from pathlib import Path
 
 from quart import Quart
 
-from server.ai.gemini import provider_name
 from server.config import load_settings
 from server.routes import register_routes
 from server.rtc import RTCManager
@@ -14,42 +13,49 @@ from server.state import AppState
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
+TEMPLATES_DIR = STATIC_DIR
 
 
 def _configure_logging(debug: bool) -> None:
     level = logging.DEBUG if debug else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-    )
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+
+
+def _validate_layout() -> None:
+    if not STATIC_DIR.exists():
+        raise RuntimeError(f"static directory missing at startup: {STATIC_DIR}")
+    if not STATIC_DIR.is_dir():
+        raise RuntimeError(f"static path is not a directory at startup: {STATIC_DIR}")
+    if not TEMPLATES_DIR.exists() or not TEMPLATES_DIR.is_dir():
+        raise RuntimeError(f"templates directory missing at startup: {TEMPLATES_DIR}")
 
 
 def create_quart_app() -> Quart:
     settings = load_settings()
     _configure_logging(settings.debug)
-    provider_name()
+    _validate_layout()
 
-    app = Quart(
-        __name__,
-        static_folder=str(STATIC_DIR),
-        static_url_path="/static",
-    )
+    app = Quart(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     state = AppState(default_room=settings.default_room)
     rtc = RTCManager(state)
 
     register_routes(app, state, settings, rtc)
 
-    app.state_obj = state
     app.settings_obj = settings
+    app.state_obj = state
     app.rtc_manager = rtc
 
+    logging.getLogger("server.startup").info(
+        "startup ready framework=quart static=%s templates=%s routes=/,/broadcast,/watch,/gfs ws=/ws/watch,/ws/broadcast,/ws/chat",
+        STATIC_DIR,
+        TEMPLATES_DIR,
+    )
     return app
 
 
-def create_asgi_app():
+def create_asgi_app() -> Quart:
     return create_quart_app()
 
 
-def create_app():
-    """Factory alias for process managers expecting create_app."""
+def create_app() -> Quart:
     return create_quart_app()

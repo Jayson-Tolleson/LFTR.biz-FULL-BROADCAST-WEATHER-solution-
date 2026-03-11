@@ -108,6 +108,10 @@ echo "===== INSTALL CONFIGURATION ====="
 echo "Domain: $DOMAIN"
 echo "Project: $GOOGLE_PROJECT_ID"
 echo "Maps API: configured"
-echo "GCP key: $GCP_KEY"
+if [[ -f "$GCP_KEY" ]]; then
+  echo "GCP key: $GCP_KEY"
+else
+  echo "GCP key: (not set; ADC mode)"
+fi
 
 exec "${ROOT_DIR}/deploy/install.sh" "$@"

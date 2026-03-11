@@ -8,6 +8,7 @@ from quart import Quart, jsonify, request, send_file, websocket
 
 from server import ai
 from server.ai.gemini import provider_name
+from server.ai import ai_status as get_ai_status
 from server.api import api_bp
 from server.config import Settings
 from server.gfs_service import GFSService
@@ -151,8 +152,16 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
     @app.get("/ai_status")
     async def ai_status():
         ai_provider = provider_name()
+        auth = get_ai_status()
         ai_available = bool(settings.ai_enabled and ai_provider != "stub")
-        return jsonify({"ai_available": ai_available, "ai_enabled": settings.ai_enabled, "provider": ai_provider, "tts_available": ai_provider})
+        return jsonify({
+            "ai_available": ai_available,
+            "ai_enabled": settings.ai_enabled,
+            "provider": ai_provider,
+            "tts_available": ai_available,
+            "stt_available": bool(auth.get("stt_ready")),
+            "google_auth": auth,
+        })
 
     @app.post("/ai/chat")
     async def ai_chat():
@@ -199,10 +208,54 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
         return jsonify(payload)
 
 
+    def _bbox_from_query() -> dict[str, float]:
+        def _q(name: str, default: float) -> float:
+            try:
+                return float(request.args.get(name, default))
+            except Exception:
+                return default
+
+        return {
+            "west": _q("west", -180.0),
+            "south": _q("south", -80.0),
+            "east": _q("east", 180.0),
+            "north": _q("north", 80.0),
+        }
+
     @app.get("/api/gfs")
+    @app.get("/api/gfs/scene")
     async def api_gfs_scene_proxy():
-        payload = gfs.get_scene_payload()
+        payload = gfs.get_scene_payload(_bbox_from_query())
         return jsonify(payload)
+
+    @app.get('/api/gfs/status')
+    async def api_gfs_status():
+        return jsonify(gfs.health())
+
+    @app.get('/api/gfs/cloud-tiles')
+    async def api_gfs_cloud_tiles():
+        return jsonify(gfs.cloud_tiles_payload(_bbox_from_query()))
+
+    @app.get('/api/gfs/hazards')
+    async def api_gfs_hazards():
+        payload = gfs.get_scene_payload(_bbox_from_query())
+        scene = payload.get("scene") if isinstance(payload.get("scene"), dict) else {}
+        return jsonify({
+            "ok": bool(payload.get("ok", True)),
+            "status": payload.get("status"),
+            "hazards": scene.get("hazards") or {},
+            "grid": payload.get("grid") or payload.get("diagnostics", {}).get("grid"),
+        })
+
+    @app.get('/api/gfs/diagnostics')
+    async def api_gfs_diagnostics():
+        payload = gfs.get_scene_payload(_bbox_from_query())
+        return jsonify({
+            "ok": bool(payload.get("ok", True)),
+            "status": payload.get("status"),
+            "diagnostics": payload.get("diagnostics") or {},
+            "grid": payload.get("grid") or payload.get("diagnostics", {}).get("grid"),
+        })
 
     @app.get("/gfs/api/fish")
     @app.get("/gfs/api/points")
@@ -247,12 +300,7 @@ def register_routes(app: Quart, state: AppState, settings: Settings, rtc: RTCMan
             out["bands"] = compact_bands
             return out
 
-        bbox = {
-            "west": _q("west", -180.0),
-            "south": _q("south", -80.0),
-            "east": _q("east", 180.0),
-            "north": _q("north", 80.0),
-        }
+        bbox = _bbox_from_query()
         limit = max(0, _qi("limit", 0))
         compact = (request.args.get("compact", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
