@@ -2063,9 +2063,14 @@ class GFSService:
                 vectors.append({"lat": float(lat2d[iy, ix]), "lon": float(lon2d[iy, ix]), "u": float(u[iy, ix]), "v": float(v[iy, ix]), "speed_mps": round(speed_mps, 3), "heading_deg": round(heading_deg, 2), "source_level": f"{int(level)} hPa"})
         return vectors
 
-    def derive_hail_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any]) -> Any:
+    def derive_hail_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any], *, target_shape: tuple[int, int] | None = None, warned: set[str] | None = None) -> Any:
         if np is None or precip_mm_hr is None:
             return None
+        precip_arr = np.asarray(precip_mm_hr, dtype=float)
+        if target_shape is None:
+            target_shape = tuple(precip_arr.shape)
+        precip_arr = self._coerce_field_to_canonical_grid(precip_arr, target_shape, "precip_mm_hr", warned)
+
         surf = datasets.get("surface")
         cape = None
         if surf is not None:
@@ -2074,26 +2079,41 @@ class GFSService:
                 cape = np.asarray(self.squeeze_forecast_array(da).values, dtype=float)
         deep = cloud_layers.get("high") if isinstance(cloud_layers, dict) else None
         if cape is None:
-            cape = np.zeros_like(precip_mm_hr)
+            cape = np.zeros(target_shape, dtype=float)
+        else:
+            cape = self._coerce_field_to_canonical_grid(cape, target_shape, "cape", warned)
         if deep is None:
-            deep = np.zeros_like(precip_mm_hr)
-        return (cape > 900.0) & (precip_mm_hr > 3.0) & (deep > 0.55)
+            deep = np.zeros(target_shape, dtype=float)
+        else:
+            deep = self._coerce_field_to_canonical_grid(deep, target_shape, "deep_cloud_mask", warned)
 
-    def derive_lightning_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any]) -> Any:
+        if tuple(cape.shape) != tuple(precip_arr.shape) or tuple(deep.shape) != tuple(precip_arr.shape):
+            raise ValueError(
+                f"hail_mask_shape_mismatch cape={tuple(cape.shape)} precip={tuple(precip_arr.shape)} deep={tuple(deep.shape)}"
+            )
+        return (cape > 900.0) & (precip_arr > 3.0) & (deep > 0.55)
+
+    def derive_lightning_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any], *, target_shape: tuple[int, int] | None = None, warned: set[str] | None = None) -> Any:
         if np is None or precip_mm_hr is None:
             return None
+        precip_arr = np.asarray(precip_mm_hr, dtype=float)
+        if target_shape is None:
+            target_shape = tuple(precip_arr.shape)
+        precip_arr = self._coerce_field_to_canonical_grid(precip_arr, target_shape, "precip_mm_hr_lightning", warned)
+
         surf = datasets.get("surface")
-        cape = np.zeros_like(precip_mm_hr)
-        cin = np.zeros_like(precip_mm_hr)
+        cape = np.zeros(target_shape, dtype=float)
+        cin = np.zeros(target_shape, dtype=float)
         if surf is not None:
             d_cape = self.safe_data_var(surf, ["cape", "CAPE"])
             d_cin = self.safe_data_var(surf, ["cin", "CIN"])
             if d_cape is not None:
-                cape = np.asarray(self.squeeze_forecast_array(d_cape).values, dtype=float)
+                cape = self._coerce_field_to_canonical_grid(np.asarray(self.squeeze_forecast_array(d_cape).values, dtype=float), target_shape, "cape_lightning", warned)
             if d_cin is not None:
-                cin = np.asarray(self.squeeze_forecast_array(d_cin).values, dtype=float)
-        high = cloud_layers.get("high") if isinstance(cloud_layers, dict) else np.zeros_like(precip_mm_hr)
-        return (cape > 650.0) & (cin > -160.0) & (precip_mm_hr > 1.4) & (high > 0.5)
+                cin = self._coerce_field_to_canonical_grid(np.asarray(self.squeeze_forecast_array(d_cin).values, dtype=float), target_shape, "cin_lightning", warned)
+        high = cloud_layers.get("high") if isinstance(cloud_layers, dict) else np.zeros(target_shape, dtype=float)
+        high = self._coerce_field_to_canonical_grid(high, target_shape, "high_cloud_lightning", warned)
+        return (cape > 650.0) & (cin > -160.0) & (precip_arr > 1.4) & (high > 0.5)
 
     def threshold_to_mask(self, array: Any, threshold: float) -> Any:
         if np is None or array is None:
@@ -2256,6 +2276,35 @@ class GFSService:
         if out is None:
             got = self._shape_of(field)
             raise ValueError(f"live_grid_mismatch field={field_name} got={got} expected={target_shape}")
+        return out
+
+    def _resample_2d_to_shape(self, arr2d: Any, target_shape: tuple[int, int]) -> Any:
+        src = np.asarray(arr2d, dtype=float)
+        if src.ndim != 2:
+            raise ValueError(f"expected_2d_field got_ndim={src.ndim}")
+        th, tw = int(target_shape[0]), int(target_shape[1])
+        if th <= 0 or tw <= 0:
+            raise ValueError(f"invalid_target_shape={target_shape}")
+        if tuple(src.shape) == (th, tw):
+            return src
+        y_idx = np.rint(np.linspace(0, src.shape[0] - 1, th)).astype(int)
+        x_idx = np.rint(np.linspace(0, src.shape[1] - 1, tw)).astype(int)
+        return src[np.ix_(y_idx, x_idx)]
+
+    def _coerce_field_to_canonical_grid(self, field: Any, target_shape: tuple[int, int], field_name: str, warned: set[str] | None = None) -> Any:
+        if np is None or field is None:
+            return field
+        arr = np.asarray(field, dtype=float)
+        if arr.ndim != 2:
+            raise ValueError(f"{field_name}_expected_2d got_shape={tuple(arr.shape)}")
+        if tuple(arr.shape) == tuple(target_shape):
+            return arr
+        out = self._resample_2d_to_shape(arr, target_shape)
+        warn_key = f"{field_name}:{tuple(arr.shape)}->{tuple(target_shape)}"
+        if warned is None or warn_key not in warned:
+            log.warning("[gfs] realigning field=%s from_shape=%s to canonical_shape=%s", field_name, tuple(arr.shape), tuple(target_shape))
+            if warned is not None:
+                warned.add(warn_key)
         return out
 
     def _derive_real_source_fields(self, groups: dict[str, Any]) -> dict[str, Any]:
@@ -2552,22 +2601,36 @@ class GFSService:
         return tiles
 
     def _derive_real_hazard_payloads(self, groups: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
-        precip = fields["precip"]
-        cloud_layers = fields["cloud_layers"]
-        lat2d = fields["lat2d"]
-        lon2d = fields["lon2d"]
+        warned: set[str] = set()
+        precip = np.asarray(fields["precip"], dtype=float)
+        canonical_shape = tuple(precip.shape)
+        log.info("[gfs] hazard canonical target shape=%s", canonical_shape)
+
+        cloud_layers = fields["cloud_layers"] if isinstance(fields.get("cloud_layers"), dict) else {}
+        lat2d = self._coerce_field_to_canonical_grid(fields["lat2d"], canonical_shape, "hazard_lat2d", warned)
+        lon2d = self._coerce_field_to_canonical_grid(fields["lon2d"], canonical_shape, "hazard_lon2d", warned)
+        precip = self._coerce_field_to_canonical_grid(precip, canonical_shape, "hazard_precip_mm_hr", warned)
+        cloud_layers = {
+            "low": self._coerce_field_to_canonical_grid(cloud_layers.get("low", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_low", warned),
+            "mid": self._coerce_field_to_canonical_grid(cloud_layers.get("mid", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_mid", warned),
+            "high": self._coerce_field_to_canonical_grid(cloud_layers.get("high", np.zeros(canonical_shape, dtype=float)), canonical_shape, "hazard_cloud_high", warned),
+        }
+
         self._assert_same_shape(
             "hazard_fields",
             precip,
-            cloud_layers.get("low") if isinstance(cloud_layers, dict) else None,
-            cloud_layers.get("mid") if isinstance(cloud_layers, dict) else None,
-            cloud_layers.get("high") if isinstance(cloud_layers, dict) else None,
+            cloud_layers.get("low"),
+            cloud_layers.get("mid"),
+            cloud_layers.get("high"),
             lat2d,
             lon2d,
         )
         rain_mask = self.threshold_to_mask(precip, 0.5)
-        hail_mask = self.derive_hail_mask(groups, precip, cloud_layers)
-        lightning_mask = self.derive_lightning_mask(groups, precip, cloud_layers)
+        hail_mask = self.derive_hail_mask(groups, precip, cloud_layers, target_shape=canonical_shape, warned=warned)
+        lightning_mask = self.derive_lightning_mask(groups, precip, cloud_layers, target_shape=canonical_shape, warned=warned)
+        hail_mask = self._coerce_field_to_canonical_grid(hail_mask, canonical_shape, "hail_mask", warned)
+        lightning_mask = self._coerce_field_to_canonical_grid(lightning_mask, canonical_shape, "lightning_mask", warned)
+        rain_mask = self._coerce_field_to_canonical_grid(rain_mask, canonical_shape, "rain_mask", warned)
         rain_polys = self.connected_components_or_simple_cell_polygons(rain_mask, lat2d, lon2d)
         hail_polys = self.connected_components_or_simple_cell_polygons(hail_mask, lat2d, lon2d)
         lightning_polys = self.connected_components_or_simple_cell_polygons(lightning_mask, lat2d, lon2d)

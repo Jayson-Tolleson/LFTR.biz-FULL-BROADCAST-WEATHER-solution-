@@ -48,8 +48,8 @@ def test_derive_real_hazard_payloads_shape_consistent(monkeypatch, tmp_path):
     lon2d = np.zeros(shape, dtype=float)
 
     monkeypatch.setattr(svc, "threshold_to_mask", lambda arr, _: np.asarray(arr) > 0.1)
-    monkeypatch.setattr(svc, "derive_hail_mask", lambda groups, p, c: np.asarray(p) > 0.2)
-    monkeypatch.setattr(svc, "derive_lightning_mask", lambda groups, p, c: np.asarray(p) > 0.3)
+    monkeypatch.setattr(svc, "derive_hail_mask", lambda groups, p, c, **kwargs: np.asarray(p) > 0.2)
+    monkeypatch.setattr(svc, "derive_lightning_mask", lambda groups, p, c, **kwargs: np.asarray(p) > 0.3)
     monkeypatch.setattr(svc, "connected_components_or_simple_cell_polygons", lambda *args, **kwargs: [{"ok": True}])
 
     out = svc._derive_real_hazard_payloads(
@@ -114,3 +114,45 @@ def test_indexgfs_single_altitude_mode_policy_present():
     assert "rain: AltitudeMode.RELATIVE_TO_GROUND" in html
     assert "surface: AltitudeMode.CLAMP_TO_GROUND" in html
     assert "modeFallback" not in html
+
+
+def test_coerce_field_to_canonical_grid_resamples_to_target(tmp_path):
+    svc = GFSService(str(tmp_path))
+    coarse = np.arange(241 * 480, dtype=float).reshape(241, 480)
+    out = svc._coerce_field_to_canonical_grid(coarse, (721, 1440), "cape")
+    assert out.shape == (721, 1440)
+    assert np.isfinite(out).all()
+
+
+def test_derive_hail_mask_coerces_mixed_grid_inputs(monkeypatch, tmp_path):
+    svc = GFSService(str(tmp_path))
+    precip = np.full((721, 1440), 6.0, dtype=float)
+    cloud_layers = {"high": np.full((241, 480), 0.9, dtype=float)}
+
+    monkeypatch.setattr(svc, "safe_data_var", lambda ds, names: object())
+
+    class _Arr:
+        values = np.full((241, 480), 1200.0, dtype=float)
+
+    monkeypatch.setattr(svc, "squeeze_forecast_array", lambda da, preserve_dims=(): _Arr())
+
+    mask = svc.derive_hail_mask({"surface": object()}, precip, cloud_layers, target_shape=(721, 1440))
+    assert mask.shape == (721, 1440)
+    assert mask.dtype == np.bool_
+
+
+def test_derive_hail_mask_named_shape_mismatch_when_coercion_bypassed(monkeypatch, tmp_path):
+    svc = GFSService(str(tmp_path))
+    precip = np.full((721, 1440), 6.0, dtype=float)
+    cloud_layers = {"high": np.full((241, 480), 0.9, dtype=float)}
+
+    monkeypatch.setattr(svc, "safe_data_var", lambda ds, names: object())
+
+    class _Arr:
+        values = np.full((241, 480), 1200.0, dtype=float)
+
+    monkeypatch.setattr(svc, "squeeze_forecast_array", lambda da, preserve_dims=(): _Arr())
+    monkeypatch.setattr(svc, "_coerce_field_to_canonical_grid", lambda field, target_shape, field_name, warned=None: np.asarray(field))
+
+    with pytest.raises(ValueError, match=r"hail_mask_shape_mismatch cape=\(241, 480\) precip=\(721, 1440\) deep=\(241, 480\)"):
+        svc.derive_hail_mask({"surface": object()}, precip, cloud_layers, target_shape=(721, 1440))
