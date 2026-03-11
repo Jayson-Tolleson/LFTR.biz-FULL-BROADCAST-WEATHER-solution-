@@ -6,6 +6,9 @@ from pathlib import Path
 from quart import Quart
 
 from server.config import load_settings
+from server.gfs.config import load_gfs_config
+from server.gfs.engine import GfsEngine
+from server.gfs.media import LocationMediaStore
 from server.routes import register_routes
 from server.rtc import RTCManager
 from server.state import AppState
@@ -38,6 +41,8 @@ def create_quart_app() -> Quart:
     app = Quart(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     state = AppState(default_room=settings.default_room)
     rtc = RTCManager(state)
+    app.extensions["gfs_engine"] = GfsEngine(load_gfs_config(debug_enabled=settings.debug))
+    app.extensions["gfs_media_store"] = LocationMediaStore(data_dir=STATIC_DIR / "data", media_dir=STATIC_DIR / "fishvid")
 
     register_routes(app, state, settings, rtc)
 
@@ -46,7 +51,7 @@ def create_quart_app() -> Quart:
     app.rtc_manager = rtc
 
     logging.getLogger("server.startup").info(
-        "startup ready framework=quart static=%s templates=%s routes=/,/broadcast,/watch,/gfs ws=/ws/watch,/ws/broadcast,/ws/chat",
+        "startup ready framework=quart static=%s templates=%s routes=/,/broadcast,/watch,/gfs ws=/ws/watch,/ws/broadcast,/ws/chat,/ws/gfs",
         STATIC_DIR,
         TEMPLATES_DIR,
     )
