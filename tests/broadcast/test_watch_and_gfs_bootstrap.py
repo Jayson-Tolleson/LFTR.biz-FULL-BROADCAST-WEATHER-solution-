@@ -20,3 +20,16 @@ def test_gfs_bootstrap_stage_order_fish_then_balloons_then_weather():
     assert 'await renderJetBalloons();' in html
     assert 'await loadClouds(true);' in html
     assert '[gfs] weather bootstrap failed, fish/balloons preserved' in html
+
+
+def test_gfs_marker_render_defers_without_maps_libraries():
+    html = Path('static/indexgfs.html').read_text(encoding='utf-8')
+    assert "fish markers deferred until maps3d/marker libraries are ready" in html
+    assert 'state.markerRetryTimer = setTimeout' in html
+
+
+def test_gfs_scene_200_partial_payload_path_is_nonfatal_and_diagnostic():
+    html = Path('static/indexgfs.html').read_text(encoding='utf-8')
+    assert 'scene payload parsed but contains no weather arrays; keeping fish/balloons active' in html
+    assert 'schema failure url=' in html
+    assert 'content-type=' in html

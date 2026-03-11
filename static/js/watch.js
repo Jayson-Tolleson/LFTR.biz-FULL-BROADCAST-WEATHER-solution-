@@ -19,6 +19,8 @@
   let broadcasterPresent = false;
   let needsStreamRequest = false;
   let streamAttached = false;
+  let isNegotiating = false;
+  let hasRequestedStream = false;
 
   const unmuteBtn = document.createElement('button');
   unmuteBtn.type = 'button';
@@ -70,12 +72,15 @@
     ws.send(JSON.stringify({ type, room, clientId, role: 'viewer', ...extra }));
   }
 
-  function requestStream() {
-    if (!broadcasterPresent || requestPending || (pc && pc.connectionState === 'connected')) {
+  function requestStream(force = false) {
+    const connected = !!(pc && pc.connectionState === 'connected' && streamAttached);
+    if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected)) {
       needsStreamRequest = !broadcasterPresent;
       return;
     }
     requestPending = true;
+    hasRequestedStream = true;
+    needsStreamRequest = false;
     sendJson('request_stream');
   }
 
@@ -123,7 +128,7 @@
       broadcasterPresent = present;
       if (present) {
         needsStreamRequest = false;
-        requestStream();
+        requestStream(true);
       }
       return;
     }
@@ -134,7 +139,7 @@
       broadcasterPresent = present;
       if (present && !requestPending) {
         needsStreamRequest = false;
-        requestStream();
+        requestStream(true);
       }
       return;
     }
@@ -146,6 +151,7 @@
         needsStreamRequest = false;
       } else if (!broadcasterPresent) {
         requestPending = false;
+        hasRequestedStream = false;
         needsStreamRequest = true;
       }
       return;
@@ -178,12 +184,18 @@
       return;
     }
     if ((msg.type === 'watch_offer' || msg.type === 'webrtc_offer') && msg.payload?.sdp) {
-      const c = await ensureViewerPeerConnection(true);
-      await c.setRemoteDescription(msg.payload);
-      const answer = await c.createAnswer();
-      await c.setLocalDescription(answer);
-      sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
-      requestPending = false;
+      isNegotiating = true;
+      try {
+        const c = await ensureViewerPeerConnection(true);
+        await c.setRemoteDescription(msg.payload);
+        const answer = await c.createAnswer();
+        await c.setLocalDescription(answer);
+        sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+      } finally {
+        requestPending = false;
+        hasRequestedStream = false;
+        isNegotiating = false;
+      }
       return;
     }
     if (msg.type === 'webrtc_ice' && pc) {
@@ -193,12 +205,23 @@
       }
       return;
     }
-    if (msg.type === 'webrtc_state' && msg.payload?.state !== 'connected' && mode.textContent === 'LIVE') {
-      if (msg.payload?.state === 'closed' || msg.payload?.state === 'failed' || msg.payload?.state === 'disconnected') {
-        streamAttached = false;
+    if (msg.type === 'webrtc_state') {
+      const st = msg.payload?.state;
+      if (st === 'connected') {
+        isNegotiating = false;
+        requestPending = false;
+        hasRequestedStream = false;
+        return;
       }
-      mode.textContent = 'STANDBY';
-      standby.style.display = 'block';
+      if ((st === 'closed' || st === 'failed' || st === 'disconnected') && mode.textContent === 'LIVE') {
+        streamAttached = false;
+        isNegotiating = false;
+        requestPending = false;
+        hasRequestedStream = false;
+        mode.textContent = 'STANDBY';
+        standby.style.display = 'block';
+        if (broadcasterPresent) requestStream(true);
+      }
       return;
     }
     if (msg.type === 'pong') return;
@@ -213,6 +236,8 @@
       retryDelayMs = 1000;
       conn.textContent = 'connected';
       requestPending = false;
+      isNegotiating = false;
+      hasRequestedStream = false;
       needsStreamRequest = true;
       sendJson('join');
       if (broadcasterPresent) requestStream();
@@ -226,6 +251,9 @@
     ws.onclose = (ev) => {
       conn.textContent = 'reconnecting';
       requestPending = false;
+      isNegotiating = false;
+      hasRequestedStream = false;
+      streamAttached = false;
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
       setTimeout(connectWatchSocket, retryDelayMs);
       retryDelayMs = Math.min(20000, Math.round(retryDelayMs * 1.8));

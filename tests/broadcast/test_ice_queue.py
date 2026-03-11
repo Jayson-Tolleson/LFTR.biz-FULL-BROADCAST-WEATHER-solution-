@@ -125,3 +125,50 @@ def test_start_viewer_offer_reuses_pending_offer(rtc_patched):
         assert first == second
 
     asyncio.run(_run())
+
+
+def test_start_viewer_offer_does_not_reuse_stale_cached_offer(rtc_patched, monkeypatch):
+    async def _run():
+        from server.rtc import RTCManager
+
+        state = AppState(default_room="r1")
+        rtc = RTCManager(state)
+
+        now = {"v": 1000}
+        monkeypatch.setattr("server.rtc.now_ms", lambda: now["v"])
+
+        await rtc.start_broadcaster_from_offer("r1", "b1", "offer", "offer")
+        rtc.broadcasters["r1"].tracks["video"] = object()
+
+        first = await rtc.start_viewer_offer("r1", "w1")
+        first_pc = rtc.viewers["r1"]["w1"]
+        now["v"] += rtc.viewer_offer_ttl_ms + 10
+        second = await rtc.start_viewer_offer("r1", "w1")
+        second_pc = rtc.viewers["r1"]["w1"]
+
+        assert first_pc is not second_pc
+        assert first_pc.closed is True
+        assert second.get("type") == "offer"
+
+    asyncio.run(_run())
+
+
+def test_viewer_failed_state_clears_offer_cache(rtc_patched):
+    async def _run():
+        from server.rtc import RTCManager
+
+        state = AppState(default_room="r1")
+        rtc = RTCManager(state)
+        await rtc.start_broadcaster_from_offer("r1", "b1", "offer", "offer")
+        rtc.broadcasters["r1"].tracks["video"] = object()
+
+        await rtc.start_viewer_offer("r1", "w1")
+        pc = rtc.viewers["r1"]["w1"]
+        assert ("r1", "w1") in rtc._viewer_offer_cache
+
+        pc.connectionState = "failed"
+        await pc.handlers["connectionstatechange"]()
+
+        assert ("r1", "w1") not in rtc._viewer_offer_cache
+
+    asyncio.run(_run())

@@ -38,6 +38,7 @@ class RTCManager:
         self._pending_viewer_ice_seen: Dict[tuple[str, str], set[str]] = {}
         self._ice_queue_started: set[tuple[str, str, str]] = set()
         self.max_pending_ice = 64
+        self.viewer_offer_ttl_ms = 8000
 
     async def _emit_room(self, room_id: str, event: str, payload: Dict[str, Any]) -> None:
         emitter = getattr(self.state, "ws_emit_room", None)
@@ -246,15 +247,33 @@ class RTCManager:
         await self._emit_status(room_id)
         return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
 
+    def _viewer_offer_cache_valid(self, room_id: str, sid: str, pc: Any, cached: Dict[str, str]) -> bool:
+        if not cached or not cached.get("sdp"):
+            return False
+        created_at = int(cached.get("created_at") or 0)
+        age = now_ms() - created_at if created_at else self.viewer_offer_ttl_ms + 1
+        if age > self.viewer_offer_ttl_ms:
+            log.info("drop stale pending viewer offer room=%s sid=%s age_ms=%s", room_id, sid, age)
+            return False
+        if pc.connectionState in {"failed", "closed", "disconnected"}:
+            return False
+        if pc.signalingState != "have-local-offer" or pc.remoteDescription is not None:
+            return False
+        return True
+
     async def start_viewer_offer(self, room_id: str, sid: str) -> Dict[str, str]:
         prev = self.viewers.get(room_id, {}).get(sid)
+        cached = self._viewer_offer_cache.get((room_id, sid))
+        if prev and self._viewer_offer_cache_valid(room_id, sid, prev, cached or {}):
+            log.info("reuse pending viewer offer room=%s sid=%s", room_id, sid)
+            return {"sdp": cached["sdp"], "type": cached.get("type") or "offer"}
+        if cached:
+            self._viewer_offer_cache.pop((room_id, sid), None)
         if prev and prev.localDescription is not None and prev.remoteDescription is None and prev.signalingState == "have-local-offer":
-            cached = self._viewer_offer_cache.get((room_id, sid))
-            if cached and cached.get("sdp"):
-                log.info("reuse pending viewer offer room=%s sid=%s", room_id, sid)
-                return {"sdp": cached["sdp"], "type": cached.get("type") or "offer"}
             try:
-                return {"sdp": prev.localDescription.sdp, "type": prev.localDescription.type}
+                age = now_ms() - int((cached or {}).get("created_at") or 0)
+                if 0 <= age <= self.viewer_offer_ttl_ms and prev.connectionState not in {"failed", "closed", "disconnected"}:
+                    return {"sdp": prev.localDescription.sdp, "type": prev.localDescription.type}
             except Exception:
                 pass
         if prev:
@@ -273,8 +292,10 @@ class RTCManager:
             log.info("viewer state room=%s sid=%s state=%s", room_id, sid, st)
             await self._emit_room(room_id, "webrtc_state", {"room": room_id, "role": "watch", "state": st, "ts": now_ms()})
             if st == "disconnected":
+                self._viewer_offer_cache.pop((room_id, sid), None)
                 await self._schedule_cleanup(room_id, sid, "viewer")
             if st in {"failed", "closed"}:
+                self._viewer_offer_cache.pop((room_id, sid), None)
                 await self.stop_viewer(room_id, sid)
 
         b = self.broadcasters.get(room_id)
@@ -289,7 +310,7 @@ class RTCManager:
         await pc.setLocalDescription(offer)
         await self._wait_ice_complete(pc)
         out = {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-        self._viewer_offer_cache[(room_id, sid)] = out
+        self._viewer_offer_cache[(room_id, sid)] = {**out, "created_at": now_ms()}
         await self._emit_status(room_id)
         return out
 

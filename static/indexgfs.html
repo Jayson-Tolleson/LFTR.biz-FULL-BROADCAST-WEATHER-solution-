@@ -466,6 +466,8 @@
     mapsApiKey: '',
     maps3dLib: null,
     markerLib: null,
+    mapsLibrariesReady: false,
+    markerRetryTimer: null,
     mapsScriptLoading: null,
     hudLocked: false,
     hudHover: false,
@@ -649,13 +651,16 @@
     const keys = [];
     const items = Array.isArray(payload?.items) ? payload.items : null;
     const sceneClouds = Array.isArray(payload?.scene?.clouds) ? payload.scene.clouds : null;
+    const rootClouds = Array.isArray(payload?.clouds) ? payload.clouds : null;
     const precip = Array.isArray(payload?.scene?.precip) ? payload.scene.precip : (Array.isArray(payload?.precip_columns) ? payload.precip_columns : null);
     const lightning = Array.isArray(payload?.scene?.lightning) ? payload.scene.lightning : (Array.isArray(payload?.lightning_events) ? payload.lightning_events : null);
     if (items) keys.push('items');
     if (sceneClouds) keys.push('scene.clouds');
+    if (rootClouds) keys.push('clouds');
     if (precip) keys.push('precip');
     if (lightning) keys.push('lightning');
-    return { ok: keys.length > 0, keys };
+    const structurallyValid = !!(payload && typeof payload === 'object' && !Array.isArray(payload));
+    return { ok: structurallyValid, keys, hasWeatherData: keys.length > 0 };
   }
 
   async function json(url, opts = {}) {
@@ -2295,12 +2300,18 @@
     const payload = await json(`/gfs/api/scene?limit=${encodeURIComponent(lod.tileLimit)}&compact=1`, {
       validate: (body) => {
         const r = validateScenePayloadShape(body);
-        return r.ok ? { ok: true } : { ok: false, missing: ['items|scene.clouds|precip|lightning'] };
+        return r.ok ? { ok: true } : { ok: false, missing: ['scene_payload_object'] };
       },
       treatOkFalseAsError: false,
     });
     state.weatherPayload = payload || null;
-    const cloudItems = Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.scene?.clouds) ? payload.scene.clouds : [];
+    const cloudItems = Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload?.scene?.clouds)
+        ? payload.scene.clouds
+        : Array.isArray(payload?.clouds)
+          ? payload.clouds
+          : [];
     state.cloudTiles = cloudItems;
     if (!Array.isArray(payload?.items) && Array.isArray(payload?.scene?.clouds)) console.info('[gfs] using scene.clouds compatibility adapter');
     state.cloudFetchedAt = Date.now();
@@ -2311,6 +2322,9 @@
     state.weatherConfidence = String(payload.confidence || 'unknown');
     const sourceLabel = state.weatherPayloadState === 'live' ? 'live real GFS/NOMADS' : state.weatherPayloadState === 'cached' ? 'cached real payload' : 'synthetic fallback';
     const sceneValidation = validateScenePayloadShape(payload);
+    if (!sceneValidation.hasWeatherData) {
+      console.warn('[gfs] scene payload parsed but contains no weather arrays; keeping fish/balloons active', { sceneValidation, payloadState: state.weatherPayloadState });
+    }
     console.info('[gfs] payload loaded', { clouds: state.cloudTiles.length, precip: (payload?.scene?.precip || payload?.precip_columns || []).length, lightning: (payload?.scene?.lightning || payload?.lightning_events || []).length, fish: (payload?.scene?.fish || []).length, sceneValidation });
     setStatus(`Cloud feed ${state.cloudTiles.length} tiles • ${fetchMs}ms • ${sourceLabel}${state.weatherQualityNote ? ` • ${state.weatherQualityNote}` : ''}`);
     await renderWeatherLayers();
@@ -2389,21 +2403,8 @@
     state.mapsScriptLoading = new Promise((resolve, reject) => {
       const existingApiScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
       if (existingApiScript && !existingApiScript.dataset.gmapsBootstrap) {
-        const started = Date.now();
-        const tick = () => {
-          if (hasGoogleMapsApiLoaded()) {
-            console.info('[gfs] Google Maps JS API loaded');
-            resolve();
-            return;
-          }
-          if (Date.now() - started > 8000) {
-            reject(new Error('Google Maps JS API script present but importLibrary unavailable'));
-            return;
-          }
-          setTimeout(tick, 120);
-        };
-        tick();
-        return;
+        console.warn('[gfs] replacing non-bootstrap Google Maps script with async importLibrary bootstrap');
+        try { existingApiScript.remove(); } catch (_) {}
       }
 
       ((g) => {
@@ -2456,6 +2457,10 @@
     }
     if (!state.maps3dLib) state.maps3dLib = await window.google.maps.importLibrary('maps3d');
     if (!state.markerLib) state.markerLib = await window.google.maps.importLibrary('marker');
+    state.mapsLibrariesReady = !!(state.maps3dLib && state.markerLib);
+    if (!state.mapsLibrariesReady) {
+      throw new Error('Maps libraries unavailable after import (maps3d/marker)');
+    }
   }
 
   function markerIntensityClass(p) {
@@ -2578,21 +2583,38 @@
     state.renderStats.fishClustersRendered = 0;
     state.renderStats.fishPoolFree = 0;
     state.renderStats.fishRebuildMs = 0;
-    if (!state.mapReady || !state.feature.markers || !state.maps3dLib || !state.markerLib) return;
+    if (!state.mapReady || !state.feature.markers) return;
+    if (!state.maps3dLib || !state.markerLib) {
+      console.info('[gfs] fish markers deferred until maps3d/marker libraries are ready');
+      if (!state.markerRetryTimer) {
+        state.markerRetryTimer = setTimeout(() => {
+          state.markerRetryTimer = null;
+          if (state.mapReady && state.feature.markers && state.maps3dLib && state.markerLib) {
+            renderMapMarkers().catch((err) => console.warn('[gfs] deferred fish marker render failed', err));
+          }
+        }, 500);
+      }
+      return;
+    }
 
     if (window.LFTRFishOrbRenderer?.createRenderer) {
-      state.fishOrbRenderer = window.LFTRFishOrbRenderer.createRenderer({
-        maps3dLib: state.maps3dLib,
-        markerLib: state.markerLib,
-        globeEl,
-        getView: parseGlobeCenterAndRange,
-        openHud: (point, lockIt) => {
-          if (!point) return;
-          setActiveMarkerByKey(point.location_key || null);
-          openHud(point, !!lockIt).catch((e) => setHudMessage(e.message));
-        },
-        scheduleHudHide,
-      });
+      try {
+        state.fishOrbRenderer = window.LFTRFishOrbRenderer.createRenderer({
+          maps3dLib: state.maps3dLib,
+          markerLib: state.markerLib,
+          globeEl,
+          getView: parseGlobeCenterAndRange,
+          openHud: (point, lockIt) => {
+            if (!point) return;
+            setActiveMarkerByKey(point.location_key || null);
+            openHud(point, !!lockIt).catch((e) => setHudMessage(e.message));
+          },
+          scheduleHudHide,
+        });
+      } catch (err) {
+        console.warn('[gfs] fish orb renderer unavailable during bootstrap; will retry', err?.message || err);
+        return;
+      }
       state.fishOrbRenderer.setData(state.fish || []);
       state.fishOrbRenderer.rebuild(true);
       state.fishOrbRenderer.start();
