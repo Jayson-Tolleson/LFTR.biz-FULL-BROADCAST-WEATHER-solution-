@@ -263,8 +263,9 @@
     }) || '';
     const mr = preferredMime ? new MediaRecorder(sttStream, { mimeType: preferredMime }) : new MediaRecorder(sttStream);
     const settings = track.getSettings ? track.getSettings() : {};
-    const sampleRate = Number(settings.sampleRate || 0) || 0;
+    const rawSampleRate = Number(settings.sampleRate || 0) || 0;
     const channels = Number(settings.channelCount || 1) || 1;
+    const sampleRate = rawSampleRate > 0 ? rawSampleRate : 48000;
     mr.ondataavailable = async (ev) => {
       if (!ev.data || ev.data.size < 1) return;
       const ab = await ev.data.arrayBuffer();

@@ -49,6 +49,34 @@ def synthesize_voice(text: str) -> str:
 
 _LOGGED_STT_FORMATS: set[str] = set()
 
+_OPUS_SUPPORTED_SAMPLE_RATES = {8000, 12000, 16000, 24000, 48000}
+
+
+def _normalize_audio_config(encoding_name: str, sample_rate_hz: int | None, channels: int | None) -> tuple[int | None, int]:
+    enc = str(encoding_name or '').upper()
+    ch = 1
+    try:
+        ch = int(channels or 1)
+    except Exception:
+        ch = 1
+    if ch < 1:
+        ch = 1
+
+    sr = None
+    try:
+        sr = int(sample_rate_hz) if sample_rate_hz is not None else None
+    except Exception:
+        sr = None
+
+    if enc in {'WEBM_OPUS', 'OGG_OPUS', 'OPUS'}:
+        if sr not in _OPUS_SUPPORTED_SAMPLE_RATES:
+            sr = 48000
+        return sr, ch
+
+    if sr is not None and sr <= 0:
+        sr = None
+    return sr, ch
+
 
 def _stt_encoding_from_mime(mime: str):
     from google.cloud import speech
@@ -82,21 +110,21 @@ def transcribe_audio_chunk(audio_b64: str, *, mime: str = "audio/webm;codecs=opu
         from google.cloud import speech
 
         encoding = _stt_encoding_from_mime(mime)
+        sample_rate, channel_count = _normalize_audio_config(encoding.name, sample_rate_hz, channels)
+
         config_kwargs = {
             "encoding": encoding,
             "language_code": language_code or "en-US",
             "enable_automatic_punctuation": True,
+            "audio_channel_count": channel_count,
         }
-        # For opus-in-container, sample rate is container-defined; forcing a mismatch causes InvalidArgument.
-        if encoding == speech.RecognitionConfig.AudioEncoding.LINEAR16 and sample_rate_hz:
-            config_kwargs["sample_rate_hertz"] = int(sample_rate_hz)
-        if channels and int(channels) > 0:
-            config_kwargs["audio_channel_count"] = int(channels)
+        if sample_rate is not None:
+            config_kwargs["sample_rate_hertz"] = int(sample_rate)
 
-        key = f"{mime}|{config_kwargs.get('sample_rate_hertz') or 'container'}|{config_kwargs.get('audio_channel_count') or 1}|{language_code}"
+        key = f"{mime}|{config_kwargs.get('sample_rate_hertz', 'none')}|{channel_count}|{language_code}"
         if key not in _LOGGED_STT_FORMATS:
             _LOGGED_STT_FORMATS.add(key)
-            log.info("google stt config encoding=%s sample_rate=%s channels=%s language=%s", encoding.name, config_kwargs.get("sample_rate_hertz", "container"), config_kwargs.get("audio_channel_count", 1), language_code)
+            log.info("google stt config encoding=%s sample_rate_hertz=%s channels=%s language=%s", encoding.name, config_kwargs.get("sample_rate_hertz", "none"), channel_count, language_code)
 
         client = speech.SpeechClient()
         recognition_config = speech.RecognitionConfig(**config_kwargs)

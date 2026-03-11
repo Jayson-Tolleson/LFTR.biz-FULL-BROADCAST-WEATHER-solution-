@@ -1,44 +1,41 @@
 from __future__ import annotations
 
 
-def test_stt_encoding_from_mime_prefers_webm_opus():
+def test_normalize_audio_config_missing_sample_rate_defaults_opus_48000():
     from server.ai import speech as mod
 
-    class _E:
-        WEBM_OPUS='WEBM_OPUS'
-        OGG_OPUS='OGG_OPUS'
-        LINEAR16='LINEAR16'
-
-    class _RC:
-        AudioEncoding=_E
-
-    class _S:
-        RecognitionConfig=_RC
-
-    import types
-    import sys
-    fake=types.SimpleNamespace(cloud=types.SimpleNamespace(speech_v1=_S))
-    # direct helper import path uses google.cloud.speech in function; monkeypatch module attribute pattern instead
-    import server.ai.speech as s
-    # simulate by local wrapper with monkeypatch-like replacement
-    def _encoding(m):
-        if 'ogg' in m and 'opus' in m:
-            return 'OGG_OPUS'
-        if 'webm' in m and 'opus' in m:
-            return 'WEBM_OPUS'
-        if 'wav' in m:
-            return 'LINEAR16'
-        return 'WEBM_OPUS'
-
-    assert _encoding('audio/webm;codecs=opus') == 'WEBM_OPUS'
-    assert _encoding('audio/ogg;codecs=opus') == 'OGG_OPUS'
-    assert _encoding('audio/wav') == 'LINEAR16'
+    sr, ch = mod._normalize_audio_config('WEBM_OPUS', None, 1)
+    assert sr == 48000
+    assert ch == 1
 
 
-def test_broadcast_js_sends_stt_audio_metadata():
+def test_normalize_audio_config_zero_sample_rate_defaults_opus_48000():
+    from server.ai import speech as mod
+
+    sr, ch = mod._normalize_audio_config('OGG_OPUS', 0, 2)
+    assert sr == 48000
+    assert ch == 2
+
+
+def test_normalize_audio_config_invalid_opus_rate_defaults_48000():
+    from server.ai import speech as mod
+
+    sr, ch = mod._normalize_audio_config('WEBM_OPUS', 44100, 1)
+    assert sr == 48000
+    assert ch == 1
+
+
+def test_normalize_audio_config_valid_opus_rate_kept():
+    from server.ai import speech as mod
+
+    sr, ch = mod._normalize_audio_config('WEBM_OPUS', 48000, 1)
+    assert sr == 48000
+    assert ch == 1
+
+
+def test_broadcast_js_sends_explicit_nonzero_samplerate_metadata():
     from pathlib import Path
 
     src = Path('static/js/broadcast.js').read_text(encoding='utf-8')
-    assert 'sampleRate' in src
-    assert 'channelCount' in src
-    assert "audio_chunk" in src
+    assert 'sampleRate = rawSampleRate > 0 ? rawSampleRate : 48000' in src
+    assert 'sampleRate, channels' in src
