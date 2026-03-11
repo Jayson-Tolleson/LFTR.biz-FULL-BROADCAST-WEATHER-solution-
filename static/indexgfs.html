@@ -2936,29 +2936,12 @@
   }
 
   function connectLiveUpdates() {
-    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const ws = new WebSocket(`${proto}${location.host}/gfs/ws/updates`);
-    ws.onopen = () => {
-      state.wsConnected = true;
-      setStatus('Feed connected');
-    };
-    ws.onmessage = () => {
-      state.lastUpdateAt = Date.now();
-      setFreshness(state.lastUpdateAt);
-      if (state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet) {
-        refreshVisibleTiles().then(() => loadClouds()).catch((e) => setStatus(e.message, true));
-      }
-    };
-    ws.onerror = () => { setStatus('WS updates unavailable • HTTP weather active', true); };
-    ws.onclose = () => {
-      state.wsConnected = false;
-      setStatus('WS disconnected • retrying live updates', true);
-      setTimeout(connectLiveUpdates, 1800);
-    };
-  }
-
-  function showGlobeFallback(show) {
-    globeFallback.classList.toggle('show', !!show);
+    // /gfs stays HTTP-only; refresh weather/fish periodically via existing APIs.
+    console.info('[gfs] live updates using HTTP polling mode');
+    setInterval(() => {
+      loadClouds().catch((e) => setStatus(`Weather refresh failed: ${e.message}`, true));
+      loadFish().catch((e) => setStatus(`Fish refresh failed: ${e.message}`, true));
+    }, 45000);
   }
 
   function applyGlobeAttributes() {

@@ -74,7 +74,7 @@
 
   function requestStream(force = false) {
     const connected = !!(pc && pc.connectionState === 'connected' && streamAttached);
-    if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected)) {
+    if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected || hasRequestedStream)) {
       needsStreamRequest = !broadcasterPresent;
       return;
     }
@@ -128,7 +128,7 @@
       broadcasterPresent = present;
       if (present) {
         needsStreamRequest = false;
-        requestStream(true);
+        requestStream();
       }
       return;
     }
@@ -139,7 +139,7 @@
       broadcasterPresent = present;
       if (present && !requestPending) {
         needsStreamRequest = false;
-        requestStream(true);
+        requestStream();
       }
       return;
     }
@@ -220,7 +220,7 @@
         hasRequestedStream = false;
         mode.textContent = 'STANDBY';
         standby.style.display = 'block';
-        if (broadcasterPresent) requestStream(true);
+        if (broadcasterPresent) requestStream();
       }
       return;
     }

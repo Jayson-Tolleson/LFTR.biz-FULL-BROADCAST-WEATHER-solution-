@@ -31,18 +31,17 @@ class VertexGeminiProvider:
         self.location = os.getenv("VERTEX_LOCATION", "global").strip() or "global"
         self.model_name = os.getenv("VERTEX_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 
-        from vertexai import init
-        from vertexai.generative_models import GenerativeModel
+        # Use google-genai client for Vertex to avoid deprecated vertexai.generative_models.
+        from google import genai
 
-        init(project=self.project, location=self.location)
-        self.model = GenerativeModel(self.model_name)
+        self.client = genai.Client(vertexai=True, project=self.project, location=self.location)
 
     def generate_content(self, prompt: str) -> str:
-        response = self.model.generate_content(prompt)
+        response = self.client.models.generate_content(model=self.model_name, contents=prompt)
         return (getattr(response, "text", "") or "").strip()
 
     def stream_content(self, prompt: str) -> Generator[str, None, None]:
-        for chunk in self.model.generate_content(prompt, stream=True):
+        for chunk in self.client.models.generate_content_stream(model=self.model_name, contents=prompt):
             text = (getattr(chunk, "text", "") or "")
             if text:
                 yield text
@@ -68,12 +67,10 @@ def _get_provider():
         try:
             _PROVIDER = VertexGeminiProvider()
             _PROVIDER_KIND = "vertex"
-            log.info("[AI] Vertex Gemini enabled")
-            log.info("[AI] Model: %s", _PROVIDER.model_name)
-            log.info("[AI] Location: %s", _PROVIDER.location)
+            log.info("[AI] Vertex Gemini enabled model=%s location=%s", _PROVIDER.model_name, _PROVIDER.location)
             return _PROVIDER
         except Exception:
-            log.warning("[AI] Vertex credentials unavailable auth_mode=%s — AI disabled", resolve_gcp_auth_mode())
+            log.warning("[AI] Vertex credentials/client unavailable auth_mode=%s — AI disabled", resolve_gcp_auth_mode())
 
     _PROVIDER = StubProvider()
     _PROVIDER_KIND = "stub"

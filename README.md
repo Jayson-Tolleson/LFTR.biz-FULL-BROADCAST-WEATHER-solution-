@@ -255,3 +255,17 @@ If you see errors like `InvalidValueError` related to `gmp-polygon-3d` `altitude
 
 ## License / Maintainer
 Project maintained by Jayson Tolleson.
+
+
+## CHANGELOG (Current Stabilization)
+- Simplified installer entrypoint (`broadcast.sh`) so it only collects config, writes `/etc/broadcast/install.env`, and runs `deploy/install.sh`.
+- Split route registration into core routes (`server/routes_core.py`) plus focused broadcast and gfs route modules, with `server/routes.py` reduced to a thin registrar.
+- Hardened watch negotiation idempotency (client + server) to reduce duplicate `request_stream`/offer churn.
+- Kept `/gfs` HTTP-only and moved live refresh behavior to polling mode instead of a dedicated `/gfs` websocket path.
+- Updated Gemini Vertex client usage to the `google.genai` Vertex path to avoid deprecated `vertexai.generative_models` usage.
+
+## OPERATIONS NOTES
+- **Environment location:** installer writes runtime configuration to `/etc/broadcast/install.env`.
+- **Maps key supply:** set `MAPS_API_KEY` / `GOOGLE_MAPS_API_KEY` in install env; no installer-time HTML rewriting is performed.
+- **GFS cache behavior:** weather and scene payloads are served from central caches with refresh locks; concurrent reads prefer cached payloads while refresh runs.
+- **Watch negotiation:** one outstanding viewer offer is tracked per watch socket flow; duplicate `request_stream` calls during in-flight negotiation are ignored until answer/failure cleanup.

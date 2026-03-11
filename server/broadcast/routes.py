@@ -344,6 +344,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         room_id = state.default_room
         client_id = f"watch:{id(ws)}"
         joined = False
+        offer_outstanding = False
         log.info("watch socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
@@ -372,19 +373,25 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         if rtc is None:
                             await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
                         else:
-                            offer = await rtc.start_viewer_offer(room_id, client_id)
-                            await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                            if not offer_outstanding:
+                                offer = await rtc.start_viewer_offer(room_id, client_id)
+                                await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                                offer_outstanding = True
                     await ws.send_json({"type": "stage_state", "payload": _stage_payload(room_id, state.ensure_room(room_id))})
                     continue
 
                 if kind == "ping":
                     await ws.send_json({"type": "pong", "room": room_id, "ts": now_ms()})
                 elif kind == "request_stream":
+                    if offer_outstanding:
+                        log.debug("watch request_stream ignored room=%s client=%s reason=offer_outstanding", room_id, client_id)
+                        continue
                     log.info("watch request_stream room=%s client=%s", room_id, client_id)
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
                         log.debug("watch waiting room=%s client=%s no broadcaster", room_id, client_id)
                         await ws.send_json({"type": "presence", "room": room_id, "broadcaster_present": False, "viewer_count": len(room.viewers), "ts": now_ms()})
+                        offer_outstanding = False
                         await ws.send_json({"type": "waiting", "room": room_id, "message": "no_broadcaster", "ts": now_ms()})
                         continue
                     if rtc is None:
@@ -392,10 +399,12 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     else:
                         offer = await rtc.start_viewer_offer(room_id, client_id)
                         await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                        offer_outstanding = True
                 elif kind in {"watch_answer", "webrtc_answer"}:
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "answer"
                     if sdp:
+                        offer_outstanding = False
                         if rtc is not None:
                             await rtc.set_viewer_answer(room_id, client_id, sdp, sdp_type)
                 elif kind in {"webrtc_ice", "watch_ice"}:
