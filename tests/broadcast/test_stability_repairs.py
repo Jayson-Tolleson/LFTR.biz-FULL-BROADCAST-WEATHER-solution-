@@ -269,3 +269,30 @@ def test_hazard_payload_uses_prealigned_hazard_inputs_without_realign_warnings(m
 
     assert out["rain"]["count"] == 1
     assert "realigning field=hazard_" not in caplog.text
+
+
+def test_derive_real_source_fields_includes_hazard_build_metadata(monkeypatch, tmp_path):
+    svc = GFSService(str(tmp_path))
+
+    shape = (721, 1440)
+    precip = np.ones(shape, dtype=float)
+    cloud_layers = {
+        "low": np.ones(shape, dtype=float) * 0.2,
+        "mid": np.ones(shape, dtype=float) * 0.3,
+        "high": np.ones(shape, dtype=float) * 0.4,
+    }
+    lat2d = np.zeros(shape, dtype=float)
+    lon2d = np.zeros(shape, dtype=float)
+
+    monkeypatch.setattr(svc, "extract_precip_rate_mm_hr", lambda groups: precip)
+    monkeypatch.setattr(svc, "derive_cloud_layers", lambda *args, **kwargs: cloud_layers)
+    monkeypatch.setattr(svc, "derive_balloon_vectors", lambda groups: [])
+    monkeypatch.setattr(svc, "ensure_lat_lon_2d", lambda sample: (lat2d, lon2d))
+    monkeypatch.setattr(svc, "_extract_scalar_field", lambda groups, candidates: None)
+
+    out = svc._derive_real_source_fields({"surface": object()})
+    meta = out.get("hazard_inputs")
+    assert isinstance(meta, dict)
+    assert meta.get("canonical_shape") == shape
+    assert "created_at_ms" in meta
+    assert "resampled" in meta

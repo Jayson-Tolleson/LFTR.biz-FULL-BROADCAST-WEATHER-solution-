@@ -107,3 +107,21 @@ def test_broadcaster_ice_queue_cap_and_cleanup(rtc_patched):
         assert key not in rtc._pending_broadcaster_ice
 
     asyncio.run(_run())
+
+
+def test_start_viewer_offer_reuses_pending_offer(rtc_patched):
+    async def _run():
+        from server.rtc import RTCManager
+
+        state = AppState(default_room="r1")
+        rtc = RTCManager(state)
+
+        await rtc.start_broadcaster_from_offer("r1", "b1", "offer", "offer")
+        rtc.broadcasters["r1"].tracks["video"] = object()
+
+        first = await rtc.start_viewer_offer("r1", "w1")
+        second = await rtc.start_viewer_offer("r1", "w1")
+
+        assert first == second
+
+    asyncio.run(_run())

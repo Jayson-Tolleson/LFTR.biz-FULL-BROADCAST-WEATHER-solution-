@@ -16,6 +16,7 @@
   let retryDelayMs = 1000;
   let requestPending = false;
   let broadcasterPresent = false;
+  let needsStreamRequest = false;
 
   async function iceServers() {
     try {
@@ -33,7 +34,10 @@
   }
 
   function requestStream() {
-    if (!broadcasterPresent || requestPending) return;
+    if (!broadcasterPresent || requestPending) {
+      needsStreamRequest = !broadcasterPresent;
+      return;
+    }
     requestPending = true;
     sendJson('request_stream');
   }
@@ -81,7 +85,6 @@
       updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
       const present = !!st.runtime?.broadcaster_present;
       broadcasterPresent = present;
-      if (present) requestStream();
       return;
     }
     if (msg.type === 'state_update') {
@@ -89,14 +92,18 @@
       updateAiStatus(st.settings?.ai_status || 'idle');
       const present = !!st.runtime?.broadcaster_present;
       broadcasterPresent = present;
-      if (present) requestStream();
       return;
     }
     if (msg.type === 'presence') {
       applyPresence(msg);
       broadcasterPresent = !!msg.broadcaster_present;
-      if (broadcasterPresent) requestStream();
-      else requestPending = false;
+      if (broadcasterPresent && needsStreamRequest) {
+        requestStream();
+        needsStreamRequest = false;
+      } else if (!broadcasterPresent) {
+        requestPending = false;
+        needsStreamRequest = true;
+      }
       return;
     }
     if (msg.type === 'ai_status') {
@@ -106,6 +113,7 @@
     if (msg.type === 'waiting' || msg.type === 'error') {
       if (msg.message === 'no_broadcaster') {
         requestPending = false;
+        needsStreamRequest = true;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
       }

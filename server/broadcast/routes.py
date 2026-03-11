@@ -222,7 +222,15 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     if len(b64_data) > 2_000_000:
                         await ws.send_json({"type": "error", "room": room_id, "message": "audio_chunk_too_large", "ts": now_ms()})
                         continue
-                    mime = str(data.get("mime") or "audio/webm")
+                    mime = str(data.get("mime") or "audio/webm;codecs=opus")
+                    try:
+                        sample_rate_hz = int(data.get("sampleRate") or 0) or None
+                    except Exception:
+                        sample_rate_hz = None
+                    try:
+                        channels = int(data.get("channels") or 1) or 1
+                    except Exception:
+                        channels = 1
                     try:
                         chunk = base64.b64decode(b64_data, validate=True)
                     except (ValueError, binascii.Error):
@@ -239,7 +247,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     text = ""
                     if chunk:
                         try:
-                            text = str(await transcribe_fn([chunk], mime=mime) or "").strip()
+                            text = str(await transcribe_fn([chunk], mime=mime, sample_rate_hz=sample_rate_hz, channels=channels) or "").strip()
                         except Exception:
                             log.exception("stt failed room=%s client=%s", room_id, client_id)
                             text = ""

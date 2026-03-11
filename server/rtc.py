@@ -32,6 +32,7 @@ class RTCManager:
         self._pending_cleanup: Dict[str, asyncio.Task] = {}
         self.disconnect_grace_seconds = 60
         self._pending_broadcaster_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
+        self._viewer_offer_cache: Dict[tuple[str, str], Dict[str, str]] = {}
         self._pending_viewer_ice: Dict[tuple[str, str], list[RTCIceCandidate]] = {}
         self._pending_broadcaster_ice_seen: Dict[tuple[str, str], set[str]] = {}
         self._pending_viewer_ice_seen: Dict[tuple[str, str], set[str]] = {}
@@ -247,6 +248,15 @@ class RTCManager:
 
     async def start_viewer_offer(self, room_id: str, sid: str) -> Dict[str, str]:
         prev = self.viewers.get(room_id, {}).get(sid)
+        if prev and prev.localDescription is not None and prev.remoteDescription is None and prev.signalingState == "have-local-offer":
+            cached = self._viewer_offer_cache.get((room_id, sid))
+            if cached and cached.get("sdp"):
+                log.info("reuse pending viewer offer room=%s sid=%s", room_id, sid)
+                return {"sdp": cached["sdp"], "type": cached.get("type") or "offer"}
+            try:
+                return {"sdp": prev.localDescription.sdp, "type": prev.localDescription.type}
+            except Exception:
+                pass
         if prev:
             try:
                 await prev.close()
@@ -278,8 +288,10 @@ class RTCManager:
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
         await self._wait_ice_complete(pc)
+        out = {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+        self._viewer_offer_cache[(room_id, sid)] = out
         await self._emit_status(room_id)
-        return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+        return out
 
     async def set_viewer_answer(self, room_id: str, sid: str, sdp: str, sdp_type: str) -> None:
         pc = self.viewers.get(room_id, {}).get(sid)
@@ -287,6 +299,7 @@ class RTCManager:
             raise RuntimeError("Viewer peer not found")
         log.info("apply viewer remote answer room=%s sid=%s state=%s", room_id, sid, pc.signalingState)
         await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=sdp_type))
+        self._viewer_offer_cache.pop((room_id, sid), None)
         await self._flush_viewer_ice(room_id, sid, pc)
 
     def parse_ice(self, payload: Dict[str, Any]) -> Optional[RTCIceCandidate]:
@@ -378,6 +391,7 @@ class RTCManager:
                 log.exception("error closing viewer pc")
         vkey = self._viewer_ice_key(room_id, sid)
         self._pending_viewer_ice.pop(vkey, None)
+        self._viewer_offer_cache.pop((room_id, sid), None)
         self._pending_viewer_ice_seen.pop(vkey, None)
         self._ice_queue_started.discard(("viewer", room_id, sid))
         self.state.remove_room_if_empty(room_id)
@@ -392,6 +406,9 @@ class RTCManager:
         except Exception:
             log.exception("error closing broadcaster pc")
         self.broadcasters.pop(room_id, None)
+        # clear all pending viewer offers for the room on broadcaster stop
+        for k in [k for k in self._viewer_offer_cache.keys() if k[0] == room_id]:
+            self._viewer_offer_cache.pop(k, None)
         bkey = self._broadcaster_ice_key(room_id, sid)
         self._pending_broadcaster_ice.pop(bkey, None)
         self._pending_broadcaster_ice_seen.pop(bkey, None)

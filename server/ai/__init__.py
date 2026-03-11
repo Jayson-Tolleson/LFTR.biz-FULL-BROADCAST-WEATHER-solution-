@@ -70,7 +70,7 @@ def ai_status() -> dict[str, Any]:
         **status,
         "stt_ready": stt_available(),
     }
-async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None) -> str:
+async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None, sample_rate_hz: int | None = None, channels: int | None = None) -> str:
     global _WARNED_STT_UNAVAILABLE
     if not chunks:
         return ""
@@ -84,7 +84,13 @@ async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None) -> 
         import base64
 
         b64 = base64.b64encode(chunk).decode("ascii")
-        transcript = await asyncio.to_thread(transcribe_audio_chunk, b64)
+        transcript = await asyncio.to_thread(
+            transcribe_audio_chunk,
+            b64,
+            mime=mime,
+            sample_rate_hz=sample_rate_hz,
+            channels=channels,
+        )
         return str(transcript or "").strip()
     except Exception:
         if not _WARNED_STT_UNAVAILABLE:

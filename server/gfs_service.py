@@ -2435,6 +2435,9 @@ class GFSService:
                 },
                 "source_shapes": source_shapes,
                 "canonical_shape": tuple(canonical_shape),
+                "resampled": bool(realigned_fields),
+                "resampled_fields": list(realigned_fields),
+                "created_at_ms": self._now_ms(),
             },
         }
 
@@ -2677,6 +2680,13 @@ class GFSService:
             tuple(precip.shape),
         )
         log.info("[gfs] hazard canonical target shape=%s", canonical_shape)
+        if hazard_inputs:
+            log.info(
+                "[gfs] hazard inputs canonicalized cycle_ready shape=%s resampled=%s fields=%s",
+                canonical_shape,
+                bool(hazard_inputs.get("resampled")),
+                ",".join(hazard_inputs.get("resampled_fields") or []) or "none",
+            )
 
         lat2d = self.ensure_same_grid(hazard_inputs.get("lat2d", fields["lat2d"]), canonical_shape, "hazard_lat2d")
         lon2d = self.ensure_same_grid(hazard_inputs.get("lon2d", fields["lon2d"]), canonical_shape, "hazard_lon2d")
