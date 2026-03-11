@@ -14,6 +14,9 @@
   let ws = null;
   let pc = null;
   let retryDelayMs = 1000;
+  let requestPending = false;
+  let broadcasterPresent = false;
+  let needsStreamRequest = false;
 
   async function iceServers() {
     try {
@@ -31,6 +34,11 @@
   }
 
   function requestStream() {
+    if (!broadcasterPresent || requestPending) {
+      needsStreamRequest = !broadcasterPresent;
+      return;
+    }
+    requestPending = true;
     sendJson('request_stream');
   }
 
@@ -76,27 +84,36 @@
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
       const present = !!st.runtime?.broadcaster_present;
-      if (present) requestStream();
+      broadcasterPresent = present;
       return;
     }
     if (msg.type === 'state_update') {
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || 'idle');
       const present = !!st.runtime?.broadcaster_present;
-      if (present) requestStream();
+      broadcasterPresent = present;
       return;
     }
     if (msg.type === 'presence') {
       applyPresence(msg);
-      if (msg.broadcaster_present) requestStream();
+      broadcasterPresent = !!msg.broadcaster_present;
+      if (broadcasterPresent && needsStreamRequest) {
+        requestStream();
+        needsStreamRequest = false;
+      } else if (!broadcasterPresent) {
+        requestPending = false;
+        needsStreamRequest = true;
+      }
       return;
     }
     if (msg.type === 'ai_status') {
       updateAiStatus(msg.status || 'idle');
       return;
     }
-    if (msg.type === 'error') {
+    if (msg.type === 'waiting' || msg.type === 'error') {
       if (msg.message === 'no_broadcaster') {
+        requestPending = false;
+        needsStreamRequest = true;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
       }
@@ -120,6 +137,7 @@
       const answer = await c.createAnswer();
       await c.setLocalDescription(answer);
       sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+      requestPending = false;
       return;
     }
     if (msg.type === 'webrtc_ice' && pc) {
@@ -155,9 +173,10 @@
     ws.onerror = (err) => console.warn('[watch] websocket error', { url, room, err });
     ws.onclose = (ev) => {
       conn.textContent = 'reconnecting';
+      requestPending = false;
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
       setTimeout(connectWatchSocket, retryDelayMs);
-      retryDelayMs = Math.min(15000, Math.round(retryDelayMs * 1.6));
+      retryDelayMs = Math.min(20000, Math.round(retryDelayMs * 1.8));
     };
   }
 

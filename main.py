@@ -1,5 +1,4 @@
-from server.app_factory import create_asgi_app, create_quart_app
+from server.app_factory import create_app
 
-
-app = create_quart_app()
-asgi_app = create_asgi_app()
+app = create_app()
+asgi_app = app

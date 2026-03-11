@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import Generator
 
+from .auth import get_effective_google_project, maybe_apply_google_credentials_env, resolve_gcp_auth_mode
+
 
 log = logging.getLogger("server.ai.gemini")
 
@@ -24,13 +26,10 @@ class StubProvider:
 
 class VertexGeminiProvider:
     def __init__(self) -> None:
-        self.project = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+        maybe_apply_google_credentials_env()
+        self.project = get_effective_google_project()
         self.location = os.getenv("VERTEX_LOCATION", "global").strip() or "global"
         self.model_name = os.getenv("VERTEX_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
-
-        key_path = os.getenv("GCP_KEY", "").strip()
-        if key_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
 
         from vertexai import init
         from vertexai.generative_models import GenerativeModel
@@ -57,7 +56,7 @@ def _vertex_requested() -> bool:
     ai_provider = os.getenv("AI_PROVIDER", "").strip().lower()
     if ai_provider == "vertex":
         return True
-    return bool(os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() and os.getenv("GCP_KEY", "").strip())
+    return bool(get_effective_google_project() and resolve_gcp_auth_mode() in {"adc_ok", "explicit_key_ok"})
 
 
 def _get_provider():
@@ -74,7 +73,7 @@ def _get_provider():
             log.info("[AI] Location: %s", _PROVIDER.location)
             return _PROVIDER
         except Exception:
-            log.warning("[AI] Vertex credentials missing — AI disabled")
+            log.warning("[AI] Vertex credentials unavailable auth_mode=%s — AI disabled", resolve_gcp_auth_mode())
 
     _PROVIDER = StubProvider()
     _PROVIDER_KIND = "stub"

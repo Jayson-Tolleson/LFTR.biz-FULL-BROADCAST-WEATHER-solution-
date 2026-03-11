@@ -7,7 +7,7 @@ INSTALL_USER="${INSTALL_USER:-jayson_tolleson}"
 APP_DIR="${APP_DIR:-/home/${INSTALL_USER}/broadcast}"
 VENV_DIR="${APP_DIR}/venv"
 GOOGLE_PROJECT_ID="${GOOGLE_PROJECT_ID:-}"
-GCP_KEY="${GCP_KEY:-/etc/broadcast/gcp-key.json}"
+GCP_KEY="${GCP_KEY:-}"
 VERTEX_LOCATION="${VERTEX_LOCATION:-global}"
 VERTEX_MODEL="${VERTEX_MODEL:-gemini-2.5-flash}"
 AI_PROVIDER="${AI_PROVIDER:-vertex}"
@@ -196,6 +196,10 @@ phase4_google_cloud() {
   export GOOGLE_CLOUD_PROJECT="${GOOGLE_PROJECT_ID}"
 
   mkdir -p /etc/broadcast
+  local gcp_key_env=""
+  if [[ -n "$explicit_key" ]]; then
+    gcp_key_env="$explicit_key"
+  fi
   cat > /etc/broadcast/install.env <<EOF
 DOMAIN=${DOMAIN}
 GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
@@ -203,7 +207,7 @@ GOOGLE_CLOUD_PROJECT=${GOOGLE_PROJECT_ID}
 MAPS_API_KEY=${MAPS_API_KEY:-}
 GOOGLE_MAPS_API_KEY=${MAPS_API_KEY:-}
 GOOGLE_CLOUD_REGION=global
-GCP_KEY=${GCP_KEY}
+GCP_KEY=${gcp_key_env}
 VERTEX_LOCATION=${VERTEX_LOCATION}
 VERTEX_MODEL=${VERTEX_MODEL}
 AI_PROVIDER=${AI_PROVIDER}

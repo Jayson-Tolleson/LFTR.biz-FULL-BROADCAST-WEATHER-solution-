@@ -40,6 +40,9 @@
     fileInput: document.getElementById('file'),
   };
 
+  let chatRetryMs = 1200;
+  let signalRetryMs = 1200;
+
   const state = {
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
     clientId: `b-${Math.random().toString(36).slice(2, 10)}`,
@@ -244,8 +247,8 @@
     }
   }
 
-  function sendAudioChunk(b64, mime) {
-    sendJson(state.chatWs, 'audio_chunk', { mime, data: b64 });
+  function sendAudioChunk(b64, mime, sampleRate, channels) {
+    sendJson(state.chatWs, 'audio_chunk', { mime, data: b64, sampleRate, channels });
   }
 
   async function startSpeechCaptureFromMic() {
@@ -255,7 +258,13 @@
     const track = cam.getAudioTracks()[0];
     if (!track) return;
     const sttStream = new MediaStream([track.clone()]);
-    const mr = new MediaRecorder(sttStream, { mimeType: 'audio/webm' });
+    const preferredMime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((m) => {
+      try { return MediaRecorder.isTypeSupported(m); } catch (_) { return false; }
+    }) || '';
+    const mr = preferredMime ? new MediaRecorder(sttStream, { mimeType: preferredMime }) : new MediaRecorder(sttStream);
+    const settings = track.getSettings ? track.getSettings() : {};
+    const sampleRate = Number(settings.sampleRate || 0) || 0;
+    const channels = Number(settings.channelCount || 1) || 1;
     mr.ondataavailable = async (ev) => {
       if (!ev.data || ev.data.size < 1) return;
       const ab = await ev.data.arrayBuffer();
@@ -265,7 +274,7 @@
       for (let i = 0; i < bytes.length; i += chunkSize) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
       }
-      sendAudioChunk(btoa(binary), ev.data.type || 'audio/webm');
+      sendAudioChunk(btoa(binary), ev.data.type || preferredMime || 'audio/webm;codecs=opus', sampleRate, channels);
     };
     mr.start(1200);
     state.mediaRecorder = mr;
@@ -275,6 +284,7 @@
     const ws = new WebSocket(`${wsBase}/ws/chat`);
     state.chatWs = ws;
     ws.onopen = () => {
+      chatRetryMs = 1200;
       updateConnectivity(true);
       sendJson(ws, 'join', { role: 'participant' });
       startSpeechCaptureFromMic().catch(() => {});
@@ -297,7 +307,8 @@
     ws.onclose = () => {
       updateConnectivity(false);
       stopSpeechCapture();
-      setTimeout(connectChat, 1500);
+      setTimeout(connectChat, chatRetryMs);
+      chatRetryMs = Math.min(15000, Math.round(chatRetryMs * 1.7));
     };
   }
 
@@ -305,6 +316,7 @@
     const ws = new WebSocket(`${wsBase}/ws/broadcast`);
     state.signalWs = ws;
     ws.onopen = async () => {
+      signalRetryMs = 1200;
       sendJson(ws, 'join', { role: 'broadcaster' });
       await syncTracks();
       await negotiate('initial');
@@ -317,7 +329,10 @@
       if (msg.type === 'presence') applyPresence(msg);
       if (msg.type === 'state_sync' || msg.type === 'state_update') applyRoomState(msg.state || {});
     };
-    ws.onclose = () => setTimeout(connectSignal, 1500);
+    ws.onclose = () => {
+      setTimeout(connectSignal, signalRetryMs);
+      signalRetryMs = Math.min(15000, Math.round(signalRetryMs * 1.7));
+    };
   }
 
   function announceState() {
