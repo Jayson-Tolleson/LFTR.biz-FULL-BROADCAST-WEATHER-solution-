@@ -1,152 +1,266 @@
 from __future__ import annotations
 
-from urllib.parse import quote
+from pathlib import Path
+import logging
+import os
 
-from quart import jsonify, request, send_file
+from quart import Blueprint, current_app, jsonify, request, send_file
 
-from server.gfs_service import GFSService
-
-
-def _bbox_from_request(default):
-    south = float(request.args.get("south", default["south"]))
-    west = float(request.args.get("west", default["west"]))
-    north = float(request.args.get("north", default["north"]))
-    east = float(request.args.get("east", default["east"]))
-    return {"south": south, "west": west, "north": north, "east": east}
+from server.gfs.engine import GfsEngine
+from server.gfs.errors import GfsError, InvalidBBoxError, NotFoundError
+from server.gfs.live import build_live_session_payload
+from server.gfs.locations import load_fish_locations, location_to_json
+from server.gfs.media import LocationMediaStore
 
 
-def register_gfs_routes(app, gfs: GFSService, static_dir) -> None:
-    @app.get("/gfs")
-    @app.get("/gfs/")
+log = logging.getLogger("server.gfs.routes")
+
+
+def create_gfs_blueprint(static_dir: Path) -> Blueprint:
+    bp = Blueprint("gfs", __name__)
+
+    def engine() -> GfsEngine:
+        return current_app.extensions["gfs_engine"]
+
+    def media_store() -> LocationMediaStore:
+        return current_app.extensions["gfs_media_store"]
+
+    def locations():
+        return load_fish_locations(static_dir / "data" / "fishloclist.csv")
+
+
+    @bp.errorhandler(Exception)
+    async def gfs_api_error_handler(exc):
+        if request.path.startswith('/gfs/api/'):
+            log.error('unhandled gfs api error path=%s err=%s', request.path, exc, exc_info=True)
+            return jsonify({"error": "internal", "message": str(exc), "provider": "gfs", "retryable": False}), 500
+        raise exc
+
+    def _location_or_404(location_id: str) -> dict:
+        for loc in locations():
+            payload = location_to_json(loc)
+            if payload["id"] == location_id:
+                return payload
+        raise NotFoundError(f"location '{location_id}' not found", provider="gfs_locations")
+
+    @bp.get("/gfs")
+    @bp.get("/gfs/")
     async def gfs_page():
         return await send_file(str(static_dir / "indexgfs.html"))
 
-    @app.get("/gfs/api/health")
-    async def gfs_health():
-        return jsonify(gfs.health())
-
-    @app.get("/gfs/api/config")
+    @bp.get("/gfs/api/config")
     async def gfs_config():
-        return jsonify(gfs.config())
+        settings = getattr(current_app, "settings_obj", None)
+        key = getattr(settings, "google_maps_api_key", "")
+        return jsonify({
+            "google_maps_api_key": key,
+            "debug": engine().config.debug_enabled,
+            "runtime": {
+                "google_maps_key_present": bool(key),
+                "settings_loaded": settings is not None,
+            },
+        })
 
-    @app.get("/api/gfs")
-    @app.get("/api/gfs/scene")
-    @app.get("/gfs/api/scene")
-    async def gfs_scene():
-        return jsonify(gfs.get_scene_payload())
+    @bp.get("/gfs/api/runtime")
+    async def gfs_runtime():
+        settings = getattr(current_app, "settings_obj", None)
+        key = getattr(settings, "google_maps_api_key", "")
+        return jsonify({
+            "google_maps_key_present": bool(key),
+            "settings_loaded": settings is not None,
+            "debug": engine().config.debug_enabled,
+            "env_hints": {
+                "has_google_maps_env": bool(os.getenv("GOOGLE_MAPS_API_KEY")),
+                "has_install_env_file": Path("/etc/broadcast/install.env").exists(),
+            },
+        })
 
-    @app.get('/api/gfs/status')
-    async def api_gfs_status():
-        return jsonify(gfs.status_payload())
+    @bp.get("/gfs/api/locations")
+    async def gfs_locations():
+        return jsonify({"locations": [location_to_json(loc) for loc in locations()]})
 
-    @app.get('/api/gfs/cloud-tiles')
-    async def api_gfs_cloud_tiles():
-        return jsonify(gfs.cloud_tiles_payload())
+    @bp.get("/gfs/api/location/<string:location_id>")
+    async def gfs_location(location_id: str):
+        try:
+            loc = _location_or_404(location_id)
+            loc["reports"] = loc.pop("all_reports")
+            loc["videos"] = [v.__dict__ for v in media_store().videos_for(location_id)]
+            loc["live"] = media_store().live_for(location_id)
+            return jsonify(loc)
+        except GfsError as exc:
+            log.error("location route failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.get('/api/gfs/hazards')
-    async def api_gfs_hazards():
-        return jsonify(gfs.hazards_payload())
+    @bp.get("/gfs/api/location/<string:location_id>/reports")
+    async def gfs_location_reports(location_id: str):
+        try:
+            loc = _location_or_404(location_id)
+            reports = list(loc["all_reports"]) + media_store().reports_for(location_id)
+            return jsonify({"location_id": location_id, "reports": reports})
+        except GfsError as exc:
+            log.error("reports route failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.get('/api/gfs/diagnostics')
-    async def api_gfs_diagnostics():
-        return jsonify(gfs.diagnostics_payload())
+    @bp.post("/gfs/api/location/<string:location_id>/reports")
+    async def gfs_location_report_upsert(location_id: str):
+        try:
+            _location_or_404(location_id)
+            payload = await request.get_json(force=True)
+            text = str((payload or {}).get("report") or "").strip()
+            if not text:
+                raise InvalidBBoxError("report is required")
+            media_store().append_report(location_id, text)
+            return jsonify({"ok": True, "location_id": location_id, "report": text})
+        except GfsError as exc:
+            log.error("report upsert failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.get("/gfs/api/fish")
-    @app.get("/gfs/api/points")
-    async def gfs_fish():
-        return jsonify(gfs.fish_payload())
+    @bp.get("/gfs/api/location/<string:location_id>/videos")
+    async def gfs_location_videos(location_id: str):
+        try:
+            _location_or_404(location_id)
+            videos = [v.__dict__ for v in media_store().videos_for(location_id)]
+            return jsonify({"location_id": location_id, "videos": videos})
+        except GfsError as exc:
+            log.error("videos route failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.get("/gfs/api/clouds")
-    @app.get("/gfs/api/cloud_tiles")
+    @bp.post("/gfs/api/location/<string:location_id>/upload")
+    async def gfs_location_upload(location_id: str):
+        try:
+            _location_or_404(location_id)
+            files = await request.files
+            file_obj = files.get("file")
+            if not file_obj:
+                raise InvalidBBoxError("missing file")
+            data = await file_obj.read()
+            saved = media_store().save_upload(location_id=location_id, filename=file_obj.filename or "upload.mp4", raw=data)
+            return jsonify({"ok": True, "location_id": location_id, **saved})
+        except GfsError as exc:
+            log.error("upload route failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
+
+    @bp.get("/gfs/api/location/<string:location_id>/live")
+    async def gfs_location_live_get(location_id: str):
+        try:
+            _location_or_404(location_id)
+            return jsonify({"location_id": location_id, "live": media_store().live_for(location_id)})
+        except GfsError as exc:
+            log.error("live GET failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
+
+    @bp.post("/gfs/api/location/<string:location_id>/live")
+    async def gfs_location_live_post(location_id: str):
+        try:
+            _location_or_404(location_id)
+            payload = await request.get_json(force=True)
+            active = bool((payload or {}).get("active"))
+            stream_url = str((payload or {}).get("stream_url") or "")
+            live = media_store().set_live(location_id, active=active, stream_url=stream_url)
+            event_type = "snapshot_changed" if active else "provider_recovered"
+            await engine().broadcast_control(event_type, {"location_id": location_id, "active": active})
+            return jsonify({"ok": True, "location_id": location_id, "live": live, "session": build_live_session_payload(location_id)})
+        except GfsError as exc:
+            log.error("live POST failed path=%s location_id=%s err=%s", request.path, location_id, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
+
+    @bp.get("/gfs/api/weather")
+    async def gfs_weather():
+        try:
+            intent = engine().parse_intent(request.args)
+            payload = await engine().weather_payload(intent)
+            return jsonify(payload)
+        except GfsError as exc:
+            log.error("weather route failed path=%s args=%s err=%s", request.path, dict(request.args), exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
+
+    @bp.get("/gfs/api/clouds")
     async def gfs_clouds():
-        return jsonify(gfs.cloud_tiles_payload())
+        try:
+            intent = engine().parse_intent(request.args)
+            return jsonify(await engine().clouds_payload(intent))
+        except GfsError as exc:
+            log.error("clouds route failed path=%s args=%s err=%s", request.path, dict(request.args), exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.get("/gfs/tile/<string:layer>/<int:z>/<int:x>/<int:y>")
-    @app.get("/gfs/api/tile/<string:layer>/<int:z>/<int:x>/<int:y>")
-    async def gfs_tile_layer(layer: str, z: int, x: int, y: int):
-        debug = request.args.get("debug") == "1"
-        return jsonify(gfs.layer_tile_payload(layer=layer, z=z, x=x, y=y, debug=debug))
+    @bp.get("/gfs/api/bait")
+    async def gfs_bait():
+        try:
+            intent = engine().parse_intent(request.args)
+            return jsonify(await engine().bait_payload(intent))
+        except GfsError as exc:
+            log.error("bait route failed path=%s args=%s err=%s", request.path, dict(request.args), exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.get("/gfs/tile")
-    async def gfs_tile_aggregate():
-        z = int(request.args.get("z", 4))
-        x = int(request.args.get("x", 4))
-        y = int(request.args.get("y", 6))
-        debug = request.args.get("debug") == "1"
-        return jsonify(gfs.tile_aggregate_payload(z=z, x=x, y=y, debug=debug))
+    @bp.get("/gfs/api/health")
+    async def gfs_health():
+        payload = engine().health_payload()
+        settings = getattr(current_app, "settings_obj", None)
+        key = getattr(settings, "google_maps_api_key", "")
+        payload["locations"] = {"count": len(locations())}
+        payload["runtime"] = {
+            "google_maps_key_present": bool(key),
+            "settings_loaded": settings is not None,
+            "debug": engine().config.debug_enabled,
+        }
+        return jsonify(payload)
 
-    @app.get("/gfs/api/tile/diagnostics")
-    async def gfs_tile_diagnostics():
-        layer = (request.args.get("layer") or "").strip().lower() or None
-        tile = (request.args.get("tile") or "").strip() or None
-        return jsonify(gfs.tile_diagnostics_payload(layer=layer, tile=tile))
+    @bp.get("/gfs/api/debug")
+    async def gfs_debug():
+        if not engine().config.debug_enabled:
+            return jsonify({"error": "notfound", "message": "debug endpoint disabled", "provider": "gfs", "retryable": False}), 404
+        return jsonify({"snapshot": engine().snapshot.__dict__, "cache": engine().cache.stats()})
 
-    @app.get("/gfs/api/location_media")
-    async def gfs_location_media():
-        payload = gfs.location_media((request.args.get("location_key") or "").strip())
-        return jsonify(payload), (200 if payload.get("ok") else 400)
+    @bp.get("/gfs/api/location_media")
+    async def gfs_legacy_location_media():
+        location_id = (request.args.get("location_key") or "").strip()
+        return await gfs_location(location_id)
 
-    @app.post("/gfs/api/report/upsert")
-    async def gfs_report_upsert():
-        payload = await request.get_json(force=True)
-        result = gfs.upsert_report((payload or {}).get("location_key") or "", (payload or {}).get("report_text") or "")
-        return jsonify(result), (200 if result.get("ok") else 400)
+    @bp.post("/gfs/api/report/upsert")
+    async def gfs_legacy_report_upsert():
+        try:
+            payload = await request.get_json(force=True)
+            location_id = str((payload or {}).get("location_key") or "").strip()
+            _location_or_404(location_id)
+            text = str((payload or {}).get("report_text") or "").strip()
+            if not text:
+                raise InvalidBBoxError("report is required")
+            media_store().append_report(location_id, text)
+            return jsonify({"ok": True, "location_id": location_id, "report": text})
+        except GfsError as exc:
+            log.error("legacy report upsert failed path=%s err=%s", request.path, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.post("/gfs/api/live/upsert")
-    async def gfs_live_upsert():
-        payload = await request.get_json(force=True)
-        result = gfs.upsert_live((payload or {}).get("location_key") or "", bool((payload or {}).get("active")), (payload or {}).get("stream_url") or "")
-        return jsonify(result), (200 if result.get("ok") else 400)
+    @bp.post("/gfs/api/live/upsert")
+    async def gfs_legacy_live_upsert():
+        try:
+            payload = await request.get_json(force=True)
+            location_id = str((payload or {}).get("location_key") or "").strip()
+            _location_or_404(location_id)
+            active = bool((payload or {}).get("active"))
+            stream_url = str((payload or {}).get("stream_url") or "")
+            live = media_store().set_live(location_id, active=active, stream_url=stream_url)
+            await engine().broadcast_control("snapshot_changed", {"location_id": location_id, "active": active})
+            return jsonify({"ok": True, "location_id": location_id, "live": live, "session": build_live_session_payload(location_id)})
+        except GfsError as exc:
+            log.error("legacy live upsert failed path=%s err=%s", request.path, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.post("/gfs/api/live/start")
-    async def gfs_live_start():
-        payload = await request.get_json(force=True)
-        location_key = ((payload or {}).get("location_key") or "").strip()
-        if not location_key:
-            return jsonify({"ok": False, "error": "missing location_key"}), 400
-        result = gfs.upsert_live(location_key, True, f"/watch?room={quote(location_key)}")
-        return jsonify(result), (200 if result.get("ok") else 400)
+    @bp.post("/gfs/api/upload_video")
+    async def gfs_legacy_upload_video():
+        try:
+            files = await request.files
+            form = await request.form
+            location_id = (form.get("location_key") or "").strip()
+            if not files.get("file"):
+                raise InvalidBBoxError("missing file")
+            return await gfs_location_upload(location_id)
+        except GfsError as exc:
+            log.error("legacy upload_video failed path=%s err=%s", request.path, exc, exc_info=True)
+            return jsonify(exc.to_json()), exc.status_code
 
-    @app.post("/gfs/api/live/stop")
-    async def gfs_live_stop():
-        payload = await request.get_json(force=True)
-        location_key = ((payload or {}).get("location_key") or "").strip()
-        if not location_key:
-            return jsonify({"ok": False, "error": "missing location_key"}), 400
-        result = gfs.upsert_live(location_key, False, "")
-        return jsonify(result), (200 if result.get("ok") else 400)
+    @bp.websocket("/ws/gfs")
+    async def ws_gfs():
+        await engine().websocket_handler()
 
-    @app.post("/gfs/api/upload_video")
-    async def gfs_upload_video():
-        form = await request.form
-        files = await request.files
-        location_key = (form.get("location_key") or "").strip()
-        file_obj = files.get("file")
-        if not location_key:
-            return jsonify({"ok": False, "error": "missing location_key"}), 400
-        if not file_obj:
-            return jsonify({"ok": False, "error": "missing file"}), 400
-        data = await file_obj.read()
-        result = gfs.save_upload_video(location_key=location_key, filename=file_obj.filename or "upload.mp4", raw=data)
-        return jsonify(result), (200 if result.get("ok") else 400)
-
-    @app.get("/gfs/api/frame")
-    async def gfs_frame():
-        return jsonify(gfs.frame_payload())
-
-    @app.get("/gfs/api/overlay")
-    async def gfs_overlay():
-        return jsonify(gfs.overlay_payload())
-
-    @app.get("/gfs/api/contours")
-    async def gfs_contours():
-        return jsonify(gfs.contours_payload())
-
-    @app.get("/gfs/api/legend")
-    async def gfs_legend():
-        return jsonify(gfs.legend_payload())
-
-    @app.get("/gfs/api/tiles/<int:z>/<int:x>/<int:y>")
-    async def gfs_tiles(z: int, x: int, y: int):
-        png = gfs.tile_png_bytes(z, x, y)
-        return png, 200, {"Content-Type": "image/png", "Cache-Control": "no-store"}
+    return bp
