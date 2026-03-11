@@ -2486,6 +2486,7 @@
     if (window.LFTRFishOrbRenderer?.createRenderer) {
       state.fishOrbRenderer = window.LFTRFishOrbRenderer.createRenderer({
         maps3dLib: state.maps3dLib,
+        markerLib: state.markerLib,
         globeEl,
         getView: parseGlobeCenterAndRange,
         openHud: (point, lockIt) => {
@@ -2521,6 +2522,7 @@
     }
 
     // tiny compatibility fallback: only for very small datasets if orb renderer is unavailable
+    console.warn('[gfs] fish orb renderer unavailable; using small PinElement fallback markers');
     const tiny = (state.fish || []).slice(0, 24);
     tiny.forEach((p) => {
       const lat = Number(p.lat);

@@ -11,6 +11,7 @@ def test_fish_orb_renderer_module_has_batched_interfaces():
     assert 'active: new Map()' in src
     assert 'free: []' in src
     assert 'requestAnimationFrame' in src
+    assert "document.createElement('div')" not in src
 
 
 def test_fish_orb_confidence_mapping_and_palette_present():
@@ -33,3 +34,12 @@ def test_indexgfs_uses_fish_orb_renderer_main_path_not_per_point_markers():
     render_block = html[render_start:load_start]
     assert 'state.fish.forEach' not in render_block
     assert 'setInterval(() => {' in render_block
+
+
+def test_fish_orb_renderer_uses_interactive_pin_content_and_click_events():
+    src = Path('static/js/fish_orb_renderer.js').read_text(encoding='utf-8')
+    assert 'new ctx.maps3dLib.Marker3DInteractiveElement' in src
+    assert 'new ctx.markerLib.PinElement' in src
+    assert 'marker.append(pin)' in src or 'wrapper.marker.append(wrapper.pin)' in src
+    assert 'gmp-click' in src
+    assert 'ctx.openHud' in src

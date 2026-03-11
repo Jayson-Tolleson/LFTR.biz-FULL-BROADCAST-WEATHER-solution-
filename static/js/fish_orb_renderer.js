@@ -128,6 +128,9 @@
   }
 
   function createRenderer(ctx) {
+    if (!ctx?.maps3dLib || !ctx?.markerLib) {
+      throw new Error('fish orb renderer requires maps3dLib and markerLib');
+    }
     const state = {
       rawItems: [],
       normalized: [],
@@ -179,18 +182,13 @@
       ].join('|');
     }
 
-    function makeOrbElement() {
-      const el = document.createElement('div');
-      el.className = 'fish-orb';
-      el.style.width = '14px';
-      el.style.height = '14px';
-      el.style.borderRadius = '999px';
-      el.style.pointerEvents = 'auto';
-      el.style.background = 'radial-gradient(circle at 35% 35%, rgba(222,255,233,0.95) 0%, rgba(80,255,140,0.85) 28%, rgba(16,185,129,0.6) 68%, rgba(6,57,26,0.25) 100%)';
-      el.style.boxShadow = '0 0 10px rgba(80,255,140,0.7), 0 0 24px rgba(16,185,129,0.55), 0 0 40px rgba(6,95,70,0.35)';
-      el.style.willChange = 'transform, opacity, box-shadow';
-      el.dataset.role = 'fish-orb';
-      return el;
+    function buildPin(style, cluster) {
+      return new ctx.markerLib.PinElement({
+        scale: clamp(style.orbScale * (cluster ? 1.08 : 1), 0.7, 2.6),
+        background: `rgba(${style.palette.core[0]},${style.palette.core[1]},${style.palette.core[2]},${clamp(0.35 + style.brightness * 0.55, 0.28, 0.95)})`,
+        borderColor: 'rgba(220,252,231,0.95)',
+        glyphColor: 'rgba(236,255,241,0.95)',
+      });
     }
 
     function acquireOrb() {
@@ -200,15 +198,17 @@
         position: { lat: 0, lng: 0, altitude: 10 },
         title: 'Fish orb',
       });
-      const el = makeOrbElement();
-      marker.append(el);
+      const style = confidenceToOrbStyle(0.5, 1);
+      const pin = buildPin(style, false);
+      marker.append(pin);
       const wrapper = {
         marker,
-        el,
+        pin,
         data: null,
         onClick: null,
         onEnter: null,
         onLeave: null,
+        lastStyleKey: '',
       };
       return wrapper;
     }
@@ -216,7 +216,6 @@
     function releaseOrb(wrapper) {
       if (!wrapper) return;
       wrapper.data = null;
-      try { wrapper.el.style.display = 'none'; } catch (_) {}
       try { wrapper.marker.remove(); } catch (_) {}
       state.free.push(wrapper);
     }
@@ -225,7 +224,6 @@
       wrapper.data = data;
       wrapper.marker.position = { lat: data.lat, lng: data.lon, altitude: data.altitude || 10 };
       wrapper.marker.title = data.cluster ? `${data.count} fish signals` : (data.point?.name || data.point?.location_key || 'Fish orb');
-      wrapper.el.style.display = '';
 
       if (wrapper.onClick) {
         wrapper.marker.removeEventListener('gmp-click', wrapper.onClick);
@@ -257,16 +255,28 @@
       const pulseScale = 0.9 + pulse * pulseBoost;
       const isActive = state.selectedKey && (data.point?.location_key === state.selectedKey);
       const activeBoost = isActive ? 0.2 : 0;
-      const size = Math.max(6, style.baseSize * pulseScale * (1 + activeBoost));
-      const alpha = clamp(style.palette.alpha * (0.72 + pulse * 0.36), 0.2, 0.98);
+      const scale = clamp(style.orbScale * pulseScale * (1 + activeBoost), 0.7, 2.8);
       const [r, g, b] = style.palette.halo;
-      wrapper.el.style.width = `${size}px`;
-      wrapper.el.style.height = `${size}px`;
-      wrapper.el.style.opacity = `${clamp(0.38 + style.brightness * 0.62, 0.2, 1)}`;
-      wrapper.el.style.boxShadow = `0 0 ${Math.round(size * 0.8)}px rgba(${r},${g},${b},${alpha}), 0 0 ${Math.round(size * 1.6)}px rgba(16,185,129,${clamp(alpha * 0.72, 0.2, 0.9)}), 0 0 ${Math.round(size * 2.7)}px rgba(5,150,105,${clamp(alpha * 0.45, 0.1, 0.7)})`;
-      wrapper.el.style.transform = `translateZ(0) scale(${style.orbScale * (isActive ? 1.12 : 1)})`;
-      const coreAlpha = clamp(0.25 + style.brightness * 0.74, 0.22, 0.98);
-      wrapper.el.style.background = `radial-gradient(circle at 35% 35%, rgba(222,255,233,0.96) 0%, rgba(${r},${g},${b},${coreAlpha}) 30%, rgba(16,185,129,${clamp(coreAlpha * 0.74, 0.18, 0.9)}) 68%, rgba(6,57,26,0.18) 100%)`;
+      const key = `${Math.round(scale * 100)}:${r}:${g}:${b}:${Math.round(style.brightness * 100)}`;
+
+      if (key !== wrapper.lastStyleKey) {
+        wrapper.lastStyleKey = key;
+        const bg = `rgba(${r},${g},${b},${clamp(0.35 + style.brightness * 0.55, 0.28, 0.95)})`;
+        try {
+          if (typeof wrapper.pin.scale !== 'undefined') wrapper.pin.scale = scale;
+          if (typeof wrapper.pin.background !== 'undefined') wrapper.pin.background = bg;
+          if (typeof wrapper.pin.borderColor !== 'undefined') wrapper.pin.borderColor = 'rgba(220,252,231,0.95)';
+          if (typeof wrapper.pin.glyphColor !== 'undefined') wrapper.pin.glyphColor = 'rgba(236,255,241,0.95)';
+        } catch (_) {
+          try { wrapper.marker.removeChild(wrapper.pin); } catch (_) {}
+          wrapper.pin = buildPin({ ...style, orbScale: scale }, data.cluster);
+          wrapper.marker.append(wrapper.pin);
+        }
+      }
+
+      const altBase = Number(data.altitude || 10);
+      const altPulse = isActive ? (pulse * 2.8) : (pulse * 1.5);
+      wrapper.marker.position = { lat: data.lat, lng: data.lon, altitude: altBase + altPulse };
     }
 
     function rebuild(force = false) {
