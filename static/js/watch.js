@@ -161,9 +161,10 @@
       return;
     }
     if (msg.type === 'waiting' || msg.type === 'error') {
-      if (msg.message === 'no_broadcaster') {
+      if (msg.message === 'no_broadcaster' || msg.message === 'stream_offline') {
         requestPending = false;
         needsStreamRequest = true;
+        hasRequestedStream = false;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
       }

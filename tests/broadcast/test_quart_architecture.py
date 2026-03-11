@@ -13,17 +13,16 @@ def test_create_app_returns_quart_instance():
     assert isinstance(app, quart.Quart)
 
 
-def test_gfs_is_http_only_no_ws_gfs_route():
+def test_gfs_routes_and_ws_channel_registered():
     from server.app_factory import create_app
 
     app = create_app()
     paths = {rule.rule for rule in app.url_map.iter_rules()}
-    assert '/api/gfs/scene' in paths
-    assert '/api/gfs/status' in paths
-    assert '/api/gfs/cloud-tiles' in paths
-    assert '/api/gfs/hazards' in paths
-    assert '/api/gfs/diagnostics' in paths
-    assert '/ws/gfs' not in paths
+    assert '/gfs/api/weather' in paths
+    assert '/gfs/api/clouds' in paths
+    assert '/gfs/api/bait' in paths
+    assert '/gfs/api/health' in paths
+    assert '/ws/gfs' in paths
 
 
 def test_quart_startup_static_missing_guard(monkeypatch, tmp_path):
@@ -40,7 +39,7 @@ def test_quart_startup_static_missing_guard(monkeypatch, tmp_path):
 def test_readme_mentions_quart_and_ws_scope():
     text = Path('README.md').read_text(encoding='utf-8').lower()
     assert 'quart' in text
-    assert '/gfs is http-only' in text
+    assert '/gfs' in text
     assert '/ws/watch' in text
 
 

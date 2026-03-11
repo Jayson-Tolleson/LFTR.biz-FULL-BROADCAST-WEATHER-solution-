@@ -15,6 +15,7 @@ from server.ai.gemini import generate_ai_reply, stream_ai_reply
 from server.ai.speech import synthesize_voice
 from server.media.upload import save_upload
 from server.state import AppState
+from server.rtc import StreamOfflineError
 from server.utils import now_ms
 
 
@@ -374,9 +375,15 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                             await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
                         else:
                             if not offer_outstanding:
-                                offer = await rtc.start_viewer_offer(room_id, client_id)
-                                await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
-                                offer_outstanding = True
+                                try:
+                                    offer = await rtc.start_viewer_offer(room_id, client_id)
+                                    await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                                    offer_outstanding = True
+                                except StreamOfflineError:
+                                    await ws.send_json({"ok": False, "type": "waiting", "room": room_id, "message": "stream_offline", "ts": now_ms()})
+                                except Exception:
+                                    log.exception("watch offer creation failed room=%s client=%s", room_id, client_id)
+                                    await ws.send_json({"ok": False, "type": "error", "room": room_id, "message": "watch_offer_failed", "ts": now_ms()})
                     await ws.send_json({"type": "stage_state", "payload": _stage_payload(room_id, state.ensure_room(room_id))})
                     continue
 
@@ -397,9 +404,17 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     if rtc is None:
                         await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
                     else:
-                        offer = await rtc.start_viewer_offer(room_id, client_id)
-                        await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
-                        offer_outstanding = True
+                        try:
+                            offer = await rtc.start_viewer_offer(room_id, client_id)
+                            await ws.send_json({"type": "watch_offer", "room": room_id, "payload": offer, "ts": now_ms()})
+                            offer_outstanding = True
+                        except StreamOfflineError:
+                            await ws.send_json({"ok": False, "type": "waiting", "room": room_id, "message": "stream_offline", "ts": now_ms()})
+                            offer_outstanding = False
+                        except Exception:
+                            log.exception("watch request_stream offer failed room=%s client=%s", room_id, client_id)
+                            await ws.send_json({"ok": False, "type": "error", "room": room_id, "message": "watch_offer_failed", "ts": now_ms()})
+                            offer_outstanding = False
                 elif kind in {"watch_answer", "webrtc_answer"}:
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "answer"
