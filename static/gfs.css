@@ -14,12 +14,3 @@ textarea{width:100%;min-height:70px;background:rgba(2,6,18,.65);color:var(--txt)
 .live-overlay{position:fixed;left:14px;bottom:14px;width:240px;height:240px;z-index:40;padding:6px;display:flex;flex-direction:column;gap:5px}.live-overlay video{width:100%;height:190px;border-radius:10px;object-fit:cover;background:#000}
 .live-controls{display:flex;justify-content:space-between}
 
-.fish-orb3d{position:relative;width:24px;height:24px;display:block;transform:translateZ(0);will-change:transform,opacity;animation:fishOrbFloat 4.2s ease-in-out infinite,fishOrbPulse 2.8s ease-in-out infinite}
-.fish-orb3d__halo,.fish-orb3d__glass,.fish-orb3d__core,.fish-orb3d__spec{position:absolute;inset:0;border-radius:50%;pointer-events:none}
-.fish-orb3d__halo{inset:-8px;background:radial-gradient(circle,rgba(52,255,144,.34) 0%,rgba(27,156,89,.16) 42%,rgba(16,56,38,0) 72%);filter:blur(1.2px)}
-.fish-orb3d__glass{background:radial-gradient(circle at 35% 28%, rgba(231,255,243,.74) 0%, rgba(166,255,201,.30) 22%, rgba(51,210,126,.18) 48%, rgba(9,56,33,.54) 88%);border:1px solid rgba(206,255,228,.52);box-shadow:inset 0 -5px 8px rgba(0,0,0,.30), inset 0 2px 3px rgba(255,255,255,.33)}
-.fish-orb3d__core{inset:7px;background:radial-gradient(circle,rgba(180,255,214,.98) 0%,rgba(56,246,132,.93) 45%,rgba(9,101,47,.84) 100%);box-shadow:0 0 10px rgba(47,255,145,.52)}
-.fish-orb3d__spec{inset:4px 8px 12px 6px;background:radial-gradient(circle at 40% 40%, rgba(255,255,255,.82), rgba(255,255,255,0) 68%)}
-.fish-orb3d.is-hover{transform:scale(1.08)}
-@keyframes fishOrbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.2px)}}
-@keyframes fishOrbPulse{0%,100%{opacity:1}50%{opacity:.88}}
