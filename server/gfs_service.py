@@ -2380,6 +2380,7 @@ class GFSService:
         }
 
         return {
+            "canonical_shape": tuple(canonical_shape),
             "precip": precip,
             "cloud_layers": cloud_layers_ds,
             "vectors": vectors,
@@ -2600,13 +2601,40 @@ class GFSService:
                 tiles.append(tile)
         return tiles
 
+    def _select_hazard_canonical_shape(self, fields: dict[str, Any], cloud_layers: dict[str, Any], precip_shape: tuple[int, int]) -> tuple[int, int]:
+        from_fields = fields.get("canonical_shape")
+        lat_shape = self._shape_of(fields.get("lat2d"))
+        low_shape = self._shape_of(cloud_layers.get("low") if isinstance(cloud_layers, dict) else None)
+
+        preferred = None
+        if from_fields and len(from_fields) >= 2:
+            preferred = (int(from_fields[0]), int(from_fields[1]))
+        elif lat_shape and len(lat_shape) >= 2:
+            preferred = (int(lat_shape[0]), int(lat_shape[1]))
+        elif low_shape and len(low_shape) >= 2:
+            preferred = (int(low_shape[0]), int(low_shape[1]))
+        else:
+            preferred = tuple(int(x) for x in precip_shape)
+
+        candidate_shapes = [
+            tuple(int(x) for x in sh[:2])
+            for sh in (from_fields, lat_shape, low_shape, precip_shape)
+            if sh is not None and len(sh) >= 2
+        ]
+        max_shape = max(candidate_shapes, key=lambda x: x[0] * x[1]) if candidate_shapes else preferred
+        if preferred[0] * preferred[1] < max_shape[0] * max_shape[1]:
+            raise ValueError(
+                f"hazard_canonical_shape_regression chosen={preferred} max_available={max_shape}"
+            )
+        return preferred
+
     def _derive_real_hazard_payloads(self, groups: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
         warned: set[str] = set()
         precip = np.asarray(fields["precip"], dtype=float)
-        canonical_shape = tuple(precip.shape)
+        cloud_layers = fields["cloud_layers"] if isinstance(fields.get("cloud_layers"), dict) else {}
+        canonical_shape = self._select_hazard_canonical_shape(fields, cloud_layers, tuple(precip.shape))
         log.info("[gfs] hazard canonical target shape=%s", canonical_shape)
 
-        cloud_layers = fields["cloud_layers"] if isinstance(fields.get("cloud_layers"), dict) else {}
         lat2d = self._coerce_field_to_canonical_grid(fields["lat2d"], canonical_shape, "hazard_lat2d", warned)
         lon2d = self._coerce_field_to_canonical_grid(fields["lon2d"], canonical_shape, "hazard_lon2d", warned)
         precip = self._coerce_field_to_canonical_grid(precip, canonical_shape, "hazard_precip_mm_hr", warned)

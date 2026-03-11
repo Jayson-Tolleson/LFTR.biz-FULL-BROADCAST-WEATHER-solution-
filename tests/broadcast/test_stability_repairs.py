@@ -8,6 +8,7 @@ np = pytest.importorskip("numpy")
 
 from server.gfs_service import GFSService
 from server import routes as routes_module
+from server import app_factory as app_factory_module
 
 
 def test_derive_real_source_fields_cloud_layers_match_precip(monkeypatch, tmp_path):
@@ -156,3 +157,69 @@ def test_derive_hail_mask_named_shape_mismatch_when_coercion_bypassed(monkeypatc
 
     with pytest.raises(ValueError, match=r"hail_mask_shape_mismatch cape=\(241, 480\) precip=\(721, 1440\) deep=\(241, 480\)"):
         svc.derive_hail_mask({"surface": object()}, precip, cloud_layers, target_shape=(721, 1440))
+
+
+def test_hazard_payload_uses_live_canonical_shape_over_coarse_precip(monkeypatch, tmp_path):
+    svc = GFSService(str(tmp_path))
+    coarse_shape = (241, 480)
+    live_shape = (721, 1440)
+
+    precip = np.ones(coarse_shape, dtype=float)
+    cloud_layers = {
+        "low": np.ones(live_shape, dtype=float) * 0.2,
+        "mid": np.ones(live_shape, dtype=float) * 0.3,
+        "high": np.ones(live_shape, dtype=float) * 0.8,
+    }
+    lat2d = np.zeros(coarse_shape, dtype=float)
+    lon2d = np.zeros(coarse_shape, dtype=float)
+
+    seen = {}
+
+    def _hail(groups, p, c, **kwargs):
+        seen["hail_precip_shape"] = np.asarray(p).shape
+        seen["hail_target"] = kwargs.get("target_shape")
+        return np.asarray(p) > 0.0
+
+    def _ltg(groups, p, c, **kwargs):
+        seen["ltg_precip_shape"] = np.asarray(p).shape
+        seen["ltg_target"] = kwargs.get("target_shape")
+        return np.asarray(p) > 0.0
+
+    monkeypatch.setattr(svc, "threshold_to_mask", lambda arr, _: np.asarray(arr) > 0.1)
+    monkeypatch.setattr(svc, "derive_hail_mask", _hail)
+    monkeypatch.setattr(svc, "derive_lightning_mask", _ltg)
+    monkeypatch.setattr(svc, "connected_components_or_simple_cell_polygons", lambda *args, **kwargs: [{"ok": True}])
+
+    out = svc._derive_real_hazard_payloads(
+        {},
+        {
+            "canonical_shape": live_shape,
+            "precip": precip,
+            "cloud_layers": cloud_layers,
+            "lat2d": lat2d,
+            "lon2d": lon2d,
+        },
+    )
+
+    assert out["rain"]["count"] == 1
+    assert seen["hail_target"] == live_shape
+    assert seen["ltg_target"] == live_shape
+    assert seen["hail_precip_shape"] == live_shape
+    assert seen["ltg_precip_shape"] == live_shape
+
+
+def test_hazard_canonical_shape_regression_guard(tmp_path):
+    svc = GFSService(str(tmp_path))
+    with pytest.raises(ValueError, match="hazard_canonical_shape_regression"):
+        svc._select_hazard_canonical_shape(
+            {"canonical_shape": (241, 480), "lat2d": np.zeros((721, 1440), dtype=float)},
+            {"low": np.zeros((241, 480), dtype=float)},
+            (241, 480),
+        )
+
+
+def test_create_quart_app_fails_fast_when_static_missing(monkeypatch, tmp_path):
+    missing_static = tmp_path / "missing_static"
+    monkeypatch.setattr(app_factory_module, "STATIC_DIR", missing_static)
+    with pytest.raises(RuntimeError, match="static directory missing at startup"):
+        app_factory_module.create_quart_app()

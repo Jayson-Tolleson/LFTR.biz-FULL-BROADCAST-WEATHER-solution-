@@ -24,9 +24,17 @@ def _configure_logging(debug: bool) -> None:
     )
 
 
+def _validate_static_layout() -> None:
+    if not STATIC_DIR.exists():
+        raise RuntimeError(f"static directory missing at startup: {STATIC_DIR}")
+    if not STATIC_DIR.is_dir():
+        raise RuntimeError(f"static path is not a directory at startup: {STATIC_DIR}")
+
+
 def create_quart_app() -> Quart:
     settings = load_settings()
     _configure_logging(settings.debug)
+    _validate_static_layout()
     provider_name()
 
     app = Quart(
