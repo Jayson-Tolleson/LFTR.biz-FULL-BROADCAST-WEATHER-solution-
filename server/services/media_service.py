@@ -1,6 +1,14 @@
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
-from fastapi import UploadFile
+
+
+class UploadLike(Protocol):
+    filename: str | None
+    content_type: str | None
+
+    async def read(self) -> bytes: ...
+
 
 UPLOAD_ROOT = Path(__file__).resolve().parent.parent.parent / "uploads"
 IMAGE_DIR = UPLOAD_ROOT / "images"
@@ -9,7 +17,7 @@ IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 
-async def save_upload_file(upload: UploadFile) -> dict:
+async def save_upload_file(upload: UploadLike) -> dict:
     filename = (upload.filename or "upload.bin").strip()
     suffix = Path(filename).suffix or ".bin"
     mimetype = (upload.content_type or "").lower()

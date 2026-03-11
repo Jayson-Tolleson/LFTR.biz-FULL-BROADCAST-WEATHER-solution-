@@ -1,7 +1,7 @@
 # LFTR Broadcast + GFS Globe Stack
 
 ## Short Overview
-LFTR Broadcast + GFS Globe is a real-time marine broadcast and weather intelligence platform. The stack now standardizes on a Python FastAPI backend, modular HTTP routers, WebRTC broadcast/watch flows, and scoped WebSocket signaling for watch/broadcast/chat. The /gfs data plane is HTTP-only and backed by real NOMADS GFS ingestion.
+LFTR Broadcast + GFS Globe is a real-time marine broadcast and weather intelligence platform. The stack now standardizes on a Python Quart backend with Hypercorn, modular route registration, WebRTC broadcast/watch flows, and scoped WebSocket signaling for watch/broadcast/chat. The /gfs data plane is HTTP-only and backed by real NOMADS GFS ingestion.
 
 The system provides fish marker intelligence, bait/weather overlays, and a popup HUD with report, upload, and live media context. It is built for practical deployment with modular install scripts, nginx, systemd, TLS, and TURN.
 
@@ -16,8 +16,8 @@ The system provides fish marker intelligence, bait/weather overlays, and a popup
 - Deployable server stack with nginx + systemd + TLS + TURN.
 
 ## Architecture (production target)
-- **FastAPI** is the primary ASGI app (`server.app_factory:create_app`).
-- **HTTP routers**: health, broadcast/pages, watch page, gfs APIs, ai APIs, uploads.
+- **Quart** is the sole web framework and ASGI app (`server.app_factory:create_app`).
+- **HTTP routes**: health, broadcast/pages, watch page, gfs APIs, ai APIs, uploads.
 - **WebSocket scope**: signaling/session lifecycle only for `/ws/watch` and `/ws/broadcast`; chat remains realtime on `/ws/chat`.
 - **/gfs is HTTP-only** (no websocket dependency).
 - **Services boundary** is under `server/services/` for GFS, RTC, AI/auth/speech/media wrappers.
@@ -31,7 +31,7 @@ hypercorn main:app --bind 127.0.0.1:8000
 ## Route Overview
 - Pages: `/`, `/broadcast`, `/watch`, `/gfs`, `/status-dashboard`
 - Health: `/health`
-- AI: `/ai/status`, `/ai/chat`, `/ai/tts`, `/ai/websearch`, compat `/ai_status`
+- AI: `/ai/chat`, `/ai/tts`, `/ai/websearch`, `/ai_status`
 - GFS HTTP APIs: `/api/gfs/status`, `/api/gfs/scene`, `/api/gfs/cloud-tiles`, `/api/gfs/hazards`, `/api/gfs/diagnostics`
 - GFS compat APIs: `/gfs/api/health`, `/gfs/api/scene`, `/gfs/api/cloud_tiles`, `/gfs/api/fish`
 - Uploads: `/api/upload`

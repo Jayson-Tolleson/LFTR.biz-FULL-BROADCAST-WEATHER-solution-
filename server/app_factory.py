@@ -3,21 +3,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from quart import Quart
 
-from server.ai.gemini import provider_name
 from server.config import load_settings
-from server.gfs_service import GFSService
+from server.routes import register_routes
 from server.rtc import RTCManager
 from server.state import AppState
-from server.routes_api.health import router as health_router
-from server.routes_api.pages import router as pages_router
-from server.routes_api.ai import router as ai_router
-from server.routes_api.broadcast import router as broadcast_router
-from server.routes_api.gfs import router as gfs_router, compat as gfs_compat_router
-from server.routes_api.uploads import router as uploads_router
-from server.ws.watch import init_ws_routes
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,58 +30,32 @@ def _validate_layout() -> None:
         raise RuntimeError(f"templates directory missing at startup: {TEMPLATES_DIR}")
 
 
-def create_quart_app() -> FastAPI:
+def create_quart_app() -> Quart:
     settings = load_settings()
     _configure_logging(settings.debug)
     _validate_layout()
-    provider_name()
 
-    app = FastAPI(title="LFTR Broadcast + GFS", version="1.0")
+    app = Quart(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     state = AppState(default_room=settings.default_room)
     rtc = RTCManager(state)
-    gfs = GFSService(str(STATIC_DIR))
 
-    app.state.settings = settings
-    app.state.app_state = state
-    app.state.rtc = rtc
-    app.state.gfs = gfs
+    register_routes(app, state, settings, rtc)
 
-    pages_router.static_dir = STATIC_DIR
-
-    app.include_router(health_router)
-    app.include_router(pages_router)
-    app.include_router(ai_router, prefix="/ai")
-    app.include_router(broadcast_router)
-    app.include_router(gfs_router)
-    app.include_router(gfs_compat_router)
-    app.include_router(uploads_router)
-
-    # Backward compatible AI status endpoint.
-    @app.get('/ai_status')
-    async def ai_status_compat():
-        from server.routes_api.ai import ai_status
-
-        return await ai_status()
-
-
-    @app.get('/api/gfs')
-    async def api_gfs_legacy_scene():
-        return gfs.get_scene_payload()
-
-    app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
-    init_ws_routes(app, state, rtc)
+    app.settings_obj = settings
+    app.state_obj = state
+    app.rtc_manager = rtc
 
     logging.getLogger("server.startup").info(
-        "startup ready static=%s templates=%s routes=health,broadcast,watch,gfs,ai,uploads ws=watch/broadcast/chat",
+        "startup ready framework=quart static=%s templates=%s routes=/,/broadcast,/watch,/gfs ws=/ws/watch,/ws/broadcast,/ws/chat",
         STATIC_DIR,
         TEMPLATES_DIR,
     )
     return app
 
 
-def create_asgi_app():
+def create_asgi_app() -> Quart:
     return create_quart_app()
 
 
-def create_app():
+def create_app() -> Quart:
     return create_quart_app()
