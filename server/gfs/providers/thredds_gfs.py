@@ -78,7 +78,14 @@ class ThreddsGfsProvider:
     async def fetch_subset(self, *, variables: tuple[str, ...], bbox: BBox, stride: int, valid_time: datetime | None) -> tuple[dict[str, Any], datetime | None]:
         ds = self._open_dataset()
         try:
-            subset = ds[list(variables)]
+            available_vars = [name for name in variables if name in ds.data_vars]
+            missing_vars = [name for name in variables if name not in ds.data_vars]
+            if missing_vars:
+                log.warning("requested vars missing count=%s missing=%s", len(missing_vars), missing_vars)
+            if not available_vars:
+                raise ValueError(f"none of requested variables available; missing={missing_vars}")
+
+            subset = ds[available_vars]
 
             time_coord = self._coord_name(subset, ("time", "valid_time"))
             if valid_time is not None and time_coord:
@@ -107,7 +114,7 @@ class ThreddsGfsProvider:
             if isel_args:
                 subset = subset.isel(**isel_args)
 
-            data = {name: subset[name].fillna(0).astype("float32").values.tolist() for name in variables if name in subset}
+            data = {name: subset[name].fillna(0).astype("float32").values.tolist() for name in available_vars if name in subset}
 
             source_time = self._safe_dt(subset.coords[time_coord].values if time_coord else None)
             self._last_fetch_at = datetime.now(timezone.utc)

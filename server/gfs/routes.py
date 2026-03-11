@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import os
 
 from quart import Blueprint, current_app, jsonify, request, send_file
 
@@ -42,9 +43,28 @@ def create_gfs_blueprint(static_dir: Path) -> Blueprint:
     @bp.get("/gfs/api/config")
     async def gfs_config():
         settings = getattr(current_app, "settings_obj", None)
+        key = getattr(settings, "google_maps_api_key", "")
         return jsonify({
-            "google_maps_api_key": getattr(settings, "google_maps_api_key", ""),
+            "google_maps_api_key": key,
             "debug": engine().config.debug_enabled,
+            "runtime": {
+                "google_maps_key_present": bool(key),
+                "settings_loaded": settings is not None,
+            },
+        })
+
+    @bp.get("/gfs/api/runtime")
+    async def gfs_runtime():
+        settings = getattr(current_app, "settings_obj", None)
+        key = getattr(settings, "google_maps_api_key", "")
+        return jsonify({
+            "google_maps_key_present": bool(key),
+            "settings_loaded": settings is not None,
+            "debug": engine().config.debug_enabled,
+            "env_hints": {
+                "has_google_maps_env": bool(os.getenv("GOOGLE_MAPS_API_KEY")),
+                "has_install_env_file": Path("/etc/broadcast/install.env").exists(),
+            },
         })
 
     @bp.get("/gfs/api/locations")
@@ -167,7 +187,14 @@ def create_gfs_blueprint(static_dir: Path) -> Blueprint:
     @bp.get("/gfs/api/health")
     async def gfs_health():
         payload = engine().health_payload()
+        settings = getattr(current_app, "settings_obj", None)
+        key = getattr(settings, "google_maps_api_key", "")
         payload["locations"] = {"count": len(locations())}
+        payload["runtime"] = {
+            "google_maps_key_present": bool(key),
+            "settings_loaded": settings is not None,
+            "debug": engine().config.debug_enabled,
+        }
         return jsonify(payload)
 
     @bp.get("/gfs/api/debug")

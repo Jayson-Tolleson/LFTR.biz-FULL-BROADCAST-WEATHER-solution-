@@ -1,7 +1,7 @@
 import { jget, jpost, upload } from './api.js';
 import { loadLocationVideos, renderVideoFrame } from './media.js';
 
-export function createHud({ root, liveOverlay, liveVideo, onStartLive, onStopLive }) {
+export function createHud({ root, liveOverlay, liveVideo, onStartLive, onStopLive, onSelectLocation }) {
   const el = {
     panel: root,
     close: document.getElementById('hudClose'),
@@ -66,6 +66,7 @@ export function createHud({ root, liveOverlay, liveVideo, onStartLive, onStopLiv
   return {
     async open(location) {
       selected = location;
+      if (onSelectLocation) onSelectLocation(location);
       el.panel.classList.remove('closed');
       el.panel.setAttribute('aria-hidden', 'false');
       await refresh();
