@@ -10,10 +10,52 @@
   const mode = document.getElementById('mode');
   const ai = document.getElementById('ai');
   const label = document.getElementById('label');
+  const videoWrap = v?.closest('.videoWrap') || v?.parentElement;
 
   let ws = null;
   let pc = null;
   let retryDelayMs = 1000;
+  let requestPending = false;
+  let broadcasterPresent = false;
+  let needsStreamRequest = false;
+  let streamAttached = false;
+  let isNegotiating = false;
+  let hasRequestedStream = false;
+
+  const unmuteBtn = document.createElement('button');
+  unmuteBtn.type = 'button';
+  unmuteBtn.textContent = 'Tap for sound';
+  unmuteBtn.style.cssText = 'position:absolute;right:12px;bottom:12px;z-index:4;padding:8px 10px;border-radius:999px;border:1px solid #2f3b57;background:rgba(9,13,25,.82);color:#e8eefc;cursor:pointer;display:none';
+  if (videoWrap) {
+    const pos = getComputedStyle(videoWrap).position;
+    if (!pos || pos === 'static') videoWrap.style.position = 'relative';
+    videoWrap.appendChild(unmuteBtn);
+  }
+
+  function showUnmute(show) {
+    unmuteBtn.style.display = show ? 'inline-flex' : 'none';
+  }
+
+  async function playVideo(reason) {
+    try {
+      await v.play();
+    } catch (err) {
+      console.warn('[watch] video play blocked', { reason, message: err?.message || String(err) });
+    }
+  }
+
+  function setLiveMutedAutoplay() {
+    v.playsInline = true;
+    v.autoplay = true;
+    v.muted = true;
+    showUnmute(true);
+  }
+
+  unmuteBtn.addEventListener('click', async () => {
+    v.muted = false;
+    await playVideo('manual_unmute');
+    showUnmute(false);
+  });
 
   async function iceServers() {
     try {
@@ -30,17 +72,24 @@
     ws.send(JSON.stringify({ type, room, clientId, role: 'viewer', ...extra }));
   }
 
-  function requestStream() {
+  function requestStream(force = false) {
+    const connected = !!(pc && pc.connectionState === 'connected' && streamAttached);
+    if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected || hasRequestedStream)) {
+      needsStreamRequest = !broadcasterPresent;
+      return;
+    }
+    requestPending = true;
+    hasRequestedStream = true;
+    needsStreamRequest = false;
     sendJson('request_stream');
   }
 
   function attachRemoteTrack(event) {
     const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
     v.srcObject = stream;
-    v.playsInline = true;
-    v.autoplay = true;
-    v.muted = false;
-    v.play().catch(() => {});
+    streamAttached = true;
+    setLiveMutedAutoplay();
+    playVideo('remote_track_attach');
     standby.style.display = 'none';
     mode.textContent = 'LIVE';
   }
@@ -76,27 +125,45 @@
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
       const present = !!st.runtime?.broadcaster_present;
-      if (present) requestStream();
+      broadcasterPresent = present;
+      if (present) {
+        needsStreamRequest = false;
+        requestStream();
+      }
       return;
     }
     if (msg.type === 'state_update') {
       const st = msg.state || {};
       updateAiStatus(st.settings?.ai_status || 'idle');
       const present = !!st.runtime?.broadcaster_present;
-      if (present) requestStream();
+      broadcasterPresent = present;
+      if (present && !requestPending) {
+        needsStreamRequest = false;
+        requestStream();
+      }
       return;
     }
     if (msg.type === 'presence') {
       applyPresence(msg);
-      if (msg.broadcaster_present) requestStream();
+      broadcasterPresent = !!msg.broadcaster_present;
+      if (broadcasterPresent && needsStreamRequest) {
+        requestStream();
+        needsStreamRequest = false;
+      } else if (!broadcasterPresent) {
+        requestPending = false;
+        hasRequestedStream = false;
+        needsStreamRequest = true;
+      }
       return;
     }
     if (msg.type === 'ai_status') {
       updateAiStatus(msg.status || 'idle');
       return;
     }
-    if (msg.type === 'error') {
+    if (msg.type === 'waiting' || msg.type === 'error') {
       if (msg.message === 'no_broadcaster') {
+        requestPending = false;
+        needsStreamRequest = true;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
       }
@@ -106,20 +173,29 @@
       const p = msg.payload || {};
       label.textContent = p.label || 'PUBLIC ACCESS';
       if (p.mode === 'upload' && p.latestUploadUrl) {
+        streamAttached = false;
+        showUnmute(false);
         v.srcObject = null;
         v.src = p.latestUploadUrl;
-        v.play().catch(() => {});
+        playVideo('fallback_upload');
         standby.style.display = 'none';
         mode.textContent = 'LATEST UPLOAD';
       }
       return;
     }
     if ((msg.type === 'watch_offer' || msg.type === 'webrtc_offer') && msg.payload?.sdp) {
-      const c = await ensureViewerPeerConnection(true);
-      await c.setRemoteDescription(msg.payload);
-      const answer = await c.createAnswer();
-      await c.setLocalDescription(answer);
-      sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+      isNegotiating = true;
+      try {
+        const c = await ensureViewerPeerConnection(true);
+        await c.setRemoteDescription(msg.payload);
+        const answer = await c.createAnswer();
+        await c.setLocalDescription(answer);
+        sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+      } finally {
+        requestPending = false;
+        hasRequestedStream = false;
+        isNegotiating = false;
+      }
       return;
     }
     if (msg.type === 'webrtc_ice' && pc) {
@@ -129,9 +205,23 @@
       }
       return;
     }
-    if (msg.type === 'webrtc_state' && msg.payload?.state !== 'connected' && mode.textContent === 'LIVE') {
-      mode.textContent = 'STANDBY';
-      standby.style.display = 'block';
+    if (msg.type === 'webrtc_state') {
+      const st = msg.payload?.state;
+      if (st === 'connected') {
+        isNegotiating = false;
+        requestPending = false;
+        hasRequestedStream = false;
+        return;
+      }
+      if ((st === 'closed' || st === 'failed' || st === 'disconnected') && mode.textContent === 'LIVE') {
+        streamAttached = false;
+        isNegotiating = false;
+        requestPending = false;
+        hasRequestedStream = false;
+        mode.textContent = 'STANDBY';
+        standby.style.display = 'block';
+        if (broadcasterPresent) requestStream();
+      }
       return;
     }
     if (msg.type === 'pong') return;
@@ -145,7 +235,12 @@
     ws.onopen = () => {
       retryDelayMs = 1000;
       conn.textContent = 'connected';
+      requestPending = false;
+      isNegotiating = false;
+      hasRequestedStream = false;
+      needsStreamRequest = true;
       sendJson('join');
+      if (broadcasterPresent) requestStream();
     };
     ws.onmessage = (ev) => {
       let msg;
@@ -155,9 +250,13 @@
     ws.onerror = (err) => console.warn('[watch] websocket error', { url, room, err });
     ws.onclose = (ev) => {
       conn.textContent = 'reconnecting';
+      requestPending = false;
+      isNegotiating = false;
+      hasRequestedStream = false;
+      streamAttached = false;
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
       setTimeout(connectWatchSocket, retryDelayMs);
-      retryDelayMs = Math.min(15000, Math.round(retryDelayMs * 1.6));
+      retryDelayMs = Math.min(20000, Math.round(retryDelayMs * 1.8));
     };
   }
 

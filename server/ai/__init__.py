@@ -9,6 +9,7 @@ from typing import Any, Dict, Sequence
 
 from .gemini import generate_ai_reply, provider_name
 from .speech import synthesize_voice, transcribe_audio_chunk
+from .auth import auth_status_payload, resolve_gcp_auth_mode
 
 log = logging.getLogger("server.ai.pkg")
 _WARNED_STT_UNAVAILABLE = False
@@ -53,7 +54,23 @@ async def handle_websearch(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "provider": "serpapi", "error": "provider_request_failed", "message": str(exc), "data": {"query": query, "results": []}}
 
 
-async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None) -> str:
+
+
+def stt_available() -> bool:
+    try:
+        from google.cloud import speech  # noqa: F401
+        return resolve_gcp_auth_mode() in {"adc_ok", "explicit_key_ok"}
+    except Exception:
+        return False
+
+
+def ai_status() -> dict[str, Any]:
+    status = auth_status_payload()
+    return {
+        **status,
+        "stt_ready": stt_available(),
+    }
+async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None, sample_rate_hz: int | None = None, channels: int | None = None) -> str:
     global _WARNED_STT_UNAVAILABLE
     if not chunks:
         return ""
@@ -67,7 +84,13 @@ async def transcribe_track(chunks: Sequence[bytes], mime: str | None = None) -> 
         import base64
 
         b64 = base64.b64encode(chunk).decode("ascii")
-        transcript = await asyncio.to_thread(transcribe_audio_chunk, b64)
+        transcript = await asyncio.to_thread(
+            transcribe_audio_chunk,
+            b64,
+            mime=mime,
+            sample_rate_hz=sample_rate_hz,
+            channels=channels,
+        )
         return str(transcript or "").strip()
     except Exception:
         if not _WARNED_STT_UNAVAILABLE:
@@ -84,4 +107,6 @@ __all__ = [
     "handle_chat",
     "handle_websearch",
     "transcribe_track",
+    "stt_available",
+    "ai_status",
 ]

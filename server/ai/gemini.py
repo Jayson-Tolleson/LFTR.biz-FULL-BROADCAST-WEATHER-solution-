@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import Generator
 
+from .auth import get_effective_google_project, maybe_apply_google_credentials_env, resolve_gcp_auth_mode
+
 
 log = logging.getLogger("server.ai.gemini")
 
@@ -24,26 +26,22 @@ class StubProvider:
 
 class VertexGeminiProvider:
     def __init__(self) -> None:
-        self.project = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+        maybe_apply_google_credentials_env()
+        self.project = get_effective_google_project()
         self.location = os.getenv("VERTEX_LOCATION", "global").strip() or "global"
         self.model_name = os.getenv("VERTEX_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 
-        key_path = os.getenv("GCP_KEY", "").strip()
-        if key_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
+        # Use google-genai client for Vertex to avoid deprecated vertexai.generative_models.
+        from google import genai
 
-        from vertexai import init
-        from vertexai.generative_models import GenerativeModel
-
-        init(project=self.project, location=self.location)
-        self.model = GenerativeModel(self.model_name)
+        self.client = genai.Client(vertexai=True, project=self.project, location=self.location)
 
     def generate_content(self, prompt: str) -> str:
-        response = self.model.generate_content(prompt)
+        response = self.client.models.generate_content(model=self.model_name, contents=prompt)
         return (getattr(response, "text", "") or "").strip()
 
     def stream_content(self, prompt: str) -> Generator[str, None, None]:
-        for chunk in self.model.generate_content(prompt, stream=True):
+        for chunk in self.client.models.generate_content_stream(model=self.model_name, contents=prompt):
             text = (getattr(chunk, "text", "") or "")
             if text:
                 yield text
@@ -57,7 +55,7 @@ def _vertex_requested() -> bool:
     ai_provider = os.getenv("AI_PROVIDER", "").strip().lower()
     if ai_provider == "vertex":
         return True
-    return bool(os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() and os.getenv("GCP_KEY", "").strip())
+    return bool(get_effective_google_project() and resolve_gcp_auth_mode() in {"adc_ok", "explicit_key_ok"})
 
 
 def _get_provider():
@@ -69,12 +67,10 @@ def _get_provider():
         try:
             _PROVIDER = VertexGeminiProvider()
             _PROVIDER_KIND = "vertex"
-            log.info("[AI] Vertex Gemini enabled")
-            log.info("[AI] Model: %s", _PROVIDER.model_name)
-            log.info("[AI] Location: %s", _PROVIDER.location)
+            log.info("[AI] Vertex Gemini enabled model=%s location=%s", _PROVIDER.model_name, _PROVIDER.location)
             return _PROVIDER
         except Exception:
-            log.warning("[AI] Vertex credentials missing — AI disabled")
+            log.warning("[AI] Vertex credentials/client unavailable auth_mode=%s — AI disabled", resolve_gcp_auth_mode())
 
     _PROVIDER = StubProvider()
     _PROVIDER_KIND = "stub"

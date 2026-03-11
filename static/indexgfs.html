@@ -388,6 +388,7 @@
 <script src="/static/jetstream.js"></script>
 <script src="/static/ocean-swell.js"></script>
 
+<script src="/static/js/fish_orb_renderer.js"></script>
 <script>
 (() => {
   const FULL_GLOBE_BBOX = { west: -180, south: -90, east: 180, north: 90 };
@@ -465,6 +466,8 @@
     mapsApiKey: '',
     maps3dLib: null,
     markerLib: null,
+    mapsLibrariesReady: false,
+    markerRetryTimer: null,
     mapsScriptLoading: null,
     hudLocked: false,
     hudHover: false,
@@ -480,7 +483,11 @@
     polygonRejectSummary: new Map(),
     polygonRenderBudget: { maxPolygonsPerTileLayer: 42, maxVerticesPerPolygon: 110, maxTotalVerticesPerPass: 8500, maxHolesPerPolygon: 3, minAreaDeg2: 0.000012, maxSpanDeg: 48 },
     polygonRenderPass: { totalVertices: 0, byTileLayer: new Map() },
-    renderStats: { fishItems: 0, fishMarkersRendered: 0, cloudTiles: 0, cloudPolygonsRendered: 0, cloudInteractiveRendered: 0, rainRendered: 0, lightningRendered: 0 },
+    fishOrbRenderer: null,
+    fishOrbRefreshId: null,
+    tileEmptyStreak: 0,
+    lastTileLayerCounts: { clouds: 0, precip: 0, lightning: 0, wind: 0, fish: 0, sst: 0, swell: 0 },
+    renderStats: { fishItems: 0, fishMarkersRendered: 0, fishClustersRendered: 0, fishPoolFree: 0, fishRebuildMs: 0, cloudTiles: 0, cloudPolygonsRendered: 0, cloudInteractiveRendered: 0, rainRendered: 0, lightningRendered: 0 },
   };
 
   const layerManager = {
@@ -532,7 +539,7 @@
   function setStatus(msg, isStale = false) {
     const mapState = state.mapReady ? 'ready' : 'fallback';
     const modeFlag = state.tileMode ? 'tile' : 'scene';
-    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • fish:${state.renderStats.fishItems} markers:${state.renderStats.fishMarkersRendered} cloudTiles:${state.renderStats.cloudTiles} cloudPolys:${state.renderStats.cloudPolygonsRendered + state.renderStats.cloudInteractiveRendered} rain:${state.renderStats.rainRendered} ltg:${state.renderStats.lightningRendered} tileFail:${state.tileFailureCount} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
+    statusLine.innerHTML = `WS: ${state.wsConnected ? 'connected' : 'disconnected'} • Last: ${state.lastUpdateAt ? new Date(state.lastUpdateAt).toLocaleTimeString() : 'n/a'} • Map: ${mapState}/${modeFlag} • Src:${state.weatherSource}/${state.weatherPayloadState}/${state.weatherConfidence} • fish:${state.renderStats.fishItems} orbs:${state.renderStats.fishMarkersRendered} clusters:${state.renderStats.fishClustersRendered} pool:${state.renderStats.fishPoolFree} rebuild:${state.renderStats.fishRebuildMs.toFixed ? state.renderStats.fishRebuildMs.toFixed(1) : state.renderStats.fishRebuildMs}ms cloudTiles:${state.renderStats.cloudTiles} cloudPolys:${state.renderStats.cloudPolygonsRendered + state.renderStats.cloudInteractiveRendered} rain:${state.renderStats.rainRendered} ltg:${state.renderStats.lightningRendered} tileFail:${state.tileFailureCount} • SST:${state.feature.sst ? "on" : "off"} Swell:${state.feature.swell ? "on" : "off"} • ${msg}`;
     statusLine.classList.toggle('stale', !!isStale);
   }
 
@@ -555,9 +562,18 @@
     };
 
     if (kind === 'markers') {
-      state.mapMarkers.forEach((m) => {
-        try { m.style.display = state.feature.markers ? '' : 'none'; } catch (_) {}
-      });
+      if (state.fishOrbRenderer) {
+        state.fishOrbRenderer.setEnabled(state.feature.markers && state.mapReady);
+        const stats = state.fishOrbRenderer.getStats();
+        state.renderStats.fishMarkersRendered = stats.activeCount;
+        state.renderStats.fishClustersRendered = stats.clusteredCount;
+        state.renderStats.fishPoolFree = stats.freeCount;
+        state.renderStats.fishRebuildMs = stats.rebuildMs;
+      } else {
+        state.mapMarkers.forEach((m) => {
+          try { m.style.display = state.feature.markers ? '' : 'none'; } catch (_) {}
+        });
+      }
       if (!state.feature.markers) {
         hideHud(true);
         setActiveMarkerByKey(null);
@@ -626,12 +642,63 @@
     ['reports', 'Reports'],
   ].forEach(([k, l]) => featuresEl.appendChild(mkFeature(k, l)));
 
-  async function json(url, opts) {
-    const res = await fetch(url, opts);
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || body.ok === false) {
-      throw new Error(body.error || `request failed (${res.status})`);
+  function _snippet(text, max = 180) {
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    return s.length > max ? `${s.slice(0, max)}…` : s;
+  }
+
+  function validateScenePayloadShape(payload) {
+    const keys = [];
+    const items = Array.isArray(payload?.items) ? payload.items : null;
+    const sceneClouds = Array.isArray(payload?.scene?.clouds) ? payload.scene.clouds : null;
+    const rootClouds = Array.isArray(payload?.clouds) ? payload.clouds : null;
+    const precip = Array.isArray(payload?.scene?.precip) ? payload.scene.precip : (Array.isArray(payload?.precip_columns) ? payload.precip_columns : null);
+    const lightning = Array.isArray(payload?.scene?.lightning) ? payload.scene.lightning : (Array.isArray(payload?.lightning_events) ? payload.lightning_events : null);
+    if (items) keys.push('items');
+    if (sceneClouds) keys.push('scene.clouds');
+    if (rootClouds) keys.push('clouds');
+    if (precip) keys.push('precip');
+    if (lightning) keys.push('lightning');
+    const structurallyValid = !!(payload && typeof payload === 'object' && !Array.isArray(payload));
+    return { ok: structurallyValid, keys, hasWeatherData: keys.length > 0 };
+  }
+
+  async function json(url, opts = {}) {
+    const fetchOpts = opts && !opts.method && !opts.headers && !opts.body && !opts.validate ? opts : {
+      method: opts.method,
+      headers: opts.headers,
+      body: opts.body,
+    };
+    const validate = typeof opts?.validate === 'function' ? opts.validate : null;
+    const treatOkFalseAsError = opts?.treatOkFalseAsError !== false;
+
+    const res = await fetch(url, fetchOpts);
+    const contentType = res.headers.get('content-type') || 'unknown';
+    const raw = await res.text();
+    let body = {};
+    if (raw && raw.trim()) {
+      try {
+        body = JSON.parse(raw);
+      } catch (err) {
+        throw new Error(`json parse failed url=${url} status=${res.status} content-type=${contentType} body=${_snippet(raw)}`);
+      }
     }
+
+    if (!res.ok) {
+      throw new Error(`http failure url=${url} status=${res.status} content-type=${contentType} error=${body?.error || body?.message || _snippet(raw)}`);
+    }
+
+    if (treatOkFalseAsError && body?.ok === false && (body?.error || body?.message || !Object.keys(body || {}).length)) {
+      throw new Error(`application failure url=${url} status=${res.status} content-type=${contentType} error=${body?.error || body?.message || 'ok_false_no_details'}`);
+    }
+
+    if (validate) {
+      const result = validate(body);
+      if (!result?.ok) {
+        throw new Error(`schema failure url=${url} status=${res.status} content-type=${contentType} missing=${(result?.missing || []).join(',') || 'unknown'} body=${_snippet(raw)}`);
+      }
+    }
+
     return body;
   }
 
@@ -649,9 +716,21 @@
   }
 
   function clearMapMarkers() {
+    if (state.fishOrbRenderer) {
+      try { state.fishOrbRenderer.destroy(); } catch (_) {}
+      state.fishOrbRenderer = null;
+    }
+    if (state.fishOrbRefreshId) {
+      clearInterval(state.fishOrbRefreshId);
+      state.fishOrbRefreshId = null;
+    }
     state.mapMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
     state.mapMarkers = [];
     state.markerStates = new Map();
+    state.renderStats.fishMarkersRendered = 0;
+    state.renderStats.fishClustersRendered = 0;
+    state.renderStats.fishPoolFree = 0;
+    state.renderStats.fishRebuildMs = 0;
   }
 
   function clearCloudPolygons() {
@@ -2057,16 +2136,29 @@
     const fish = collectTileFeatures('fish');
     const sst = collectTileFeatures('sst');
     const swell = collectTileFeatures('swell');
+    const wind = collectTileFeatures('wind');
     state.cloudTiles = clouds;
     state.weatherPayload = state.weatherPayload || {};
     state.weatherPayload.precip_columns = precip;
     state.weatherPayload.lightning_events = lightning;
+    state.weatherPayload.wind_vectors = wind;
     if (fish.length) {
       state.fish = fish;
     }
     state.weatherPayload.scene = state.weatherPayload.scene || {};
     state.weatherPayload.scene.sst = sst;
     state.weatherPayload.scene.swell = swell;
+    const counts = {
+      clouds: clouds.length,
+      precip: precip.length,
+      lightning: lightning.length,
+      wind: wind.length,
+      fish: fish.length,
+      sst: sst.length,
+      swell: swell.length,
+    };
+    state.lastTileLayerCounts = counts;
+    return counts;
   }
 
   async function refreshVisibleTiles() {
@@ -2129,7 +2221,8 @@
         }
       }
 
-      applyTileAggregates();
+      const layerCounts = applyTileAggregates();
+      console.info('[gfs] tile layer counts', layerCounts);
 
       const cloudMap = state.layerTileData.clouds || new Map();
       const firstCloudTile = [...cloudMap.values()].find((v) => v && v.status && v.meta);
@@ -2158,6 +2251,20 @@
     }
   }
 
+  function hasUsableTileWeather(counts) {
+    const c = counts || state.lastTileLayerCounts || {};
+    const enabled = state.feature || {};
+    const relevant = [
+      enabled.clouds ? Number(c.clouds || 0) : 0,
+      enabled.rain ? Number(c.precip || 0) : 0,
+      enabled.lightning ? Number(c.lightning || 0) : 0,
+      enabled.jet ? Number(c.wind || 0) : 0,
+      enabled.sst ? Number(c.sst || 0) : 0,
+      enabled.swell ? Number(c.swell || 0) : 0,
+    ];
+    return relevant.some((v) => v > 0);
+  }
+
   async function loadClouds(force = false) {
     if (!force && Date.now() - state.cloudFetchedAt < 75000 && state.cloudTiles.length) {
       await refreshVisibleTiles().catch(() => {});
@@ -2168,19 +2275,43 @@
     const started = performance.now();
     if (state.tileMode && state.mapReady) {
       await refreshVisibleTiles();
-      if (state.cloudTiles.length || (state.weatherPayload?.precip_columns || []).length || (state.weatherPayload?.lightning_events || []).length) {
+      let layerCounts = state.lastTileLayerCounts || {};
+      if (!hasUsableTileWeather(layerCounts)) {
+        state.tileEmptyStreak = Number(state.tileEmptyStreak || 0) + 1;
+        if (state.tileEmptyStreak <= 1) {
+          await new Promise((r) => setTimeout(r, 350));
+          await refreshVisibleTiles();
+          layerCounts = state.lastTileLayerCounts || {};
+        }
+      } else {
+        state.tileEmptyStreak = 0;
+      }
+
+      if (hasUsableTileWeather(layerCounts)) {
         state.cloudFetchedAt = Date.now();
         setStatus(`Tile mode active • clouds:${state.cloudTiles.length} precip:${(state.weatherPayload?.precip_columns || []).length} lightning:${(state.weatherPayload?.lightning_events || []).length}`);
         await renderWeatherLayers();
         if (state.fish.length) await renderMapMarkers().catch(() => {});
         return;
       }
-      state.weatherQualityNote = 'tile mode empty; using scene fallback';
-      console.warn('[gfs] tile mode returned empty, falling back to scene endpoint');
+      state.weatherQualityNote = `tile mode empty; using scene fallback (counts=${JSON.stringify(layerCounts)})`;
+      console.warn('[gfs] tile mode returned empty, falling back to scene endpoint', { reason: 'no_usable_weather_tiles', layerCounts, tileEmptyStreak: state.tileEmptyStreak });
     }
-    const payload = await json(`/gfs/api/scene?limit=${encodeURIComponent(lod.tileLimit)}&compact=1`);
+    const payload = await json(`/gfs/api/scene?limit=${encodeURIComponent(lod.tileLimit)}&compact=1`, {
+      validate: (body) => {
+        const r = validateScenePayloadShape(body);
+        return r.ok ? { ok: true } : { ok: false, missing: ['scene_payload_object'] };
+      },
+      treatOkFalseAsError: false,
+    });
     state.weatherPayload = payload || null;
-    const cloudItems = Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.scene?.clouds) ? payload.scene.clouds : [];
+    const cloudItems = Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload?.scene?.clouds)
+        ? payload.scene.clouds
+        : Array.isArray(payload?.clouds)
+          ? payload.clouds
+          : [];
     state.cloudTiles = cloudItems;
     if (!Array.isArray(payload?.items) && Array.isArray(payload?.scene?.clouds)) console.info('[gfs] using scene.clouds compatibility adapter');
     state.cloudFetchedAt = Date.now();
@@ -2190,7 +2321,11 @@
     state.weatherQualityNote = String(payload.quality_note || '');
     state.weatherConfidence = String(payload.confidence || 'unknown');
     const sourceLabel = state.weatherPayloadState === 'live' ? 'live real GFS/NOMADS' : state.weatherPayloadState === 'cached' ? 'cached real payload' : 'synthetic fallback';
-    console.info('[gfs] payload loaded', { clouds: state.cloudTiles.length, precip: (payload?.scene?.precip || payload?.precip_columns || []).length, lightning: (payload?.scene?.lightning || payload?.lightning_events || []).length, fish: (payload?.scene?.fish || []).length });
+    const sceneValidation = validateScenePayloadShape(payload);
+    if (!sceneValidation.hasWeatherData) {
+      console.warn('[gfs] scene payload parsed but contains no weather arrays; keeping fish/balloons active', { sceneValidation, payloadState: state.weatherPayloadState });
+    }
+    console.info('[gfs] payload loaded', { clouds: state.cloudTiles.length, precip: (payload?.scene?.precip || payload?.precip_columns || []).length, lightning: (payload?.scene?.lightning || payload?.lightning_events || []).length, fish: (payload?.scene?.fish || []).length, sceneValidation });
     setStatus(`Cloud feed ${state.cloudTiles.length} tiles • ${fetchMs}ms • ${sourceLabel}${state.weatherQualityNote ? ` • ${state.weatherQualityNote}` : ''}`);
     await renderWeatherLayers();
   }
@@ -2268,21 +2403,8 @@
     state.mapsScriptLoading = new Promise((resolve, reject) => {
       const existingApiScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
       if (existingApiScript && !existingApiScript.dataset.gmapsBootstrap) {
-        const started = Date.now();
-        const tick = () => {
-          if (hasGoogleMapsApiLoaded()) {
-            console.info('[gfs] Google Maps JS API loaded');
-            resolve();
-            return;
-          }
-          if (Date.now() - started > 8000) {
-            reject(new Error('Google Maps JS API script present but importLibrary unavailable'));
-            return;
-          }
-          setTimeout(tick, 120);
-        };
-        tick();
-        return;
+        console.warn('[gfs] replacing non-bootstrap Google Maps script with async importLibrary bootstrap');
+        try { existingApiScript.remove(); } catch (_) {}
       }
 
       ((g) => {
@@ -2302,6 +2424,7 @@
         const u = () => h || (h = new Promise(async (f, n) => {
           await (a = m.createElement('script'));
           e.set('libraries', [...r] + '');
+          e.set('loading', 'async');
           for (k in g) e.set(k.replace(/[A-Z]/g, (t) => '_' + t[0].toLowerCase()), g[k]);
           e.set('callback', c + '.maps.' + q);
           a.src = `https://maps.${c}apis.com/maps/api/js?` + e;
@@ -2334,6 +2457,10 @@
     }
     if (!state.maps3dLib) state.maps3dLib = await window.google.maps.importLibrary('maps3d');
     if (!state.markerLib) state.markerLib = await window.google.maps.importLibrary('marker');
+    state.mapsLibrariesReady = !!(state.maps3dLib && state.markerLib);
+    if (!state.mapsLibrariesReady) {
+      throw new Error('Maps libraries unavailable after import (maps3d/marker)');
+    }
   }
 
   function markerIntensityClass(p) {
@@ -2414,6 +2541,9 @@
   }
 
   function setActiveMarkerByKey(locationKey) {
+    if (state.fishOrbRenderer) {
+      state.fishOrbRenderer.setSelectedKey(locationKey || null);
+    }
     state.markerStates.forEach((markerState, key) => {
       setMarkerVisualActive(markerState, !!locationKey && key === locationKey);
     });
@@ -2450,57 +2580,89 @@
     clearMapMarkers();
     state.renderStats.fishItems = state.fish.length;
     state.renderStats.fishMarkersRendered = 0;
-    if (!state.mapReady || !state.feature.markers || !state.maps3dLib || !state.markerLib) return;
+    state.renderStats.fishClustersRendered = 0;
+    state.renderStats.fishPoolFree = 0;
+    state.renderStats.fishRebuildMs = 0;
+    if (!state.mapReady || !state.feature.markers) return;
+    if (!state.maps3dLib || !state.markerLib) {
+      console.info('[gfs] fish markers deferred until maps3d/marker libraries are ready');
+      if (!state.markerRetryTimer) {
+        state.markerRetryTimer = setTimeout(() => {
+          state.markerRetryTimer = null;
+          if (state.mapReady && state.feature.markers && state.maps3dLib && state.markerLib) {
+            renderMapMarkers().catch((err) => console.warn('[gfs] deferred fish marker render failed', err));
+          }
+        }, 500);
+      }
+      return;
+    }
 
-    state.fish.forEach((p) => {
+    if (window.LFTRFishOrbRenderer?.createRenderer) {
+      try {
+        state.fishOrbRenderer = window.LFTRFishOrbRenderer.createRenderer({
+          maps3dLib: state.maps3dLib,
+          markerLib: state.markerLib,
+          globeEl,
+          getView: parseGlobeCenterAndRange,
+          openHud: (point, lockIt) => {
+            if (!point) return;
+            setActiveMarkerByKey(point.location_key || null);
+            openHud(point, !!lockIt).catch((e) => setHudMessage(e.message));
+          },
+          scheduleHudHide,
+        });
+      } catch (err) {
+        console.warn('[gfs] fish orb renderer unavailable during bootstrap; will retry', err?.message || err);
+        return;
+      }
+      state.fishOrbRenderer.setData(state.fish || []);
+      state.fishOrbRenderer.rebuild(true);
+      state.fishOrbRenderer.start();
+
+      const stats = state.fishOrbRenderer.getStats();
+      state.renderStats.fishMarkersRendered = stats.activeCount;
+      state.renderStats.fishClustersRendered = stats.clusteredCount;
+      state.renderStats.fishPoolFree = stats.freeCount;
+      state.renderStats.fishRebuildMs = stats.rebuildMs;
+      console.info('[gfs] fish orb renderer active', stats);
+
+      state.fishOrbRefreshId = setInterval(() => {
+        if (!state.fishOrbRenderer || !state.feature.markers || !state.mapReady) return;
+        state.fishOrbRenderer.rebuild(false);
+        const s = state.fishOrbRenderer.getStats();
+        state.renderStats.fishMarkersRendered = s.activeCount;
+        state.renderStats.fishClustersRendered = s.clusteredCount;
+        state.renderStats.fishPoolFree = s.freeCount;
+        state.renderStats.fishRebuildMs = s.rebuildMs;
+      }, 900);
+
+      await renderBaitPolygons();
+      return;
+    }
+
+    // tiny compatibility fallback: only for very small datasets if orb renderer is unavailable
+    console.warn('[gfs] fish orb renderer unavailable; using small PinElement fallback markers');
+    const tiny = (state.fish || []).slice(0, 24);
+    tiny.forEach((p) => {
       const lat = Number(p.lat);
       const lon = Number(p.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-
       const marker = new state.maps3dLib.Marker3DInteractiveElement({
         position: { lat, lng: lon, altitude: 10 },
         title: p.name || p.location_key || 'Fish marker',
       });
-
       const markerState = { marker, point: p, active: false, hover: false, pin: null };
       const pin = buildFishPin(p, markerState);
       marker.append(pin);
       markerState.pin = pin;
       state.markerStates.set(p.location_key, markerState);
-
-      const hoverOpen = () => {
-        setMarkerVisualHover(markerState, true);
-        setActiveMarkerByKey(p.location_key);
-        openHud(p, false).catch((e) => setHudMessage(e.message));
-      };
-
-      const lockedOpen = () => {
-        setActiveMarkerByKey(p.location_key);
-        openHud(p, true).catch((e) => setHudMessage(e.message));
-      };
-
-      const hoverLeave = () => {
-        if (!state.hudLocked) {
-          setMarkerVisualHover(markerState, false);
-          setActiveMarkerByKey(state.selected?.location_key || null);
-          scheduleHudHide();
-        }
-      };
-
-      marker.addEventListener('gmp-click', lockedOpen);
-      marker.addEventListener('click', lockedOpen);
-      marker.addEventListener('mouseenter', hoverOpen);
-      marker.addEventListener('mouseover', hoverOpen);
-      marker.addEventListener('pointerenter', hoverOpen);
-      marker.addEventListener('mouseleave', hoverLeave);
-      marker.addEventListener('mouseout', hoverLeave);
-      marker.addEventListener('pointerleave', hoverLeave);
-
+      marker.addEventListener('gmp-click', () => openHud(p, true).catch((e) => setHudMessage(e.message)));
       globeEl.append(marker);
       state.mapMarkers.push(marker);
     });
     await renderBaitPolygons();
     state.renderStats.fishMarkersRendered = state.mapMarkers.length;
+    state.renderStats.fishClustersRendered = state.mapMarkers.length;
   }
 
   async function loadFish() {
@@ -2774,29 +2936,12 @@
   }
 
   function connectLiveUpdates() {
-    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const ws = new WebSocket(`${proto}${location.host}/gfs/ws/updates`);
-    ws.onopen = () => {
-      state.wsConnected = true;
-      setStatus('Feed connected');
-    };
-    ws.onmessage = () => {
-      state.lastUpdateAt = Date.now();
-      setFreshness(state.lastUpdateAt);
-      if (state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet) {
-        refreshVisibleTiles().then(() => loadClouds()).catch((e) => setStatus(e.message, true));
-      }
-    };
-    ws.onerror = () => { setStatus('WS updates unavailable • HTTP weather active', true); };
-    ws.onclose = () => {
-      state.wsConnected = false;
-      setStatus('WS disconnected • retrying live updates', true);
-      setTimeout(connectLiveUpdates, 1800);
-    };
-  }
-
-  function showGlobeFallback(show) {
-    globeFallback.classList.toggle('show', !!show);
+    // /gfs stays HTTP-only; refresh weather/fish periodically via existing APIs.
+    console.info('[gfs] live updates using HTTP polling mode');
+    setInterval(() => {
+      loadClouds().catch((e) => setStatus(`Weather refresh failed: ${e.message}`, true));
+      loadFish().catch((e) => setStatus(`Fish refresh failed: ${e.message}`, true));
+    }, 45000);
   }
 
   function applyGlobeAttributes() {
@@ -2845,15 +2990,52 @@
       showGlobeFallback(false);
       setStatus('Photorealistic globe connected');
       const readyReason = await waitForGlobeSteadyState(4200);
+      console.info('[gfs] bootstrap stage: globe ready', { readyReason });
       console.info('[gfs] globe steady state', readyReason);
       state.mapReady = true;
-      try { await renderMapMarkers(); } catch (err) { console.error('[gfs] renderMapMarkers failed', err); }
-      try { await loadClouds(true); } catch (err) { console.error('[gfs] weather bootstrap failed', err); }
     } catch (err) {
       console.error('[gfs] unable to load Google 3D globe', err);
       state.mapReady = false;
       showGlobeFallback(true);
       setStatus('Unable to load Maps API script', true);
+    }
+  }
+
+  async function runBootStages() {
+    if (!state.mapReady) return;
+    const yieldFrame = () => new Promise((r) => setTimeout(r, 0));
+
+    console.info('[gfs] bootstrap stage: fish start');
+    try {
+      await loadFish();
+      await yieldFrame();
+      console.info('[gfs] bootstrap stage: fish ready', { fish: state.fish.length, markers: state.renderStats.fishMarkersRendered, clusters: state.renderStats.fishClustersRendered });
+    } catch (err) {
+      console.error('[gfs] bootstrap fish failed', err);
+      setStatus(`Fish load failed: ${err.message}`, true);
+    }
+
+    console.info('[gfs] bootstrap stage: balloons start');
+    try {
+      await renderJetBalloons();
+      await yieldFrame();
+      console.info('[gfs] bootstrap stage: balloons ready', { jet: state.jetMarkers.length });
+    } catch (err) {
+      console.error('[gfs] bootstrap balloons failed', err);
+      setStatus(`Balloon load failed: ${err.message}`, true);
+    }
+
+    console.info('[gfs] bootstrap stage: weather start');
+    try {
+      await loadClouds(true);
+      console.info('[gfs] bootstrap stage: weather ready', {
+        clouds: state.cloudTiles.length,
+        precip: (state.weatherPayload?.precip_columns || []).length,
+        lightning: (state.weatherPayload?.lightning_events || []).length,
+      });
+    } catch (err) {
+      console.error('[gfs] weather bootstrap failed, fish/balloons preserved', err);
+      setStatus(`Weather load failed: ${err.message}`, true);
     }
   }
 
@@ -2917,8 +3099,7 @@
     try { await loadRuntimeConfig(); } catch (e) { setStatus(`Config load failed: ${e.message}`, true); }
     try { await loadGoogleMapScript(); } catch (e) { setStatus(`Globe bootstrap failed: ${e.message}`, true); }
     try { await loadHealth(); } catch (e) { setStatus(e.message, true); }
-    try { await loadFish(); } catch (e) { setStatus(`Fish load failed: ${e.message}`, true); }
-    try { await loadClouds(); } catch (e) { setStatus(`Weather load failed: ${e.message}`, true); }
+    await runBootStages();
 
     setInterval(() => {
       if ((state.feature.clouds || state.feature.rain || state.feature.lightning || state.feature.jet || state.feature.markers || state.feature.sst || state.feature.swell || state.feature.bait) && state.mapReady) {
