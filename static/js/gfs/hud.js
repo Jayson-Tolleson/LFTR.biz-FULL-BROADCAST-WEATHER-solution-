@@ -40,6 +40,7 @@ export function createHud({ root, liveOverlay, liveVideo, onStartLive, onStopLiv
     goLive: document.getElementById('hudGoLive'),
     stopLive: document.getElementById('hudStopLive'),
     weather: document.getElementById('hudWeather'),
+    hoverWeather: document.getElementById('hudHoverWeather'),
     bait: document.getElementById('hudBait'),
     reports: document.getElementById('hudReports'),
   };
@@ -123,5 +124,18 @@ export function createHud({ root, liveOverlay, liveVideo, onStartLive, onStopLiv
       await refresh();
     },
     selected: () => selected,
+    updateHover(point, sample) {
+      if (!el.hoverWeather) return;
+      const lat = Number(point?.lat);
+      const lon = Number(point?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        el.hoverWeather.textContent = 'Move cursor over globe';
+        return;
+      }
+      const temp = Number(sample?.temperature_c);
+      const pressure = Number(sample?.pressure_hpa);
+      const wind = Number(sample?.wind_speed_mps);
+      el.hoverWeather.textContent = `@ ${lat.toFixed(3)}, ${lon.toFixed(3)} • Temp ${Number.isFinite(temp) ? temp.toFixed(1) : 'n/a'}°C • Pressure ${Number.isFinite(pressure) ? pressure.toFixed(1) : 'n/a'} hPa • Wind ${Number.isFinite(wind) ? wind.toFixed(1) : 'n/a'} m/s`;
+    },
   };
 }

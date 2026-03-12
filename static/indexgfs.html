@@ -57,6 +57,7 @@
       </section>
 
       <section><h3>Weather</h3><div id="hudWeather">—</div></section>
+      <section><h3>Hover HUD</h3><div id="hudHoverWeather">Move cursor over globe</div></section>
       <section><h3>Bait</h3><div id="hudBait">—</div></section>
       <section><h3>What to fish with</h3><div id="hudTackle">Small live bait / anchovy / sabiki at active periods.</div></section>
       <section><h3>All time reports</h3><ul id="hudReports"></ul></section>
@@ -80,6 +81,17 @@
     content-type=
   </script>
 
+
+  <script>
+    window.updateHUD = function updateHUD(sample) {
+      var el = document.getElementById('hudHoverWeather');
+      if (!el || !sample) return;
+      var temp = Number(sample.temperature_c);
+      var pressure = Number(sample.pressure_hpa);
+      var wind = Number(sample.wind_speed_mps);
+      el.textContent = 'Temp ' + (Number.isFinite(temp) ? temp.toFixed(1) : 'n/a') + '°C • Pressure ' + (Number.isFinite(pressure) ? pressure.toFixed(1) : 'n/a') + ' hPa • Wind ' + (Number.isFinite(wind) ? wind.toFixed(1) : 'n/a') + ' m/s';
+    };
+  </script>
 
   <script type="module" src="/static/js/gfs/main.js"></script>
 </body>

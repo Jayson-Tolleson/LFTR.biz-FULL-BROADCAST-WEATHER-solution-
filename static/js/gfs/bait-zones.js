@@ -1,6 +1,6 @@
 import { normalizePolygonFieldPayload } from './polygon_math.js';
-import { pathToOuterCoordinates } from './polygon_render.js';
 import { clamp01 } from './greek_math.js';
+import { createPolygon3D } from './polygon3d.js';
 
 function toNumber(v, fallback = 0) {
   const n = Number(v);
@@ -61,17 +61,17 @@ function toPath(coords, altitude = 20) {
 }
 
 function makePolygonLayer(path, fillColor, fillOpacity, extrudedHeight) {
-  const el = document.createElement('gmp-polygon-3d');
-  el.path = path;
-  el.setAttribute('altitude-mode', 'relative-to-ground');
-  el.setAttribute('fill-color', fillColor);
-  el.setAttribute('fill-opacity', String(fillOpacity));
-  el.setAttribute('stroke-color', fillColor);
-  el.setAttribute('stroke-opacity', String(fillOpacity));
-  el.setAttribute('stroke-width', '0.8');
-  el.setAttribute('extruded', 'true');
-  el.setAttribute('extruded-height', String(extrudedHeight));
-  return el;
+  return createPolygon3D({
+    path,
+    altitude: 20,
+    altitudeMode: 'relative',
+    fillColor,
+    fillOpacity,
+    strokeColor: fillColor,
+    strokeOpacity: fillOpacity,
+    strokeWidth: 0.8,
+    extrudedHeight,
+  });
 }
 
 function makeLineOverlay(line) {
@@ -97,7 +97,6 @@ export function renderBaitZones({ payload, map3DElement }) {
   const legacyPolygonField = payload?.polygon_field_v1;
   if (legacyPolygonField) {
     normalizePolygonFieldPayload(legacyPolygonField);
-    pathToOuterCoordinates([]);
   }
   if (bait.status !== 'ready' || bait.source !== 'full_stack') {
     console.info('[gfs bait] suppressed render', { status: bait.status, source: bait.source });

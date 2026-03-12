@@ -4,13 +4,15 @@
   const room = (new URLSearchParams(location.search).get('room') || 'default').trim() || 'default';
   const clientId = `w-${Math.random().toString(36).slice(2, 10)}`;
 
-  const v = document.getElementById('v');
+  const v = document.getElementById('remoteVideo') || document.getElementById('v');
   const standby = document.getElementById('standby');
   const conn = document.getElementById('conn');
   const mode = document.getElementById('mode');
   const ai = document.getElementById('ai');
   const label = document.getElementById('label');
   const videoWrap = v?.closest('.videoWrap') || v?.parentElement;
+  const joinOverlay = document.getElementById('joinStreamOverlay');
+  const joinBtn = document.getElementById('joinStreamBtn');
 
   let ws = null;
   let pc = null;
@@ -103,11 +105,18 @@
     unmuteBtn.style.display = show ? 'inline-flex' : 'none';
   }
 
+  function showJoinOverlay(show) {
+    if (!joinOverlay) return;
+    joinOverlay.style.display = show ? 'flex' : 'none';
+  }
+
   async function playVideo(reason) {
     try {
       await v.play();
+      showJoinOverlay(false);
     } catch (err) {
       console.warn('[watch] video play blocked', { reason, message: err?.message || String(err) });
+      showJoinOverlay(true);
     }
   }
 
@@ -122,6 +131,10 @@
     v.muted = false;
     await playVideo('manual_unmute');
     showUnmute(false);
+  });
+
+  joinBtn?.addEventListener('click', async () => {
+    await playVideo('join_stream_click');
   });
 
   async function iceServers() {

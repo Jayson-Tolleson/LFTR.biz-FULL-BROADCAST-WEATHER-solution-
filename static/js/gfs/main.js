@@ -465,6 +465,31 @@ function nearestOverlaySummary(loc) {
   };
 }
 
+function sampleWeatherAt(lat, lon) {
+  const bbox = overlayState.latest.bbox;
+  const weather = overlayState.latest.weather;
+  if (!bbox || !weather) return null;
+  const sample = (grid) => {
+    if (!Array.isArray(grid) || !Array.isArray(grid[0])) return NaN;
+    const arr = Array.isArray(grid[0][0]) ? grid[0] : grid;
+    const ny = arr.length;
+    const nx = Array.isArray(arr[0]) ? arr[0].length : 0;
+    if (!ny || !nx) return NaN;
+    const yi = Math.max(0, Math.min(ny - 1, Math.floor(((lat - bbox.south) / (bbox.north - bbox.south || 1)) * ny)));
+    const xi = Math.max(0, Math.min(nx - 1, Math.floor(((lon - bbox.west) / (bbox.east - bbox.west || 1)) * nx)));
+    return Number(arr[yi]?.[xi]);
+  };
+  const windU = sample(weather?.fields?.wind_u);
+  const windV = sample(weather?.fields?.wind_v);
+  const tempK = sample(weather?.fields?.temp2m);
+  const pressurePa = sample(weather?.fields?.mslp);
+  return {
+    temperature_c: Number.isFinite(tempK) ? (tempK - 273.15) : NaN,
+    pressure_hpa: Number.isFinite(pressurePa) ? (pressurePa / 100) : NaN,
+    wind_speed_mps: Number.isFinite(windU) && Number.isFinite(windV) ? Math.hypot(windU, windV) : NaN,
+  };
+}
+
 const hud = createHud({
   root: document.getElementById('locationHud'),
   getOverlaySummary: nearestOverlaySummary,
@@ -495,6 +520,26 @@ const hud = createHud({
   },
 });
 
+function installHoverHud() {
+  const handler = (ev) => {
+    const d = ev?.detail || {};
+    const lat = Number(d?.latLng?.lat ?? d?.position?.lat ?? d?.lat);
+    const lon = Number(d?.latLng?.lng ?? d?.position?.lng ?? d?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const sample = sampleWeatherAt(lat, lon);
+    hud.updateHover({ lat, lon }, sample);
+    if (typeof window.updateHUD === 'function') {
+      window.updateHUD(sample);
+    }
+  };
+  globeEl.addEventListener('gmp-click', handler);
+  globeEl.addEventListener('gmp-pointermove', handler);
+  return () => {
+    globeEl.removeEventListener('gmp-click', handler);
+    globeEl.removeEventListener('gmp-pointermove', handler);
+  };
+}
+
 
 window.addEventListener('beforeunload', () => {
   stopLivePolling();
@@ -519,6 +564,7 @@ async function boot() {
 
   const teardownSteady = installSteadyRefresh();
   const teardownTimerRefresh = installTimerRefresh();
+  const teardownHoverHud = installHoverHud();
 
   pillClouds?.addEventListener('click', () => {
     overlayState.cloudsEnabled = !overlayState.cloudsEnabled;
@@ -544,6 +590,7 @@ async function boot() {
 
   window.addEventListener('beforeunload', teardownSteady, { once: true });
   window.addEventListener('beforeunload', teardownTimerRefresh, { once: true });
+  window.addEventListener('beforeunload', teardownHoverHud, { once: true });
 }
 
 boot().catch((e) => {

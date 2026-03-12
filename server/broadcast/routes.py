@@ -375,7 +375,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         ws = websocket._get_current_object()
         room_id = state.default_room
         client_id = f"watch:{id(ws)}"
-        joined = False
+        joined = True
         offer_outstanding = False
         offer_started_at = 0.0
         watcher_state = "disconnected"
@@ -414,6 +414,25 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
             _set_state("offer_pending", "offer_sent")
             log.info("watch offer sent room=%s client=%s", active_room_id, active_client_id)
 
+        registry.register(room_id, "watch", ws, client_id)
+        state.ensure_room(room_id).viewers[client_id] = True
+        await ws.send_json({"type": "state_sync", "room": room_id, "state": state.room_state_payload(room_id), "ts": now_ms()})
+        await _broadcast_presence(state, room_id)
+        _set_state("joined", "auto_join")
+        room = state.ensure_room(room_id)
+        if room.broadcaster_sid is None:
+            _set_state("waiting_for_broadcaster", "auto_no_broadcaster")
+            await _send_waiting_no_broadcaster(room_id, client_id)
+        elif rtc is not None and _room_has_live_source(room_id):
+            _set_state("request_pending", "auto_request_stream")
+            try:
+                await _send_offer(room_id, client_id)
+            except StreamOfflineError:
+                _set_state("waiting_for_broadcaster", "auto_stream_offline")
+                await _send_waiting_stream_offline(room_id, client_id)
+            except Exception:
+                log.exception("watch auto-offer creation failed room=%s client=%s", room_id, client_id)
+
         try:
             while True:
                 try:
@@ -435,8 +454,16 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
 
                 if kind in {"join", "watch_join"}:
                     next_room_id, next_client_id = _normalize_room_client(data, state.default_room, "viewer")
-                    if joined and next_room_id == room_id and next_client_id == client_id:
-                        log.info("watch duplicate join ignored room=%s client=%s", room_id, client_id)
+                    if joined and next_room_id == room_id:
+                        if next_client_id != client_id:
+                            state.ensure_room(room_id).viewers.pop(client_id, None)
+                            registry.unregister(room_id, "watch", ws)
+                            client_id = next_client_id
+                            registry.register(room_id, "watch", ws, client_id)
+                            state.ensure_room(room_id).viewers[client_id] = True
+                            log.info("watch join client_id updated room=%s client=%s", room_id, client_id)
+                        else:
+                            log.info("watch duplicate join ignored room=%s client=%s", room_id, client_id)
                         await ws.send_json({"type": "state_sync", "room": room_id, "state": state.room_state_payload(room_id), "ts": now_ms()})
                         continue
                     if joined:

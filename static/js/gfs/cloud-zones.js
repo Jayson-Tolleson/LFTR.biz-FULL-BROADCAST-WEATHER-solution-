@@ -1,5 +1,6 @@
 import { buildCellRing, normalizePolygonFeature, normalizePolygonFieldPayload } from './polygon_math.js';
-import { pathToOuterCoordinates, ringRadToPath } from './polygon_render.js';
+import { ringRadToPath } from './polygon_render.js';
+import { createPolygon3D } from './polygon3d.js';
 
 function toNumber(v, fallback = 0) {
   const n = Number(v);
@@ -30,18 +31,20 @@ function cloudFeaturesFromContract(payload) {
 }
 
 function makeColumn({ lat, lon, height, color, opacity }) {
-  const el = document.createElement('gmp-polygon-3d');
   const feature = normalizePolygonFeature({ lat, lon, altitude_m: 0, cell_size_deg: 0.07 });
   const ring = buildCellRing(feature);
   const path = ringRadToPath(ring);
-  el.setAttribute('outer-coordinates', pathToOuterCoordinates(path));
-  el.setAttribute('altitude-mode', 'relative-to-ground');
-  el.setAttribute('fill-color', color);
-  el.setAttribute('fill-opacity', String(opacity));
-  el.setAttribute('stroke-width', '0');
-  el.setAttribute('extruded', 'true');
-  el.setAttribute('extruded-height', String(height));
-  return el;
+  return createPolygon3D({
+    path,
+    altitude: 0,
+    altitudeMode: 'relative',
+    fillColor: color,
+    fillOpacity: opacity,
+    strokeColor: color,
+    strokeOpacity: 0,
+    strokeWidth: 0,
+    extrudedHeight: height,
+  });
 }
 
 export function renderCloudZones({ payload, map3DElement }) {
