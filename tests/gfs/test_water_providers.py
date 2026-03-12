@@ -59,5 +59,5 @@ def test_coastwatch_returns_chlorophyll_and_water_color(monkeypatch):
 
 def test_rtofs_health_reports_live_upstreams():
     payload = RtofsProvider().health()
-    assert payload['status'] == 'live_with_fallback'
-    assert 'noaa_coops_currents' in payload['upstreams']
+    assert payload['status'] == 'viewport_subset_only'
+    assert 'noaa_coops_aux' in payload['upstreams']

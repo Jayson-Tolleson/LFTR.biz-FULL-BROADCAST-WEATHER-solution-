@@ -7,11 +7,13 @@ from uuid import uuid4
 
 try:
     from google.api_core.exceptions import DeadlineExceeded, InternalServerError, ServiceUnavailable
+    from google.api_core.exceptions import InvalidArgument
 except Exception:  # pragma: no cover - optional dependency wiring
     class _TransientExc(Exception):
         pass
 
     DeadlineExceeded = InternalServerError = ServiceUnavailable = _TransientExc
+    InvalidArgument = ValueError
 
 from server.audio.validation import PCM16_CHANNELS, PCM16_ENCODING, PCM16_SAMPLE_RATE
 
@@ -101,6 +103,9 @@ def transcribe_pcm16_chunk(
     except TRANSIENT_STT_ERRORS as exc:
         log.warning("google stt transient error; retrying once err=%s", exc.__class__.__name__)
         response = client.recognize(config=recognition_config, audio=recognition_audio)
+    except InvalidArgument as exc:
+        log.warning("google stt invalid argument sample_rate=%s channels=%s encoding=%s err=%s", sample_rate_hz, channels, PCM16_ENCODING, str(exc))
+        raise ValueError("invalid_stt_request") from exc
 
     parts: list[str] = []
     for result in (response.results or []):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -39,6 +40,7 @@ class GfsEngine:
         self.snapshot = SnapshotState(payloads={})
         self._ws_clients: set[Any] = set()
         self._lock = asyncio.Lock()
+        self._inflight: dict[str, asyncio.Task] = {}
 
     def parse_intent(self, query: dict[str, str]) -> RequestIntent:
         raw_bbox = query.get("bbox")
@@ -87,6 +89,24 @@ class GfsEngine:
             intent.stride,
         )
         return intent
+
+    @staticmethod
+    def _rounded_bbox_key(intent: RequestIntent, precision: int = 2) -> str:
+        rounded = [round(v, precision) for v in intent.bbox.as_list()]
+        return f"{rounded}:{intent.stride}:{intent.quality}:{intent.valid_time}"
+
+    async def _run_deduped(self, key: str, fn):
+        existing = self._inflight.get(key)
+        if existing:
+            log.debug("gfs request deduped key=%s", key)
+            return await existing
+        task = asyncio.create_task(fn())
+        self._inflight[key] = task
+        try:
+            return await task
+        finally:
+            if self._inflight.get(key) is task:
+                self._inflight.pop(key, None)
 
     async def weather_payload(self, intent: RequestIntent) -> dict[str, Any]:
         key = f"weather:{intent.bbox.as_list()}:{intent.valid_time}:{intent.stride}"
@@ -175,73 +195,81 @@ class GfsEngine:
         )
 
     async def bait_advanced_payload(self, intent: RequestIntent) -> dict[str, Any]:
-        atmospheric, valid_time, stale = await self._fetch_atmospheric(BAIT_ATMOSPHERIC_VARIABLES, intent, snapshot_key="bait")
-        ocean_task = self.rtofs.fetch_subset(bbox=intent.bbox, stride=intent.stride, valid_time=intent.valid_time)
-        bio_task = self.coastwatch.fetch_subset(bbox=intent.bbox, stride=intent.stride, valid_time=intent.valid_time)
-        (ocean, ocean_time), (bio, bio_time) = await asyncio.gather(ocean_task, bio_task)
-        merged_ocean = {**ocean, **bio}
-        derived = derive_bait_payload(atmospheric, ocean, bio, bbox=intent.bbox.as_list())
+        request_id = uuid.uuid4().hex[:8]
+        dedupe_key = f"bait_advanced:{self._rounded_bbox_key(intent)}"
 
-        has_full_stack = bool(ocean.get("sst")) and bool(bio.get("chlorophyll")) and derived.get("bait", {}).get("status") == "ready"
-        bait_meta = dict(derived.get("bait", {}).get("meta") or {})
-        bait_meta.update({
-            "atmos_time": valid_time.isoformat() + "Z" if valid_time else None,
-            "ocean_time": ocean_time.isoformat() + "Z" if ocean_time else None,
-            "bio_time": bio_time.isoformat() + "Z" if bio_time else None,
-        })
-        if not has_full_stack:
-            derived["bait"] = {
-                "status": "incomplete",
-                "source": "suppressed_incomplete",
-                "polygons": [],
-                "meta": {**bait_meta, "reason": "full_stack_not_ready"},
-            }
-            derived["front_lines"] = []
-            derived["convergence_polygons"] = []
-            derived["boil_probability_polygons"] = []
-            derived["bait_score"] = []
+        async def _compute() -> dict[str, Any]:
+            atmospheric, valid_time, stale = await self._fetch_atmospheric(BAIT_ATMOSPHERIC_VARIABLES, intent, snapshot_key="bait")
+            ocean_task = self.rtofs.fetch_subset(bbox=intent.bbox, stride=intent.stride, valid_time=intent.valid_time)
+            bio_task = self.coastwatch.fetch_subset(bbox=intent.bbox, stride=intent.stride, valid_time=intent.valid_time)
+            (ocean, ocean_time), (bio, bio_time) = await asyncio.gather(ocean_task, bio_task)
+            merged_ocean = {**ocean, **bio}
+            derived = derive_bait_payload(atmospheric, ocean, bio, bbox=intent.bbox.as_list())
 
-        log.info(
-            "bait advanced stack bbox=%s stride=%s has_sst=%s has_chlorophyll=%s status=%s polygons=%s",
-            intent.bbox.as_list(),
-            intent.stride,
-            bool(ocean.get("sst")),
-            bool(bio.get("chlorophyll")),
-            derived.get("bait", {}).get("status"),
-            len(derived.get("bait", {}).get("polygons") or []),
-        )
+            has_full_stack = bool(ocean.get("sst")) and bool(bio.get("chlorophyll")) and derived.get("bait", {}).get("status") == "ready"
+            bait_meta = dict(derived.get("bait", {}).get("meta") or {})
+            bait_meta.update({
+                "atmos_time": valid_time.isoformat() + "Z" if valid_time else None,
+                "ocean_time": ocean_time.isoformat() + "Z" if ocean_time else None,
+                "bio_time": bio_time.isoformat() + "Z" if bio_time else None,
+            })
+            if not has_full_stack:
+                derived["bait"] = {
+                    "status": "incomplete",
+                    "source": "suppressed_incomplete",
+                    "polygons": [],
+                    "meta": {**bait_meta, "reason": "full_stack_not_ready"},
+                }
+                derived["front_lines"] = []
+                derived["convergence_polygons"] = []
+                derived["boil_probability_polygons"] = []
+                derived["bait_score"] = []
 
-        return serialize_bait(
-            valid_time=valid_time,
-            bbox=intent.bbox.as_list(),
-            stale=stale,
-            bait_base_field_v1=build_bait_base_field_v1(
+            log.info(
+                "bait advanced stack request_id=%s bbox=%s dedupe_key=%s stride=%s has_sst=%s has_chlorophyll=%s status=%s polygons=%s",
+                request_id,
+                intent.bbox.as_list(),
+                dedupe_key,
+                intent.stride,
+                bool(ocean.get("sst")),
+                bool(bio.get("chlorophyll")),
+                derived.get("bait", {}).get("status"),
+                len(derived.get("bait", {}).get("polygons") or []),
+            )
+
+            return serialize_bait(
+                valid_time=valid_time,
                 bbox=intent.bbox.as_list(),
-                cell_size_deg=0.25 * intent.stride,
-                source_time=valid_time,
-                atmos=atmospheric,
-                altitude_base_m=900,
-                quality=intent.quality,
-            ),
-            bait_advanced_field_v1=build_bait_ocean_field_v1(
-                bbox=intent.bbox.as_list(),
-                cell_size_deg=0.25 * intent.stride,
-                source_time=valid_time,
-                ocean=merged_ocean,
-                quality=intent.quality,
-            ),
-            polygon_field_v1=build_polygon_field_v1_from_atmos(
-                layer="bait_advanced",
-                bbox=intent.bbox.as_list(),
-                cell_size_deg=0.25 * intent.stride,
-                source_time=valid_time,
-                atmos=atmospheric,
-                altitude_base_m=900,
-                quality=intent.quality,
-                include_fields=("wind_u", "wind_v", "air_temp", "rel_humidity", "dewpoint", "pressure_msl", "precip_rate", "cloud_total"),
-            ),
-            **derived,
-        )
+                stale=stale,
+                bait_base_field_v1=build_bait_base_field_v1(
+                    bbox=intent.bbox.as_list(),
+                    cell_size_deg=0.25 * intent.stride,
+                    source_time=valid_time,
+                    atmos=atmospheric,
+                    altitude_base_m=900,
+                    quality=intent.quality,
+                ),
+                bait_advanced_field_v1=build_bait_ocean_field_v1(
+                    bbox=intent.bbox.as_list(),
+                    cell_size_deg=0.25 * intent.stride,
+                    source_time=valid_time,
+                    ocean=merged_ocean,
+                    quality=intent.quality,
+                ),
+                polygon_field_v1=build_polygon_field_v1_from_atmos(
+                    layer="bait_advanced",
+                    bbox=intent.bbox.as_list(),
+                    cell_size_deg=0.25 * intent.stride,
+                    source_time=valid_time,
+                    atmos=atmospheric,
+                    altitude_base_m=900,
+                    quality=intent.quality,
+                    include_fields=("wind_u", "wind_v", "air_temp", "rel_humidity", "dewpoint", "pressure_msl", "precip_rate", "cloud_total"),
+                ),
+                **derived,
+            )
+
+        return await self._run_deduped(dedupe_key, _compute)
 
     async def _fetch_atmospheric(self, variables: tuple[str, ...], intent: RequestIntent, snapshot_key: str) -> tuple[dict[str, Any], datetime | None, bool]:
         merged: dict[str, Any] = {}

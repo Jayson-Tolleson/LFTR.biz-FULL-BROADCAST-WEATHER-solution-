@@ -22,6 +22,7 @@
   let isNegotiating = false;
   let hasRequestedStream = false;
   let lastStreamRequestAt = 0;
+  let nextStreamRequestAllowedAt = 0;
 
   let reconnectTimer = null;
 
@@ -141,6 +142,7 @@
   function requestStream(force = false) {
     const connected = !!(pc && pc.connectionState === 'connected' && streamAttached);
     const now = Date.now();
+    if (!force && now < nextStreamRequestAllowedAt) return;
     if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected || hasRequestedStream)) {
       needsStreamRequest = !broadcasterPresent;
       return;
@@ -279,6 +281,7 @@
         requestPending = false;
         needsStreamRequest = true;
         hasRequestedStream = false;
+        nextStreamRequestAllowedAt = Date.now() + 1500;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
         hideLiveOverlay().catch(() => {});
@@ -350,6 +353,7 @@
       isNegotiating = false;
       hasRequestedStream = false;
       lastStreamRequestAt = 0;
+      nextStreamRequestAllowedAt = 0;
       needsStreamRequest = true;
       sendJson('join');
       if (broadcasterPresent) requestStream();
@@ -366,6 +370,7 @@
       isNegotiating = false;
       hasRequestedStream = false;
       lastStreamRequestAt = 0;
+      nextStreamRequestAllowedAt = Date.now() + 1200;
       streamAttached = false;
       resetViewerPlaybackState('ws_closed');
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });

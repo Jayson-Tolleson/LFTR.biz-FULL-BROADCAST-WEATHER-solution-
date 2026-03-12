@@ -28,6 +28,20 @@ def _iso_time_or_last(valid_time: datetime | None) -> str:
     return f"{valid_time.isoformat()}Z" if valid_time else "last"
 
 
+def normalize_lon(lon: float, convention: str) -> float:
+    if convention == "0360":
+        while lon < 0.0:
+            lon += 360.0
+        while lon >= 360.0:
+            lon -= 360.0
+        return lon
+    while lon < -180.0:
+        lon += 360.0
+    while lon >= 180.0:
+        lon -= 360.0
+    return lon
+
+
 def split_antimeridian(viewport: Viewport) -> list[ErddapSlice]:
     # ERDDAP lon slices cannot cross the antimeridian in one interval.
     if viewport.west <= viewport.east:
@@ -54,12 +68,35 @@ def build_ncss_subset_request(viewport: Viewport, vars: list[str], stride: int, 
     return f"{base_url}?{urllib.parse.urlencode(query)}"
 
 
-def build_erddap_subset_request(viewport: Viewport, dataset_csv_url: str, vars: list[str], stride: int, valid_time: datetime | None) -> list[str]:
+def build_erddap_subset_request(
+    viewport: Viewport,
+    dataset_csv_url: str,
+    vars: list[str],
+    stride: int,
+    valid_time: datetime | None,
+    *,
+    lon_convention: str = "pm180",
+) -> list[str]:
     time_selector = _iso_time_or_last(valid_time)
+    stride_val = max(1, int(stride))
+    if lon_convention == "0360":
+        lon_view = Viewport(
+            west=normalize_lon(viewport.west, "0360"),
+            south=viewport.south,
+            east=normalize_lon(viewport.east, "0360"),
+            north=viewport.north,
+        )
+    else:
+        lon_view = Viewport(
+            west=normalize_lon(viewport.west, "pm180"),
+            south=viewport.south,
+            east=normalize_lon(viewport.east, "pm180"),
+            north=viewport.north,
+        )
     urls: list[str] = []
-    for s in split_antimeridian(viewport):
+    for s in split_antimeridian(lon_view):
         for var in vars:
-            constraint = f"[{time_selector}][({s.lat_start}):{max(1,int(stride))}:({s.lat_stop})][({s.lon_start}):{max(1,int(stride))}:({s.lon_stop})]"
+            constraint = f"[{time_selector}][({s.lat_start}):{stride_val}:({s.lat_stop})][({s.lon_start}):{stride_val}:({s.lon_stop})]"
             params = urllib.parse.urlencode({var: constraint})
             urls.append(f"{dataset_csv_url}?{params}")
     return urls

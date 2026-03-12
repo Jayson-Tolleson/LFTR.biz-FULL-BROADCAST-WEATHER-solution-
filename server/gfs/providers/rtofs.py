@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import csv
-import io
 import json
 import logging
 import math
@@ -12,6 +10,7 @@ from typing import Any
 
 from server.gfs.models import BBox
 from server.gfs.providers.adapters import build_erddap_subset_request, build_station_enrichment_request, split_antimeridian, viewport_from_bbox
+from server.gfs.providers.erddap_csv import ErddapParseDiagnostics, parse_erddap_grid
 
 
 log = logging.getLogger("server.gfs.provider.rtofs")
@@ -65,31 +64,8 @@ class RtofsProvider:
             return None
 
     @staticmethod
-    def _parse_erddap_grid(text: str | None) -> list[list[float]]:
-        if not text:
-            return []
-        rows = [r for r in csv.reader(io.StringIO(text)) if r]
-        if len(rows) < 2:
-            return []
-
-        values_by_lat: dict[float, list[float]] = {}
-        for row in rows[1:]:
-            if len(row) < 4:
-                continue
-            try:
-                lat = float(row[1])
-                val = float(row[-1])
-            except Exception:
-                continue
-            if not math.isfinite(lat):
-                continue
-            values_by_lat.setdefault(lat, []).append(val if math.isfinite(val) else float("nan"))
-
-        if not values_by_lat:
-            return []
-
-        lats = sorted(values_by_lat.keys())
-        return [values_by_lat[lat] for lat in lats]
+    def _parse_erddap_grid(text: str | None) -> tuple[list[list[float]], ErddapParseDiagnostics]:
+        return parse_erddap_grid(text, preferred_value_columns=("sst", "sea_surface_temperature"))
 
     @staticmethod
     def _merge_antimeridian_parts(parts: list[list[list[float]]]) -> list[list[float]]:
@@ -136,9 +112,22 @@ class RtofsProvider:
     def _fetch_subset_sync(self, *, bbox: BBox, stride: int, valid_time: datetime | None) -> tuple[dict[str, Any], datetime | None]:
         viewport = viewport_from_bbox(bbox)
         slices = split_antimeridian(viewport)
-        sst_urls = build_erddap_subset_request(viewport, ERDDAP_OISST_CSV, ["sst"], stride, valid_time)
-        sst_parts = [self._parse_erddap_grid(self._http_text(url)) for url in sst_urls]
+        lon_convention = "pm180"
+        sst_urls = build_erddap_subset_request(viewport, ERDDAP_OISST_CSV, ["sst"], stride, valid_time, lon_convention=lon_convention)
+        raw_parts = [self._http_text(url) for url in sst_urls]
+        parsed_parts = [self._parse_erddap_grid(body) for body in raw_parts]
+        sst_parts = [grid for grid, _diag in parsed_parts]
         sst = self._merge_antimeridian_parts(sst_parts)
+        diagnostics = [diag for _grid, diag in parsed_parts]
+
+        if not sst:
+            lon_convention = "0360"
+            sst_urls = build_erddap_subset_request(viewport, ERDDAP_OISST_CSV, ["sst"], stride, valid_time, lon_convention=lon_convention)
+            raw_parts = [self._http_text(url) for url in sst_urls]
+            parsed_parts = [self._parse_erddap_grid(body) for body in raw_parts]
+            sst_parts = [grid for grid, _diag in parsed_parts]
+            diagnostics = [diag for _grid, diag in parsed_parts]
+            sst = self._merge_antimeridian_parts(sst_parts)
 
         station_req = build_station_enrichment_request(viewport, valid_time)
         u, v = self._fetch_station_currents(center_lat=station_req["center_lat"], center_lon=station_req["center_lon"])
@@ -154,6 +143,7 @@ class RtofsProvider:
                 "station_source": "noaa_coops_aux",
                 "station_enrichment": {"current_u": u, "current_v": v},
                 "subset_urls": len(sst_urls),
+                "lon_convention": lon_convention,
                 "real_subset": bool(sst),
             },
         }
@@ -169,6 +159,26 @@ class RtofsProvider:
             nx,
             bool(sst),
         )
+        if not sst:
+            diag_rows = [d.row_count for d in diagnostics]
+            diag_lat = [d.lat_count for d in diagnostics]
+            diag_lon = [d.lon_count for d in diagnostics]
+            diag_rejected = [d.parser_rejected_rows for d in diagnostics]
+            preview = [line for d in diagnostics for line in d.preview_lines[:2]][:4]
+            log.warning(
+                "rtofs subset empty bbox=%s dataset=%s vars=%s urls=%s rows=%s lat=%s lon=%s parser_rejected=%s http_success_no_data=%s lon_convention=%s preview=%s",
+                bbox.as_list(),
+                ERDDAP_OISST_CSV,
+                ["sst"],
+                sst_urls,
+                diag_rows,
+                diag_lat,
+                diag_lon,
+                diag_rejected,
+                all(r is not None for r in raw_parts),
+                lon_convention,
+                preview,
+            )
         return payload, valid_time
 
     async def fetch_subset(self, *, bbox: BBox, stride: int, valid_time: datetime | None) -> tuple[dict[str, Any], datetime | None]:

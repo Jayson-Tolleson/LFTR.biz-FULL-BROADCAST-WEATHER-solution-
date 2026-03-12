@@ -110,6 +110,8 @@ async def transcribe_track(chunks: Sequence[bytes], *, sample_rate_hz: int, chan
         )
         return str(transcript or "").strip()
     except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
         if not _WARNED_STT_UNAVAILABLE:
             _WARNED_STT_UNAVAILABLE = True
             log.warning("STT backend unavailable; transcribe_track will return empty transcript err=%s", exc.__class__.__name__)

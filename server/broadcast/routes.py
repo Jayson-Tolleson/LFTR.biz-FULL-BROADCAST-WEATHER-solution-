@@ -23,6 +23,7 @@ STT_SOURCE_LITERAL = {"source": "stt"}
 WATCH_OFFER_TIMEOUT_S = 12.0
 STT_FAILURE_BACKOFF_S = 20.0
 STT_FAILURE_THRESHOLD = 3
+WATCH_RETRY_BACKOFF_S = 1.5
 
 
 class RoomRegistry:
@@ -176,6 +177,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         joined = False
         stt_failures = 0
         stt_backoff_until = 0.0
+        stt_contract_logged = False
         log.info("chat socket connected room=%s client=%s", room_id, client_id)
         try:
             while True:
@@ -229,6 +231,16 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
 
                     try:
                         parsed = decode_audio_chunk_payload(data)
+                        if not stt_contract_logged:
+                            stt_contract_logged = True
+                            log.info(
+                                "stt contract accepted room=%s client=%s encoding=%s sample_rate=%s channels=%s",
+                                room_id,
+                                client_id,
+                                parsed.encoding,
+                                parsed.sample_rate_hz,
+                                parsed.channels,
+                            )
                     except AudioValidationError as exc:
                         stt_failures += 1
                         log.warning("stt chunk rejected room=%s client=%s reason=%s", room_id, client_id, str(exc))
@@ -253,6 +265,11 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                             or ""
                         ).strip()
                         stt_failures = 0
+                    except ValueError as exc:
+                        stt_failures = STT_FAILURE_THRESHOLD
+                        stt_backoff_until = now_loop + STT_FAILURE_BACKOFF_S
+                        log.warning("stt non-retryable room=%s client=%s reason=%s backoff_s=%s", room_id, client_id, str(exc), STT_FAILURE_BACKOFF_S)
+                        continue
                     except Exception as exc:
                         stt_failures += 1
                         log.warning("stt failed room=%s client=%s err=%s", room_id, client_id, exc.__class__.__name__)
@@ -361,7 +378,17 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         joined = False
         offer_outstanding = False
         offer_started_at = 0.0
+        watcher_state = "disconnected"
+        next_request_allowed_at = 0.0
         log.info("watch socket connected room=%s client=%s", room_id, client_id)
+
+        def _set_state(next_state: str, reason: str) -> None:
+            nonlocal watcher_state
+            if watcher_state != next_state:
+                log.info("watch state transition room=%s client=%s %s->%s reason=%s", room_id, client_id, watcher_state, next_state, reason)
+                watcher_state = next_state
+
+        _set_state("socket_connected", "ws_open")
 
         async def _send_waiting_no_broadcaster(active_room_id: str, active_client_id: str) -> None:
             room = state.ensure_room(active_room_id)
@@ -384,6 +411,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
             await ws.send_json({"type": "watch_offer", "room": active_room_id, "payload": offer, "ts": now_ms()})
             offer_outstanding = True
             offer_started_at = asyncio.get_running_loop().time()
+            _set_state("offer_pending", "offer_sent")
             log.info("watch offer sent room=%s client=%s", active_room_id, active_client_id)
 
         try:
@@ -402,6 +430,8 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     log.warning("watch offer timeout room=%s client=%s timeout_s=%s", room_id, client_id, WATCH_OFFER_TIMEOUT_S)
                     offer_outstanding = False
                     offer_started_at = 0.0
+                    next_request_allowed_at = now_loop + WATCH_RETRY_BACKOFF_S
+                    _set_state("waiting_for_broadcaster", "offer_timeout")
 
                 if kind in {"join", "watch_join"}:
                     next_room_id, next_client_id = _normalize_room_client(data, state.default_room, "viewer")
@@ -417,20 +447,25 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     log.info("watcher joined room=%s client=%s", room_id, client_id)
                     registry.register(room_id, "watch", ws, client_id)
                     joined = True
+                    _set_state("joined", "join")
                     state.ensure_room(room_id).viewers[client_id] = True
                     await ws.send_json({"type": "state_sync", "room": room_id, "state": state.room_state_payload(room_id), "ts": now_ms()})
                     await _broadcast_presence(state, room_id)
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
+                        _set_state("waiting_for_broadcaster", "no_broadcaster")
                         await _send_waiting_no_broadcaster(room_id, client_id)
                     else:
                         if rtc is None:
+                            _set_state("waiting_for_broadcaster", "rtc_unavailable")
                             await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
                         elif not _room_has_live_source(room_id):
+                            _set_state("waiting_for_broadcaster", "stream_offline")
                             await _send_waiting_stream_offline(room_id, client_id)
                         elif not offer_outstanding:
                             log.info("watch signaling started room=%s client=%s", room_id, client_id)
                             try:
+                                _set_state("request_pending", "join_request_stream")
                                 await _send_offer(room_id, client_id)
                             except StreamOfflineError:
                                 offer_outstanding = False
@@ -445,21 +480,33 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 if kind == "ping":
                     await ws.send_json({"type": "pong", "room": room_id, "ts": now_ms()})
                 elif kind == "request_stream":
+                    if now_loop < next_request_allowed_at:
+                        log.debug("watch request_stream ignored room=%s client=%s reason=backoff until=%s", room_id, client_id, round(next_request_allowed_at - now_loop, 3))
+                        continue
                     if offer_outstanding:
                         log.debug("watch request_stream ignored room=%s client=%s reason=offer_outstanding", room_id, client_id)
                         continue
+                    if watcher_state == "peer_active":
+                        log.debug("watch request_stream ignored room=%s client=%s reason=peer_active", room_id, client_id)
+                        continue
                     log.info("watch request_stream room=%s client=%s", room_id, client_id)
+                    _set_state("request_pending", "request_stream")
                     room = state.ensure_room(room_id)
                     if room.broadcaster_sid is None:
                         offer_outstanding = False
                         offer_started_at = 0.0
+                        _set_state("waiting_for_broadcaster", "no_broadcaster")
+                        next_request_allowed_at = now_loop + WATCH_RETRY_BACKOFF_S
                         await _send_waiting_no_broadcaster(room_id, client_id)
                         continue
                     if rtc is None:
+                        _set_state("waiting_for_broadcaster", "rtc_unavailable")
                         await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
                     elif not _room_has_live_source(room_id):
                         offer_outstanding = False
                         offer_started_at = 0.0
+                        _set_state("waiting_for_broadcaster", "stream_offline")
+                        next_request_allowed_at = now_loop + WATCH_RETRY_BACKOFF_S
                         await _send_waiting_stream_offline(room_id, client_id)
                     else:
                         try:
@@ -479,6 +526,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     if sdp:
                         offer_outstanding = False
                         offer_started_at = 0.0
+                        _set_state("peer_active", "answer_received")
                         log.info("watch answer received room=%s client=%s", room_id, client_id)
                         if rtc is not None:
                             await rtc.set_viewer_answer(room_id, client_id, sdp, sdp_type)
@@ -493,6 +541,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         await _handle_chat_text(state, room_id, client_id, "viewer", text)
         finally:
             if joined:
+                _set_state("cleanup_pending", "disconnect")
                 registry.unregister(room_id, "watch", ws)
                 state.ensure_room(room_id).viewers.pop(client_id, None)
                 if rtc is not None:
@@ -502,6 +551,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     except Exception:
                         log.exception("watch cleanup failed")
                 await _broadcast_presence(state, room_id)
+            _set_state("disconnected", "ws_close")
             log.info("watch socket disconnected room=%s client=%s", room_id, client_id)
 
     @app.post('/api/upload')
