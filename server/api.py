@@ -28,6 +28,35 @@ def _sample_grid(grid, lat: float, lon: float, bbox: list[float]):
         return None
 
 
+def _jetstream_orb_grid(fields: dict, bbox: list[float], stride: int = 5, altitude_m: float = 10500.0) -> list[dict]:
+    u_grid = fields.get("wind_u")
+    v_grid = fields.get("wind_v")
+    if not isinstance(u_grid, list) or not u_grid or not isinstance(u_grid[0], list):
+        return []
+    if not isinstance(v_grid, list) or not v_grid or not isinstance(v_grid[0], list):
+        return []
+    u = u_grid[0] if isinstance(u_grid[0][0], list) else u_grid
+    v = v_grid[0] if isinstance(v_grid[0][0], list) else v_grid
+    ny = len(u)
+    nx = len(u[0]) if ny and isinstance(u[0], list) else 0
+    if ny < 1 or nx < 1:
+        return []
+    west, south, east, north = [float(x) for x in bbox]
+    items: list[dict] = []
+    for iy in range(0, ny, max(1, int(stride))):
+        for ix in range(0, nx, max(1, int(stride))):
+            try:
+                u_val = float(u[iy][ix])
+                v_val = float(v[iy][ix])
+            except Exception:
+                continue
+            speed_mph = ((u_val * u_val + v_val * v_val) ** 0.5) * 2.23694
+            lat = south + ((iy + 0.5) / max(1, ny)) * (north - south)
+            lon = west + ((ix + 0.5) / max(1, nx)) * (east - west)
+            items.append({"lat": lat, "lon": lon, "mph": round(speed_mph, 2), "altitude_m": altitude_m})
+    return items
+
+
 @api_bp.get("/gfs/scene")
 async def api_gfs_scene():
     try:
@@ -55,6 +84,7 @@ async def api_gfs_scene():
             "bbox": bbox,
             "valid_time": weather.get("valid_time"),
             "fields": fields,
+            "jet_orbs": _jetstream_orb_grid(fields, bbox, stride=5, altitude_m=10500.0),
             "hud": {
                 "sample_lat": center_lat,
                 "sample_lon": center_lon,

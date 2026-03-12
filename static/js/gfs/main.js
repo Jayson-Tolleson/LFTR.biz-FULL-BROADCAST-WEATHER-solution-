@@ -251,6 +251,7 @@ async function refreshOverlays(reason = 'manual') {
 
   try {
     const bboxQ = encodeURIComponent(bboxToQuery(b));
+    window.__gfsLastBbox = bboxToQuery(b);
     const vpQ = viewportToQuery(viewport);
     const req = (path) => getJsonSafe(path, null, { signal: controller.signal });
     const [weather, clouds, baitBase] = await Promise.all([
@@ -277,6 +278,9 @@ async function refreshOverlays(reason = 'manual') {
     });
 
     fetchAdvanced();
+    if (typeof window.drawJetBalloons === 'function') {
+      window.drawJetBalloons().catch(() => {});
+    }
   } catch (err) {
     if (err?.name === 'AbortError') {
       console.info('[gfs overlays] request aborted', { reason, seq });

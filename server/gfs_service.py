@@ -2048,7 +2048,16 @@ class GFSService:
         if u_da is None or v_da is None or "isobaricInhPa" not in u_da.dims:
             return []
         levels = np.asarray(iso["isobaricInhPa"].values, dtype=float)
-        level = 700.0 if 700.0 in levels else float(levels[np.argmin(np.abs(levels - 700.0))])
+        preferred = [250.0, 300.0]
+        level = None
+        for cand in preferred:
+            if cand in levels:
+                level = cand
+                break
+        if level is None:
+            level = float(levels[np.argmin(np.abs(levels - 275.0))])
+        if not math.isfinite(level):
+            level = 300.0
         u = np.asarray(self.squeeze_forecast_array(u_da.sel(isobaricInhPa=level)).values, dtype=float)
         v = np.asarray(self.squeeze_forecast_array(v_da.sel(isobaricInhPa=level)).values, dtype=float)
         lat2d, lon2d = self.ensure_lat_lon_2d(iso)
@@ -2060,7 +2069,18 @@ class GFSService:
         for iy in range(0, u.shape[0], step_y):
             for ix in range(0, u.shape[1], step_x):
                 speed_mps, heading_deg = self.wind_speed_dir_from_uv(float(u[iy, ix]), float(v[iy, ix]))
-                vectors.append({"lat": float(lat2d[iy, ix]), "lon": float(lon2d[iy, ix]), "u": float(u[iy, ix]), "v": float(v[iy, ix]), "speed_mps": round(speed_mps, 3), "heading_deg": round(heading_deg, 2), "source_level": f"{int(level)} hPa"})
+                altitude_m = 10500.0 if level <= 300.0 else 9800.0
+                vectors.append({
+                    "lat": float(lat2d[iy, ix]),
+                    "lon": float(lon2d[iy, ix]),
+                    "u": float(u[iy, ix]),
+                    "v": float(v[iy, ix]),
+                    "speed_mps": round(speed_mps, 3),
+                    "speed_mph": round(speed_mps * 2.23694, 2),
+                    "heading_deg": round(heading_deg, 2),
+                    "altitude_m": round(altitude_m, 1),
+                    "source_level": f"{int(level)} hPa",
+                })
         return vectors
 
     def derive_hail_mask(self, datasets: dict[str, Any], precip_mm_hr: Any, cloud_layers: dict[str, Any], *, target_shape: tuple[int, int] | None = None, warned: set[str] | None = None) -> Any:
