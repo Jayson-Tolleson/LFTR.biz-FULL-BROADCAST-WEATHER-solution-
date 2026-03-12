@@ -21,6 +21,72 @@
   let streamAttached = false;
   let isNegotiating = false;
   let hasRequestedStream = false;
+  let lastStreamRequestAt = 0;
+
+  let reconnectTimer = null;
+
+  function clearReconnectTimer() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
+  function scheduleRequestStream(delayMs = 500, force = false) {
+    clearReconnectTimer();
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      requestStream(force);
+    }, Math.max(0, Number(delayMs) || 0));
+  }
+
+  function resetViewerPlaybackState(reason) {
+    clearReconnectTimer();
+    requestPending = false;
+    hasRequestedStream = false;
+    isNegotiating = false;
+    streamAttached = false;
+    if (pc) {
+      try { pc.ontrack = null; } catch (_) {}
+      try { pc.onicecandidate = null; } catch (_) {}
+      try { pc.onconnectionstatechange = null; } catch (_) {}
+      try { pc.oniceconnectionstatechange = null; } catch (_) {}
+      try { pc.close(); } catch (_) {}
+      pc = null;
+    }
+    if (v) {
+      try {
+        if (v.srcObject) {
+          const tracks = v.srcObject.getTracks ? v.srcObject.getTracks() : [];
+          tracks.forEach((t) => { try { t.stop(); } catch (_) {} });
+        }
+      } catch (_) {}
+      v.srcObject = null;
+    }
+    mode.textContent = 'STANDBY';
+    standby.style.display = 'block';
+    hideLiveOverlay().catch(() => {});
+    console.info('[watch] viewer peer reset', { reason, broadcasterPresent });
+  }
+
+  let overlayModulePromise = null;
+
+  function overlayModule() {
+    if (!overlayModulePromise) {
+      overlayModulePromise = import('/static/js/ui/liveOverlay.js');
+    }
+    return overlayModulePromise;
+  }
+
+  async function showLiveOverlay(stream = null) {
+    const mod = await overlayModule();
+    mod.createLiveOverlay({ stream, muted: true });
+  }
+
+  async function hideLiveOverlay() {
+    const mod = await overlayModule();
+    mod.destroyLiveOverlay();
+  }
 
   const unmuteBtn = document.createElement('button');
   unmuteBtn.type = 'button';
@@ -74,13 +140,17 @@
 
   function requestStream(force = false) {
     const connected = !!(pc && pc.connectionState === 'connected' && streamAttached);
+    const now = Date.now();
     if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected || hasRequestedStream)) {
       needsStreamRequest = !broadcasterPresent;
       return;
     }
+    if (force && (requestPending || isNegotiating || connected)) return;
+    if (now - lastStreamRequestAt < 750) return;
     requestPending = true;
     hasRequestedStream = true;
     needsStreamRequest = false;
+    lastStreamRequestAt = now;
     sendJson('request_stream');
   }
 
@@ -92,6 +162,7 @@
     playVideo('remote_track_attach');
     standby.style.display = 'none';
     mode.textContent = 'LIVE';
+    showLiveOverlay(stream).catch(() => {});
   }
 
   function sendIceCandidate(candidate) {
@@ -101,10 +172,29 @@
 
   async function ensureViewerPeerConnection(force = false) {
     if (pc && !force) return pc;
-    if (pc && force) { try { pc.close(); } catch {} }
+    if (pc && force) {
+      try { pc.close(); } catch {}
+      pc = null;
+    }
     pc = new RTCPeerConnection({ iceServers: await iceServers() });
     pc.ontrack = attachRemoteTrack;
     pc.onicecandidate = (e) => sendIceCandidate(e.candidate);
+    pc.onconnectionstatechange = () => {
+      const st = pc?.connectionState;
+      if (!st) return;
+      if ((st === 'failed' || st === 'disconnected' || st === 'closed') && mode.textContent === 'LIVE') {
+        resetViewerPlaybackState(`pc_connection_${st}`);
+        if (broadcasterPresent) scheduleRequestStream(500);
+      }
+    };
+    pc.oniceconnectionstatechange = () => {
+      const st = pc?.iceConnectionState;
+      if (!st) return;
+      if ((st === 'failed' || st === 'disconnected' || st === 'closed') && mode.textContent === 'LIVE') {
+        resetViewerPlaybackState(`pc_ice_${st}`);
+        if (broadcasterPresent) scheduleRequestStream(500);
+      }
+    };
     return pc;
   }
 
@@ -156,16 +246,42 @@
       }
       return;
     }
+
+    if (msg.type === 'stream_started') {
+      requestPending = false;
+      isNegotiating = false;
+      hasRequestedStream = false;
+      needsStreamRequest = false;
+      broadcasterPresent = true;
+      scheduleRequestStream(80, true);
+      return;
+    }
+    if (msg.type === 'broadcaster-start') {
+      broadcasterPresent = true;
+      needsStreamRequest = false;
+      requestPending = false;
+      showLiveOverlay().catch(() => {});
+      scheduleRequestStream(80, true);
+      return;
+    }
+    if (msg.type === 'broadcaster-stop') {
+      broadcasterPresent = false;
+      needsStreamRequest = true;
+      resetViewerPlaybackState('broadcaster_stop');
+      return;
+    }
     if (msg.type === 'ai_status') {
       updateAiStatus(msg.status || 'idle');
       return;
     }
     if (msg.type === 'waiting' || msg.type === 'error') {
-      if (msg.message === 'no_broadcaster') {
+      if (msg.message === 'no_broadcaster' || msg.message === 'stream_offline') {
         requestPending = false;
         needsStreamRequest = true;
+        hasRequestedStream = false;
         mode.textContent = 'OFFLINE';
         standby.style.display = 'block';
+        hideLiveOverlay().catch(() => {});
       }
       return;
     }
@@ -214,13 +330,8 @@
         return;
       }
       if ((st === 'closed' || st === 'failed' || st === 'disconnected') && mode.textContent === 'LIVE') {
-        streamAttached = false;
-        isNegotiating = false;
-        requestPending = false;
-        hasRequestedStream = false;
-        mode.textContent = 'STANDBY';
-        standby.style.display = 'block';
-        if (broadcasterPresent) requestStream();
+        resetViewerPlaybackState(`server_state_${st}`);
+        if (broadcasterPresent) scheduleRequestStream(500);
       }
       return;
     }
@@ -238,6 +349,7 @@
       requestPending = false;
       isNegotiating = false;
       hasRequestedStream = false;
+      lastStreamRequestAt = 0;
       needsStreamRequest = true;
       sendJson('join');
       if (broadcasterPresent) requestStream();
@@ -253,12 +365,16 @@
       requestPending = false;
       isNegotiating = false;
       hasRequestedStream = false;
+      lastStreamRequestAt = 0;
       streamAttached = false;
+      resetViewerPlaybackState('ws_closed');
       console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
       setTimeout(connectWatchSocket, retryDelayMs);
       retryDelayMs = Math.min(20000, Math.round(retryDelayMs * 1.8));
     };
   }
+
+  window.addEventListener('beforeunload', () => { hideLiveOverlay().catch(() => {}); });
 
   connectWatchSocket();
 })();

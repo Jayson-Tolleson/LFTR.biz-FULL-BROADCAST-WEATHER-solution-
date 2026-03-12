@@ -25,9 +25,15 @@ def _static_file(path_name: str, static_dir: Path | None = None) -> Path:
     return path
 
 
-def _static_error_response(app: Quart, static_dir: Path | None = None):
-    app.logger.error("[routes] static deployment invalid at %s", static_dir or STATIC_DIR)
-    return jsonify({"ok": False, "error": "static deployment invalid"}), 500
+def _static_error_response(app: Quart, path_name: str, exc: Exception, static_dir: Path | None = None):
+    app.logger.error(
+        "[routes] static serving failed path_name=%s static_root=%s exc=%s",
+        path_name,
+        static_dir or STATIC_DIR,
+        exc,
+        exc_info=True,
+    )
+    return jsonify({"ok": False, "error": "static deployment invalid", "detail": str(exc)}), 500
 
 
 def _normalize_ice_url(raw: str, default_scheme: str = "turn") -> str:
@@ -83,8 +89,8 @@ def register_core_routes(app: Quart, settings: Settings, static_dir: Path | None
     async def index():
         try:
             return await send_file(str(_static_file("index.html", static_dir)))
-        except Exception:
-            return _static_error_response(app, static_dir)
+        except Exception as exc:
+            return _static_error_response(app, "index.html", exc, static_dir)
 
     @app.get("/health")
     async def health():
@@ -94,15 +100,15 @@ def register_core_routes(app: Quart, settings: Settings, static_dir: Path | None
     async def broadcast_page():
         try:
             return await send_file(str(_static_file("broadcast.html", static_dir)))
-        except Exception:
-            return _static_error_response(app, static_dir)
+        except Exception as exc:
+            return _static_error_response(app, "broadcast.html", exc, static_dir)
 
     @app.get("/watch")
     async def watch_page():
         try:
             return await send_file(str(_static_file("watch.html", static_dir)))
-        except Exception:
-            return _static_error_response(app, static_dir)
+        except Exception as exc:
+            return _static_error_response(app, "watch.html", exc, static_dir)
 
     @app.get("/favicon.ico")
     async def favicon():
@@ -116,8 +122,8 @@ def register_core_routes(app: Quart, settings: Settings, static_dir: Path | None
     async def status_dashboard():
         try:
             return await send_file(str(_static_file("status_dashboard.html", static_dir)))
-        except Exception:
-            return _static_error_response(app, static_dir)
+        except Exception as exc:
+            return _static_error_response(app, "status_dashboard.html", exc, static_dir)
 
     @app.get("/webrtc/ice-config")
     async def webrtc_ice_config():

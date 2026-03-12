@@ -51,7 +51,9 @@
     signalWs: null,
     camStream: null,
     screenStream: null,
-    mediaRecorder: null,
+    speechCtx: null,
+    speechSource: null,
+    speechProcessor: null,
     media: {
       ai_enabled: true,
       ai_status: 'idle',
@@ -149,6 +151,8 @@
         echoCancellation: true,
         noiseSuppression: !!state.media.noise_cancel_enabled,
         autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
       },
     });
     if (dom.preview && !state.media.screen_enabled) dom.preview.srcObject = state.camStream;
@@ -240,15 +244,73 @@
     announceState();
   }
 
+  const STT_TARGET_SAMPLE_RATE = 16000;
+  const STT_TARGET_CHANNELS = 1;
+
   function stopSpeechCapture() {
-    if (state.mediaRecorder) {
-      try { state.mediaRecorder.stop(); } catch {}
-      state.mediaRecorder = null;
+    if (state.speechProcessor) {
+      try { state.speechProcessor.disconnect(); } catch (_) {}
+      state.speechProcessor.onaudioprocess = null;
+      state.speechProcessor = null;
+    }
+    if (state.speechSource) {
+      try { state.speechSource.disconnect(); } catch (_) {}
+      state.speechSource = null;
+    }
+    if (state.speechCtx) {
+      try { state.speechCtx.close(); } catch (_) {}
+      state.speechCtx = null;
     }
   }
 
-  function sendAudioChunk(b64, mime, sampleRate, channels) {
-    sendJson(state.chatWs, 'audio_chunk', { mime, data: b64, sampleRate, channels });
+  function sendAudioChunk(b64, sampleRate) {
+    sendJson(state.chatWs, 'audio_chunk', {
+      encoding: 'linear16',
+      channels: STT_TARGET_CHANNELS,
+      sampleRate,
+      data: b64,
+    });
+  }
+
+  function floatToInt16(input) {
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i += 1) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      out[i] = s < 0 ? Math.round(s * 0x8000) : Math.round(s * 0x7fff);
+    }
+    return out;
+  }
+
+  function downsampleBuffer(input, inputRate, outputRate) {
+    if (outputRate === inputRate) return input;
+    const ratio = inputRate / outputRate;
+    const outLength = Math.max(1, Math.round(input.length / ratio));
+    const out = new Float32Array(outLength);
+    let outOffset = 0;
+    let inOffset = 0;
+    while (outOffset < outLength) {
+      const nextOffset = Math.min(input.length, Math.round((outOffset + 1) * ratio));
+      let acc = 0;
+      let count = 0;
+      for (let i = inOffset; i < nextOffset; i += 1) {
+        acc += input[i];
+        count += 1;
+      }
+      out[outOffset] = count > 0 ? acc / count : 0;
+      outOffset += 1;
+      inOffset = nextOffset;
+    }
+    return out;
+  }
+
+  function int16ToBase64(samples) {
+    const bytes = new Uint8Array(samples.buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
   }
 
   async function startSpeechCaptureFromMic() {
@@ -257,28 +319,30 @@
     const cam = await startCameraStream();
     const track = cam.getAudioTracks()[0];
     if (!track) return;
+
     const sttStream = new MediaStream([track.clone()]);
-    const preferredMime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((m) => {
-      try { return MediaRecorder.isTypeSupported(m); } catch (_) { return false; }
-    }) || '';
-    const mr = preferredMime ? new MediaRecorder(sttStream, { mimeType: preferredMime }) : new MediaRecorder(sttStream);
-    const settings = track.getSettings ? track.getSettings() : {};
-    const rawSampleRate = Number(settings.sampleRate || 0) || 0;
-    const channels = Number(settings.channelCount || 1) || 1;
-    const sampleRate = rawSampleRate > 0 ? rawSampleRate : 48000;
-    mr.ondataavailable = async (ev) => {
-      if (!ev.data || ev.data.size < 1) return;
-      const ab = await ev.data.arrayBuffer();
-      const bytes = new Uint8Array(ab);
-      let binary = '';
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-      }
-      sendAudioChunk(btoa(binary), ev.data.type || preferredMime || 'audio/webm;codecs=opus', sampleRate, channels);
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+
+    const ctx = new Ctx({ sampleRate: STT_TARGET_SAMPLE_RATE });
+    const source = ctx.createMediaStreamSource(sttStream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (event) => {
+      if (!state.chatWs || state.chatWs.readyState !== WebSocket.OPEN) return;
+      const input = event.inputBuffer.getChannelData(0);
+      const reduced = downsampleBuffer(input, ctx.sampleRate, STT_TARGET_SAMPLE_RATE);
+      const pcm = floatToInt16(reduced);
+      if (!pcm.length) return;
+      sendAudioChunk(int16ToBase64(pcm), STT_TARGET_SAMPLE_RATE);
     };
-    mr.start(1200);
-    state.mediaRecorder = mr;
+
+    source.connect(processor);
+    processor.connect(ctx.destination);
+
+    state.speechCtx = ctx;
+    state.speechSource = source;
+    state.speechProcessor = processor;
   }
 
   function connectChat() {

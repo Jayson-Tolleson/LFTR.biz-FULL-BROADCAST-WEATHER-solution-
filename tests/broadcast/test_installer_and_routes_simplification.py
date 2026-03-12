@@ -13,7 +13,7 @@ def test_broadcast_sh_no_html_mutation_logic():
 def test_routes_split_files_present_and_used():
     routes_src = Path('server/routes.py').read_text(encoding='utf-8')
     assert 'register_core_routes' in routes_src
-    assert 'register_gfs_routes' in routes_src
+    assert 'create_gfs_blueprint' in routes_src
     assert 'register_broadcast_routes' in routes_src
 
 
@@ -35,4 +35,5 @@ def test_watch_js_avoids_forced_duplicate_stream_requests():
     src = Path('static/js/watch.js').read_text(encoding='utf-8')
     assert 'hasRequestedStream' in src
     assert 'requestStream();' in src
-    assert 'requestStream(true);' not in src
+    assert "if (msg.type === 'stream_started')" in src
+    assert 'requestStream(true);' in src

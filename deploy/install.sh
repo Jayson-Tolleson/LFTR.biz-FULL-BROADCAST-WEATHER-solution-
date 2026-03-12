@@ -106,6 +106,7 @@ phase2_python_runtime() {
   source "$VENV_DIR/bin/activate"
   pip install --upgrade pip
   pip install -r "$APP_DIR/requirements.txt"
+  pip install netCDF4 pydap
   pip install cfgrib eccodes
   find "$APP_DIR" -type d -exec chmod 755 {} \;
   find "$APP_DIR" -type f -exec chmod 644 {} \;

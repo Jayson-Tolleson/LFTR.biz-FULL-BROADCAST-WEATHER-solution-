@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() + "Z" if value else None
+
+
+def serialize_weather(
+    *,
+    valid_time: datetime | None,
+    bbox: list[float],
+    stride: int,
+    fields: dict[str, Any],
+    stale: bool,
+    polygon_field_v1: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    sample = next(iter(fields.values()), [])
+    ny = len(sample) if isinstance(sample, list) else 0
+    nx = len(sample[0]) if ny and isinstance(sample[0], list) else 0
+    return {
+        "valid_time": _iso(valid_time),
+        "bbox": bbox,
+        "stride": stride,
+        "grid": {"nx": nx, "ny": ny, "dx": 0.25 * stride, "dy": 0.25 * stride},
+        "fields": fields,
+        "stale": stale,
+        "polygon_field_v1": polygon_field_v1 or None,
+    }
+
+
+def serialize_clouds(
+    *,
+    valid_time: datetime | None,
+    bbox: list[float],
+    layers: list[dict[str, Any]],
+    convective: dict[str, Any],
+    stale: bool,
+    polygon_field_v1: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "valid_time": _iso(valid_time),
+        "bbox": bbox,
+        "cloud_layers": layers,
+        "convective": convective,
+        "stale": stale,
+        "polygon_field_v1": polygon_field_v1 or None,
+    }
+
+
+def serialize_bait(
+    *,
+    valid_time: datetime | None,
+    bbox: list[float],
+    bait_score: Any,
+    front_lines: list[Any] | None = None,
+    convergence_polygons: list[Any] | None = None,
+    boil_probability_polygons: list[Any] | None = None,
+    confidence: dict[str, float] | None = None,
+    stale: bool,
+    polygon_field_v1: dict[str, Any] | None = None,
+    bait_base_field_v1: dict[str, Any] | None = None,
+    bait_advanced_field_v1: dict[str, Any] | None = None,
+    bait: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "valid_time": _iso(valid_time),
+        "bbox": bbox,
+        "bait_score": bait_score,
+        "front_lines": front_lines or [],
+        "convergence_polygons": convergence_polygons or [],
+        "boil_probability_polygons": boil_probability_polygons or [],
+        "confidence": confidence or {},
+        "stale": stale,
+        "polygon_field_v1": polygon_field_v1 or None,
+        "bait_base_field_v1": bait_base_field_v1 or None,
+        "bait_advanced_field_v1": bait_advanced_field_v1 or None,
+        "bait": bait or {"status": "incomplete", "source": "suppressed_incomplete", "polygons": []},
+    }
