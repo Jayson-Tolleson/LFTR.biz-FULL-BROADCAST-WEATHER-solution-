@@ -25,9 +25,7 @@
     webBtn: document.getElementById('webBtn'),
     searchCloseBtn: document.getElementById('searchCloseBtn'),
     searchPane: document.getElementById('searchPane'),
-    searchFrame: document.getElementById('searchFrame'),
-    searchFallback: document.getElementById('searchFallback'),
-    searchOpenLink: document.getElementById('searchOpenLink'),
+    searchResults: document.getElementById('searchResults'),
   };
   const v = dom.video;
 
@@ -43,6 +41,9 @@
   let requestPending = false;
   let hasRequestedStream = false;
   let retryTimer = null;
+  const DEBUG_CHAT = false;
+  let lastChatSendAt = 0;
+  let lastChatText = '';
 
   if (dom.joinOverlay) dom.joinOverlay.appendChild(unmuteBtn);
 
@@ -73,6 +74,38 @@
     wrap.append(meta, body);
     dom.chat.appendChild(wrap);
     dom.chat.scrollTop = dom.chat.scrollHeight;
+  }
+
+  function renderSearchResults(query, result) {
+    if (!dom.searchPane || !dom.searchResults) return;
+    const results = (((result || {}).data || {}).results || []);
+    dom.searchPane.classList.add('open');
+    dom.searchResults.textContent = '';
+    const frag = document.createDocumentFragment();
+    if (!results.length) {
+      const empty = document.createElement('div');
+      empty.className = 'searchMeta';
+      empty.textContent = `No results for "${query}".`;
+      frag.appendChild(empty);
+    } else {
+      for (const item of results.slice(0, 8)) {
+        const row = document.createElement('div');
+        row.className = 'searchItem';
+        const title = document.createElement('a');
+        title.href = item.url || '#';
+        title.target = '_blank';
+        title.rel = 'noopener';
+        title.textContent = item.title || item.url || 'Result';
+        const snip = document.createElement('div');
+        snip.textContent = item.snippet || '';
+        const meta = document.createElement('div');
+        meta.className = 'searchMeta';
+        meta.textContent = item.source || 'web';
+        row.append(title, snip, meta);
+        frag.appendChild(row);
+      }
+    }
+    dom.searchResults.appendChild(frag);
   }
 
   function sendJson(type, extra = {}) {
@@ -249,12 +282,7 @@
       return;
     }
     if (msg.type === 'web_search_result') {
-      const q = encodeURIComponent(msg.query || '');
-      const fallbackUrl = `https://www.google.com/search?q=${q}`;
-      dom.searchPane?.classList.add('open');
-      if (dom.searchFrame) dom.searchFrame.src = fallbackUrl;
-      if (dom.searchOpenLink) dom.searchOpenLink.href = fallbackUrl;
-      if (dom.searchFallback) dom.searchFallback.classList.add('show');
+      renderSearchResults(msg.query || '', msg.result || {});
       return;
     }
     if (msg.type === 'waiting' || msg.type === 'error') {
@@ -328,17 +356,24 @@
     dom.chatCollapseBtn.textContent = dom.chatDock.classList.contains('collapsed') ? 'Expand' : 'Collapse';
   });
 
-  dom.sendBtn?.addEventListener('click', () => {
+  function sendChatMessage() {
     const text = (dom.chatInput?.value || '').trim();
     if (!text) return;
+    const now = Date.now();
+    if (text === lastChatText && (now - lastChatSendAt) < 400) return;
+    lastChatText = text;
+    lastChatSendAt = now;
+    if (DEBUG_CHAT) console.debug('[watch.chat] send', { chars: text.length });
     sendJson('chat', { text });
     dom.chatInput.value = '';
-  });
+  }
+
+  dom.sendBtn?.addEventListener('click', sendChatMessage);
 
   dom.chatInput?.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey) {
       ev.preventDefault();
-      dom.sendBtn?.click();
+      sendChatMessage();
     }
   });
 
@@ -366,6 +401,7 @@
   dom.webBtn?.addEventListener('click', () => {
     const query = (dom.chatInput?.value || '').trim();
     if (!query) return;
+    if (DEBUG_CHAT) console.debug('[watch.chat] web_search send', { query_len: query.length });
     sendJson('web_search', { query });
   });
 

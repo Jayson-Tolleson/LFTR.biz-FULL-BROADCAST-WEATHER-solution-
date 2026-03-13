@@ -32,9 +32,10 @@ video{width:100%;height:100%;object-fit:contain;background:#000}
 textarea{flex:1;min-height:58px;max-height:120px;background:#0b1220;color:#eaf1ff;border:1px solid #334161;border-radius:8px;padding:8px;resize:vertical}
 .searchPane{display:none;border-top:1px solid #27324a;padding:8px}
 .searchPane.open{display:block}
-.searchFrame{width:100%;height:200px;border:1px solid #313c58;border-radius:10px;background:#0a101d}
-.searchFallback{display:none;color:var(--muted);font-size:12px;padding-top:6px}
-.searchFallback.show{display:block}
+.searchResults{display:grid;gap:8px;max-height:200px;overflow:auto}
+.searchItem{padding:8px;border:1px solid #334161;border-radius:10px;background:#0c1422}
+.searchItem a{color:#7dd3fc;text-decoration:none}
+.searchMeta{font-size:11px;color:#a7b0c8}
 @media (max-width:980px){.chatDock{width:min(420px,96vw)}}
 </style>
 </head>
@@ -74,8 +75,7 @@ textarea{flex:1;min-height:58px;max-height:120px;background:#0b1220;color:#eaf1f
       </div>
       <div id="chat" class="chatList"></div>
       <div id="searchPane" class="searchPane">
-        <iframe id="searchFrame" class="searchFrame" title="Web Search"></iframe>
-        <div id="searchFallback" class="searchFallback">Google may block embedding. Use <a id="searchOpenLink" href="#" target="_blank" rel="noopener">open in new tab</a>.</div>
+        <div id="searchResults" class="searchResults"></div>
       </div>
       <div class="input">
         <textarea id="chatInput" placeholder="Message room…"></textarea>

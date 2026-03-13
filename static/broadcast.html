@@ -26,13 +26,14 @@ video{width:100%;height:100%;object-fit:contain}
 .chatList{flex:1;overflow:auto;padding:10px}
 .entry{padding:8px;border:1px solid #2c3958;border-radius:10px;margin-bottom:8px;background:#0d1423}
 .entry.stt{border-color:#60a5fa}
-.input{display:flex;gap:6px;padding:8px;border-top:1px solid #27324a}
+.input{display:flex;gap:6px;padding:8px;border-top:1px solid #27324a;align-items:flex-end}
 textarea{flex:1;min-height:58px;max-height:140px;background:#0b1220;color:#eaf1ff;border:1px solid #334161;border-radius:8px;padding:8px}
 .searchPane{display:none;border-top:1px solid #27324a;padding:8px}
 .searchPane.open{display:block}
-.searchFrame{width:100%;height:240px;border:1px solid #313c58;border-radius:10px;background:#0a101d}
-.searchFallback{display:none;color:var(--muted);font-size:12px;padding-top:6px}
-.searchFallback.show{display:block}
+.searchResults{display:grid;gap:8px;max-height:220px;overflow:auto}
+.searchItem{padding:8px;border:1px solid #334161;border-radius:10px;background:#0c1422}
+.searchItem a{color:#7dd3fc;text-decoration:none}
+.searchMeta{font-size:11px;color:#a7b0c8}
 .led{width:10px;height:10px;border-radius:999px;display:inline-block}.r{background:#ef4444}.g{background:#22c55e}.b{background:#3b82f6}.blink{animation:bl 1s linear infinite}@keyframes bl{50%{opacity:.25}}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 </style>
@@ -62,27 +63,23 @@ textarea{flex:1;min-height:58px;max-height:140px;background:#0b1220;color:#eaf1f
         <button id="aiEnableBtn" class="btn"><span id="aiEnableLed" class="led r"></span><span id="aiEnableTxt">AI: off</span></button>
         <button id="aiStatusBtn" class="btn">AI idle</button>
         <button id="ttsMonBtn" class="btn"><span id="ttsMonLed" class="led r"></span><span id="ttsMonTxt">Hear AI voice: off</span></button>
-        <button id="speakBtn" class="btn"><span class="led b"></span><span>Speak last AI</span></button>
       </div>
       <div class="tip">Tip: keep "Hear AI voice" off when STT is enabled to avoid loopback. Screen-share ending in browser auto-falls back to camera.</div>
     </div>
 
     <div class="glass chat">
       <div class="chatHead"><span>Studio Chat + Search</span><span id="roomStatus"></span></div>
-      <div class="chatTools">
-        <button id="attachBtn" class="btn small">Attach</button>
-        <button id="webBtn" class="btn small">Web Search</button>
-        <button id="searchCloseBtn" class="btn small">Hide Search</button>
-        <input id="file" type="file" hidden>
-      </div>
+      <div class="chatTools"><button id="searchCloseBtn" class="btn small">Hide Search</button></div>
       <div id="chat" class="chatList"></div>
       <div id="searchPane" class="searchPane">
-        <iframe id="searchFrame" class="searchFrame" title="Web Search"></iframe>
-        <div id="searchFallback" class="searchFallback">Google blocks embedding in many browsers. Use <a id="searchOpenLink" href="#" target="_blank" rel="noopener">open in new tab</a>.</div>
+        <div id="searchResults" class="searchResults"></div>
       </div>
       <div class="input">
+        <button id="webBtn" class="btn small" type="button">Web Search</button>
+        <button id="attachBtn" class="btn small" type="button">Attach</button>
+        <input id="file" type="file" hidden>
         <textarea id="chatInput" placeholder="Message"></textarea>
-        <button id="sendBtn" class="btn">Send</button>
+        <button id="sendBtn" class="btn" type="button">Send</button>
       </div>
     </div>
   </div>

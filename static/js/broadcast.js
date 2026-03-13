@@ -29,19 +29,19 @@
     aiEnableBtn: document.getElementById('aiEnableBtn'),
     aiStatusBtn: document.getElementById('aiStatusBtn'),
     ttsMonBtn: document.getElementById('ttsMonBtn'),
-    speakBtn: document.getElementById('speakBtn'),
     attachBtn: document.getElementById('attachBtn'),
     webBtn: document.getElementById('webBtn'),
     searchCloseBtn: document.getElementById('searchCloseBtn'),
     searchPane: document.getElementById('searchPane'),
-    searchFrame: document.getElementById('searchFrame'),
-    searchFallback: document.getElementById('searchFallback'),
-    searchOpenLink: document.getElementById('searchOpenLink'),
+    searchResults: document.getElementById('searchResults'),
     fileInput: document.getElementById('file'),
   };
 
   let chatRetryMs = 1200;
   let signalRetryMs = 1200;
+  const DEBUG_CHAT = false;
+  let lastChatSendAt = 0;
+  let lastChatText = '';
 
   const state = {
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
@@ -120,11 +120,16 @@
 
   function appendChat(msg) {
     if (!dom.chat) return;
-    const d = document.createElement('div');
+    const startedAt = performance.now();
+    const d = document.createElement('article');
     d.className = 'entry';
     const who = msg.user || msg.sender || 'system';
     const text = msg.text || msg.payload?.text || '';
-    d.innerHTML = `<b>[${who}]</b><div>${String(text).replace(/[<>&]/g, (s)=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[s]))}</div>`;
+    const whoEl = document.createElement('b');
+    whoEl.textContent = `[${who}]`;
+    const textEl = document.createElement('div');
+    textEl.textContent = String(text);
+    d.append(whoEl, textEl);
     if (msg.attachment?.url) {
       const a = document.createElement('a');
       a.href = msg.attachment.url;
@@ -135,6 +140,41 @@
     }
     dom.chat.appendChild(d);
     dom.chat.scrollTop = dom.chat.scrollHeight;
+    if (DEBUG_CHAT) {
+      console.debug('[broadcast.chat] render_ms', Math.round((performance.now() - startedAt) * 1000) / 1000);
+    }
+  }
+
+  function renderSearchResults(query, result) {
+    if (!dom.searchPane || !dom.searchResults) return;
+    const results = (((result || {}).data || {}).results || []);
+    dom.searchPane.classList.add('open');
+    dom.searchResults.textContent = '';
+    const frag = document.createDocumentFragment();
+    if (!results.length) {
+      const empty = document.createElement('div');
+      empty.className = 'searchMeta';
+      empty.textContent = `No results for "${query}".`;
+      frag.appendChild(empty);
+    } else {
+      for (const item of results.slice(0, 8)) {
+        const row = document.createElement('div');
+        row.className = 'searchItem';
+        const title = document.createElement('a');
+        title.href = item.url || '#';
+        title.target = '_blank';
+        title.rel = 'noopener';
+        title.textContent = item.title || item.url || 'Result';
+        const snip = document.createElement('div');
+        snip.textContent = item.snippet || '';
+        const meta = document.createElement('div');
+        meta.className = 'searchMeta';
+        meta.textContent = item.source || 'web';
+        row.append(title, snip, meta);
+        frag.appendChild(row);
+      }
+    }
+    dom.searchResults.appendChild(frag);
   }
 
   function updateConnectivity(online) {
@@ -371,12 +411,7 @@
       if (msg.type === 'ai_status') updateAiStatus(msg.status || 'idle');
       if (['chat', 'ai', 'ai_partial', 'attachment'].includes(msg.type)) appendChat(msg);
       if (msg.type === 'web_search_result') {
-        const q = encodeURIComponent(msg.query || '');
-        const fallbackUrl = `https://www.google.com/search?q=${q}`;
-        if (dom.searchOpenLink) dom.searchOpenLink.href = fallbackUrl;
-        if (dom.searchFrame) dom.searchFrame.src = fallbackUrl;
-        if (dom.searchPane) dom.searchPane.classList.add('open');
-        if (dom.searchFallback) dom.searchFallback.classList.add('show');
+        renderSearchResults(msg.query || '', msg.result || {});
       }
     };
     ws.onclose = () => {
@@ -434,19 +469,27 @@
     applyRoomState({ settings: state.media, runtime: { broadcaster_present: true, viewer_count: Number(dom.stWatchers?.textContent || 0) } });
   }
 
-  dom.sendBtn?.addEventListener('click', () => {
+  function sendChatMessage() {
     const text = dom.chatInput?.value?.trim();
     if (!text) return;
+    const now = Date.now();
+    if (text === lastChatText && (now - lastChatSendAt) < 400) return;
+    lastChatText = text;
+    lastChatSendAt = now;
+    if (DEBUG_CHAT) console.debug('[broadcast.chat] send', { chars: text.length });
     sendJson(state.chatWs, 'chat', { text });
     dom.chatInput.value = '';
-  });
+  }
+
+  dom.sendBtn?.addEventListener('click', sendChatMessage);
   dom.chatInput?.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); dom.sendBtn?.click(); }
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendChatMessage(); }
   });
 
   dom.webBtn?.addEventListener('click', () => {
     const query = (dom.chatInput?.value || '').trim();
     if (!query) return;
+    if (DEBUG_CHAT) console.debug('[broadcast.chat] web_search send', { query_len: query.length });
     sendJson(state.chatWs, 'web_search', { query });
   });
   dom.searchCloseBtn?.addEventListener('click', () => dom.searchPane?.classList.remove('open'));
@@ -491,13 +534,6 @@
   });
   dom.aiEnableBtn?.addEventListener('click', () => { state.media.ai_enabled = !state.media.ai_enabled; announceState(); });
   dom.ttsMonBtn?.addEventListener('click', () => { state.media.hear_ai_voice = !state.media.hear_ai_voice; announceState(); });
-  dom.speakBtn?.addEventListener('click', () => {
-    const lastAi = [...(dom.chat?.querySelectorAll('.entry') || [])].reverse().find((e) => (e.textContent || '').toLowerCase().includes('[ai]'));
-    if (!lastAi) return;
-    const text = (lastAi.textContent || '').replace(/\[ai\]/ig, '').trim();
-    if (text) sendJson(state.chatWs, 'chat', { text });
-  });
-
   applyRoomState({ settings: state.media, runtime: { broadcaster_present: false, viewer_count: 0 } });
   connectChat();
   connectSignal();
