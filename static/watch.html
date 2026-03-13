@@ -5,35 +5,84 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Watch</title>
 <style>
-body{margin:0;background:#0f1320;color:#e8eefc;font-family:Arial,sans-serif}
+:root{--bg:#07090f;--pane:#12151fbb;--line:#2f3649;--text:#e8eefc;--muted:#a7b0c8;--accent:#7dd3fc}
+body{margin:0;background:radial-gradient(circle at 20% 10%,#1b2030 0,#07090f 40%,#04050a 100%);color:var(--text);font-family:Inter,Arial,sans-serif}
 .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
-.hud{padding:10px 12px;border-bottom:1px solid #263047;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.badge{padding:4px 8px;border:1px solid #334161;border-radius:999px;background:#121a2c;font-size:12px}
-.stage{padding:12px;height:100%;box-sizing:border-box}
-.videoWrap{height:100%;border:1px solid #2a3550;border-radius:12px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center}
-video{width:100%;height:100%;object-fit:contain}
-#standby{opacity:.8}
+.hdr{display:flex;gap:10px;padding:10px 14px;border-bottom:1px solid #1f2434;background:#090d16f2;backdrop-filter:blur(10px);overflow:auto}
+.badge{display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #30384e;border-radius:999px;background:#121a2cdd;font-size:12px}
+.main{position:relative;min-height:0;padding:12px}
+.glass{background:var(--pane);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 26px #0007, inset 0 1px 0 #fff1;backdrop-filter:blur(10px)}
+.videoWrap{position:relative;height:calc(100vh - 84px);overflow:hidden}
+video{width:100%;height:100%;object-fit:contain;background:#000}
+.statusOverlay{position:absolute;left:14px;bottom:14px;display:flex;flex-direction:column;gap:8px;z-index:4}
+.statusChip{padding:8px 10px;border-radius:10px;background:#111928cc;border:1px solid #334161;font-size:12px;color:#dbe7ff}
+.joinOverlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.56);z-index:6}
+.joinCard{padding:16px 18px;border-radius:14px;border:1px solid #4d5f90;background:#111a2ddd;display:flex;flex-direction:column;gap:10px;align-items:center}
+.btn{padding:8px 12px;border-radius:999px;border:1px solid #3a435c;background:#151c2fee;color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:12px}
+.btn:hover{border-color:#5f6c91}
+.chatDock{position:absolute;top:14px;right:14px;bottom:14px;width:min(380px,92vw);display:flex;flex-direction:column;z-index:5;transition:transform .24s ease,opacity .24s ease}
+.chatDock.collapsed{transform:translateX(calc(100% - 42px));opacity:.95}
+.chatHead{display:flex;align-items:center;justify-content:space-between;padding:10px;border-bottom:1px solid #252d40}
+.chatTools{display:flex;gap:8px;padding:8px;border-bottom:1px solid #252d40;flex-wrap:wrap}
+.chatList{flex:1;overflow:auto;padding:10px;min-height:120px}
+.entry{padding:8px;border:1px solid #2c3958;border-radius:10px;margin-bottom:8px;background:#0d1423}
+.entry .meta{font-size:11px;color:var(--muted);margin-bottom:4px}
+.input{display:flex;gap:6px;padding:8px;border-top:1px solid #27324a}
+textarea{flex:1;min-height:58px;max-height:120px;background:#0b1220;color:#eaf1ff;border:1px solid #334161;border-radius:8px;padding:8px;resize:vertical}
+.searchPane{display:none;border-top:1px solid #27324a;padding:8px}
+.searchPane.open{display:block}
+.searchFrame{width:100%;height:200px;border:1px solid #313c58;border-radius:10px;background:#0a101d}
+.searchFallback{display:none;color:var(--muted);font-size:12px;padding-top:6px}
+.searchFallback.show{display:block}
+@media (max-width:980px){.chatDock{width:min(420px,96vw)}}
 </style>
 </head>
 <body>
 <div class="app">
-  <div class="hud">
+  <div class="hdr">
     <span class="badge" id="label">PUBLIC ACCESS</span>
     <span class="badge" id="mode">STANDBY</span>
     <span class="badge" id="conn">connecting</span>
-        <span class="badge" id="ai">AI idle</span>
+    <span class="badge" id="ai">AI idle</span>
+    <span class="badge" id="watchers">watchers 0</span>
   </div>
-  <div class="stage">
-    <div class="videoWrap">
-      <video id="remoteVideo" autoplay playsinline controls></video>
-      <div id="joinStreamOverlay" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:5;">
-        <button id="joinStreamBtn" type="button" style="padding:12px 16px;border-radius:10px;border:1px solid #4c6fff;background:#2040a8;color:#fff;font-weight:600;cursor:pointer;">Join Stream</button>
+  <div class="main">
+    <div class="glass videoWrap">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="joinOverlay" id="joinStreamOverlay">
+        <div class="joinCard">
+          <div id="joinHint">Playback blocked by browser policy</div>
+          <button id="joinStreamBtn" class="btn" type="button">Tap to join audio</button>
+        </div>
       </div>
-      <div id="standby">Waiting for live stream or latest upload...</div>
+      <div class="statusOverlay" id="standby">
+        <div class="statusChip" id="statusText">Waiting for live stream…</div>
+      </div>
     </div>
+
+    <aside id="chatDock" class="chatDock glass">
+      <div class="chatHead">
+        <strong>Room Chat HUD</strong>
+        <button id="chatCollapseBtn" class="btn" type="button">Collapse</button>
+      </div>
+      <div class="chatTools">
+        <button id="attachBtn" class="btn" type="button">Attach</button>
+        <button id="webBtn" class="btn" type="button">Web Search</button>
+        <button id="searchCloseBtn" class="btn" type="button">Hide Search</button>
+        <input id="file" type="file" hidden>
+      </div>
+      <div id="chat" class="chatList"></div>
+      <div id="searchPane" class="searchPane">
+        <iframe id="searchFrame" class="searchFrame" title="Web Search"></iframe>
+        <div id="searchFallback" class="searchFallback">Google may block embedding. Use <a id="searchOpenLink" href="#" target="_blank" rel="noopener">open in new tab</a>.</div>
+      </div>
+      <div class="input">
+        <textarea id="chatInput" placeholder="Message room…"></textarea>
+        <button id="sendBtn" class="btn" type="button">Send</button>
+      </div>
+    </aside>
   </div>
 </div>
 <script src="/static/js/watch.js"></script>
-
 </body>
 </html>

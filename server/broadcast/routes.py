@@ -667,6 +667,15 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     text = str(data.get("text") or "").strip()
                     if text:
                         await _handle_chat_text(state, room_id, client_id, "viewer", text)
+                elif kind == "web_search":
+                    query = str(data.get("query") or "").strip()
+                    room = state.ensure_room(room_id)
+                    if query and room.settings.web_search_enabled:
+                        res = await ai.handle_websearch({"query": query})
+                        await registry.broadcast_room(room_id, {"type": "web_search_result", "room": room_id, "query": query, "result": res, "ts": now_ms()})
+                elif kind in {"attachment", "attachment_uploaded"}:
+                    attachment = data.get("attachment") or {}
+                    await registry.broadcast_room(room_id, {"type": "attachment", "room": room_id, "user": "viewer", "clientId": client_id, "attachment": attachment, "ts": now_ms()})
         finally:
             if joined:
                 _set_state("cleanup_pending", "disconnect")

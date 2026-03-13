@@ -2,143 +2,121 @@
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   const wsBase = `${wsProto}://${location.host}`;
   const room = (new URLSearchParams(location.search).get('room') || 'default').trim() || 'default';
-  const clientId = `w-${Math.random().toString(36).slice(2, 10)}`;
-  let viewerId = clientId;
 
-  const v = document.getElementById('remoteVideo') || document.getElementById('v');
-  const standby = document.getElementById('standby');
-  const conn = document.getElementById('conn');
-  const mode = document.getElementById('mode');
-  const ai = document.getElementById('ai');
-  const label = document.getElementById('label');
-  const videoWrap = v?.closest('.videoWrap') || v?.parentElement;
-  const joinOverlay = document.getElementById('joinStreamOverlay');
-  const joinBtn = document.getElementById('joinStreamBtn');
+  const dom = {
+    video: document.getElementById('remoteVideo'),
+    standby: document.getElementById('standby'),
+    statusText: document.getElementById('statusText'),
+    conn: document.getElementById('conn'),
+    mode: document.getElementById('mode'),
+    ai: document.getElementById('ai'),
+    label: document.getElementById('label'),
+    watchers: document.getElementById('watchers'),
+    joinOverlay: document.getElementById('joinStreamOverlay'),
+    joinBtn: document.getElementById('joinStreamBtn'),
+    joinHint: document.getElementById('joinHint'),
+    chatDock: document.getElementById('chatDock'),
+    chatCollapseBtn: document.getElementById('chatCollapseBtn'),
+    chat: document.getElementById('chat'),
+    chatInput: document.getElementById('chatInput'),
+    sendBtn: document.getElementById('sendBtn'),
+    attachBtn: document.getElementById('attachBtn'),
+    fileInput: document.getElementById('file'),
+    webBtn: document.getElementById('webBtn'),
+    searchCloseBtn: document.getElementById('searchCloseBtn'),
+    searchPane: document.getElementById('searchPane'),
+    searchFrame: document.getElementById('searchFrame'),
+    searchFallback: document.getElementById('searchFallback'),
+    searchOpenLink: document.getElementById('searchOpenLink'),
+  };
+  const v = dom.video;
+
+  const unmuteBtn = document.createElement('button');
+  unmuteBtn.textContent = 'Tap for sound';
+  unmuteBtn.style.display = 'none';
 
   let ws = null;
   let pc = null;
-  let retryDelayMs = 1000;
-  let requestPending = false;
+  let reconnectDelayMs = 1000;
+  let viewerId = `watch-${Math.random().toString(36).slice(2, 10)}`;
   let broadcasterPresent = false;
-  let needsStreamRequest = false;
-  let streamAttached = false;
-  let isNegotiating = false;
+  let requestPending = false;
   let hasRequestedStream = false;
-  let lastStreamRequestAt = 0;
-  let nextStreamRequestAllowedAt = 0;
+  let retryTimer = null;
 
-  let reconnectTimer = null;
+  if (dom.joinOverlay) dom.joinOverlay.appendChild(unmuteBtn);
 
-  function clearReconnectTimer() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
+  function setStatus(text) {
+    if (dom.statusText) dom.statusText.textContent = text;
   }
 
-  function scheduleRequestStream(delayMs = 500, force = false) {
-    clearReconnectTimer();
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      requestStream(force);
-    }, Math.max(0, Number(delayMs) || 0));
+  function showJoinOverlay(show, reason = '') {
+    if (!dom.joinOverlay) return;
+    dom.joinOverlay.style.display = show ? 'flex' : 'none';
+    if (show && dom.joinHint && reason) dom.joinHint.textContent = reason;
   }
 
-  function resetViewerPlaybackState(reason) {
-    clearReconnectTimer();
-    requestPending = false;
-    hasRequestedStream = false;
-    isNegotiating = false;
-    streamAttached = false;
-    if (pc) {
-      try { pc.ontrack = null; } catch (_) {}
-      try { pc.onicecandidate = null; } catch (_) {}
-      try { pc.onconnectionstatechange = null; } catch (_) {}
-      try { pc.oniceconnectionstatechange = null; } catch (_) {}
-      try { pc.close(); } catch (_) {}
-      pc = null;
-    }
-    if (v) {
-      try {
-        if (v.srcObject) {
-          const tracks = v.srcObject.getTracks ? v.srcObject.getTracks() : [];
-          tracks.forEach((t) => { try { t.stop(); } catch (_) {} });
-        }
-      } catch (_) {}
-      v.srcObject = null;
-    }
-    mode.textContent = 'STANDBY';
-    standby.style.display = 'block';
-    hideLiveOverlay().catch(() => {});
-    console.info('[watch] viewer peer reset', { reason, broadcasterPresent });
+  function setStandby(show, reason = 'Waiting for live stream…') {
+    if (dom.standby) dom.standby.style.display = show ? 'block' : 'none';
+    if (show) setStatus(reason);
   }
 
-  let overlayModulePromise = null;
-
-  function overlayModule() {
-    if (!overlayModulePromise) {
-      overlayModulePromise = import('/static/js/ui/liveOverlay.js');
-    }
-    return overlayModulePromise;
+  function appendChat(entry) {
+    if (!dom.chat) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'entry';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = `${entry.user || entry.sender || 'room'} • ${new Date().toLocaleTimeString()}`;
+    const body = document.createElement('div');
+    body.textContent = entry.text || '';
+    wrap.append(meta, body);
+    dom.chat.appendChild(wrap);
+    dom.chat.scrollTop = dom.chat.scrollHeight;
   }
 
-  async function showLiveOverlay(stream = null) {
-    const mod = await overlayModule();
-    mod.createLiveOverlay({ stream, muted: true });
+  function sendJson(type, extra = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ type, room, clientId: viewerId, role: 'viewer', ...extra }));
+    return true;
   }
 
-  async function hideLiveOverlay() {
-    const mod = await overlayModule();
-    mod.destroyLiveOverlay();
-  }
-
-  const unmuteBtn = document.createElement('button');
-  unmuteBtn.type = 'button';
-  unmuteBtn.textContent = 'Tap for sound';
-  unmuteBtn.style.cssText = 'position:absolute;right:12px;bottom:12px;z-index:4;padding:8px 10px;border-radius:999px;border:1px solid #2f3b57;background:rgba(9,13,25,.82);color:#e8eefc;cursor:pointer;display:none';
-  if (videoWrap) {
-    const pos = getComputedStyle(videoWrap).position;
-    if (!pos || pos === 'static') videoWrap.style.position = 'relative';
-    videoWrap.appendChild(unmuteBtn);
-  }
-
-  function showUnmute(show) {
-    unmuteBtn.style.display = show ? 'inline-flex' : 'none';
-  }
-
-  function showJoinOverlay(show) {
-    if (!joinOverlay) return;
-    joinOverlay.style.display = show ? 'flex' : 'none';
-  }
-
-  async function playVideo(reason) {
-    try {
-      await v.play();
-      console.info('[watch] playback started successfully', { reason });
-      showJoinOverlay(false);
-    } catch (err) {
-      console.warn('[watch] video play blocked', { reason, message: err?.message || String(err) });
-      console.info('[watch] autoplay blocked / manual overlay shown', { reason });
-      showJoinOverlay(true);
-    }
-  }
 
   function setLiveMutedAutoplay() {
+    if (!v) return;
     v.playsInline = true;
     v.autoplay = true;
     v.muted = true;
-    showUnmute(true);
   }
 
-  unmuteBtn.addEventListener('click', async () => {
-    v.muted = false;
-    await playVideo('manual_unmute');
-    showUnmute(false);
-  });
+  async function tryPlay(reason) {
+    if (!dom.video) return;
+    try {
+      await dom.video.play();
+      dom.video.muted = false;
+      showJoinOverlay(false);
+      console.info('[watch] playback started successfully', { reason, muted: dom.video.muted });
+    } catch (err) {
+      console.warn('[watch] autoplay blocked', { reason, message: err?.message || String(err) });
+      showJoinOverlay(true, 'Tap to join audio');
+    }
+  }
 
-  joinBtn?.addEventListener('click', async () => {
-    await playVideo('join_stream_click');
-  });
+  function requestStream(force = false) {
+    if (force) hasRequestedStream = false;
+    scheduleStreamRequest(0);
+  }
+
+  function scheduleStreamRequest(delayMs = 350) {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (!broadcasterPresent || requestPending || hasRequestedStream) return;
+      requestPending = sendJson('request_stream');
+      hasRequestedStream = requestPending || hasRequestedStream;
+      console.info('[watch] request_stream sent', { room, viewerId, requestPending });
+    }, delayMs);
+  }
 
   async function iceServers() {
     try {
@@ -150,264 +128,248 @@
     }
   }
 
-  function sendJson(type, extra = {}) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type, room, clientId: viewerId, role: 'viewer', ...extra }));
-  }
-
-  function requestStream(force = false) {
-    const connected = !!(pc && pc.connectionState === 'connected' && streamAttached);
-    const now = Date.now();
-    if (!force && now < nextStreamRequestAllowedAt) return;
-    if (!force && (!broadcasterPresent || requestPending || isNegotiating || connected || hasRequestedStream)) {
-      needsStreamRequest = !broadcasterPresent;
-      return;
-    }
-    if (force && (requestPending || isNegotiating || connected)) return;
-    if (now - lastStreamRequestAt < 750) return;
-    requestPending = true;
-    hasRequestedStream = true;
-    needsStreamRequest = false;
-    lastStreamRequestAt = now;
-    sendJson('request_stream');
-  }
-
-  function attachRemoteTrack(event) {
-    const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
-    if (v.srcObject === stream) return;
-    v.srcObject = stream;
-    streamAttached = true;
-    console.info('[watch] remote track attached', { trackKind: event.track?.kind || 'unknown' });
-    setLiveMutedAutoplay();
-    playVideo('remote_track_attach');
-    standby.style.display = 'none';
-    mode.textContent = 'LIVE';
-    showLiveOverlay(stream).catch(() => {});
-  }
-
-  function sendIceCandidate(candidate) {
-    if (!candidate) return;
-    sendJson('ice-candidate', { viewerId, candidate });
-    sendJson('webrtc_ice', { candidate });
-  }
-
-  async function ensureViewerPeerConnection(force = false) {
-    if (pc && !force) return pc;
-    if (pc && force) {
-      try { pc.close(); } catch {}
+  async function ensurePeerConnection(reset = false) {
+    if (pc && !reset) return pc;
+    if (pc && reset) {
+      try { pc.close(); } catch (_) {}
       pc = null;
     }
     pc = new RTCPeerConnection({ iceServers: await iceServers() });
-    pc.ontrack = attachRemoteTrack;
-    pc.onicecandidate = (e) => sendIceCandidate(e.candidate);
-    pc.onconnectionstatechange = () => {
-      const st = pc?.connectionState;
-      if (!st) return;
-      if ((st === 'failed' || st === 'disconnected' || st === 'closed') && mode.textContent === 'LIVE') {
-        resetViewerPlaybackState(`pc_connection_${st}`);
-        if (broadcasterPresent) scheduleRequestStream(500);
-      }
+    pc.ontrack = async (event) => {
+      const stream = event.streams?.[0] || new MediaStream([event.track]);
+      if (dom.video.srcObject !== stream) dom.video.srcObject = stream;
+      setStandby(false);
+      dom.mode && (dom.mode.textContent = 'LIVE');
+      console.info('[watch] remote track attached', { kind: event.track?.kind || 'unknown' });
+      await tryPlay('remote_track_attach');
     };
-    pc.oniceconnectionstatechange = () => {
-      const st = pc?.iceConnectionState;
-      if (!st) return;
-      if ((st === 'failed' || st === 'disconnected' || st === 'closed') && mode.textContent === 'LIVE') {
-        resetViewerPlaybackState(`pc_ice_${st}`);
-        if (broadcasterPresent) scheduleRequestStream(500);
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) return;
+      sendJson('ice-candidate', { viewerId, candidate: e.candidate });
+      sendJson('webrtc_ice', { candidate: e.candidate });
+    };
+    pc.onconnectionstatechange = () => {
+      const state = pc?.connectionState || 'unknown';
+      console.info('[watch] pc connection state', { state });
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+        requestPending = false;
+        hasRequestedStream = false;
+        setStandby(true, 'Reconnecting stream…');
+        if (broadcasterPresent) scheduleStreamRequest(500);
       }
     };
     return pc;
   }
 
-  function applyPresence(presence) {
-    conn.textContent = `watchers ${presence.viewer_count ?? 0}`;
-    if (presence.broadcaster_present === false && mode.textContent !== 'LIVE') {
-      mode.textContent = 'STANDBY';
-      standby.style.display = 'block';
-    }
+  async function onOffer(payload, sourceType) {
+    if (!payload?.sdp) return;
+    console.info('[watch] offer received', { room, viewerId, sourceType });
+    requestPending = false;
+    hasRequestedStream = false;
+    const localPc = await ensurePeerConnection(true);
+    await localPc.setRemoteDescription(payload);
+    const answer = await localPc.createAnswer();
+    await localPc.setLocalDescription(answer);
+    sendJson('answer', { viewerId, sdp: answer.sdp, type: answer.type });
+    sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+    console.info('[watch] answer sent', { viewerId });
   }
 
-  function updateAiStatus(status) {
-    ai.textContent = `AI ${status || 'idle'}`;
-  }
-
-  async function handleWatchSocketMessage(msg) {
-    if (msg.type === 'state_sync') {
-      const st = msg.state || {};
-      updateAiStatus(st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle'));
-      const present = !!st.runtime?.broadcaster_present;
-      broadcasterPresent = present;
-      if (present) {
-        needsStreamRequest = false;
-        requestStream();
-      }
-      return;
-    }
-    if (msg.type === 'state_update') {
-      const st = msg.state || {};
-      updateAiStatus(st.settings?.ai_status || 'idle');
-      const present = !!st.runtime?.broadcaster_present;
-      broadcasterPresent = present;
-      if (present && !requestPending) {
-        needsStreamRequest = false;
-        requestStream();
-      }
-      return;
-    }
-    if (msg.type === 'presence') {
-      applyPresence(msg);
-      broadcasterPresent = !!msg.broadcaster_present;
-      if (broadcasterPresent && needsStreamRequest) {
-        requestStream();
-        needsStreamRequest = false;
-      } else if (!broadcasterPresent) {
-        requestPending = false;
-        hasRequestedStream = false;
-        needsStreamRequest = true;
-      }
-      return;
-    }
-
-    if (msg.type === 'stream_started') {
-      requestPending = false;
-      isNegotiating = false;
-      hasRequestedStream = false;
-      needsStreamRequest = false;
-      broadcasterPresent = true;
-      scheduleRequestStream(80, true);
-      return;
-    }
-    if (msg.type === 'broadcaster-start') {
-      broadcasterPresent = true;
-      needsStreamRequest = false;
-      requestPending = false;
-      showLiveOverlay().catch(() => {});
-      scheduleRequestStream(80, true);
-      return;
-    }
-    if (msg.type === 'broadcaster-stop') {
-      broadcasterPresent = false;
-      needsStreamRequest = true;
-      resetViewerPlaybackState('broadcaster_stop');
-      return;
-    }
-    if (msg.type === 'ai_status') {
-      updateAiStatus(msg.status || 'idle');
-      return;
-    }
-    if (msg.type === 'waiting' || msg.type === 'error') {
-      if (msg.message === 'no_broadcaster' || msg.message === 'stream_offline') {
-        requestPending = false;
-        needsStreamRequest = true;
-        hasRequestedStream = false;
-        nextStreamRequestAllowedAt = Date.now() + 1500;
-        mode.textContent = 'OFFLINE';
-        standby.style.display = 'block';
-        hideLiveOverlay().catch(() => {});
-      }
-      return;
-    }
-    if (msg.type === 'stage_state') {
-      const p = msg.payload || {};
-      label.textContent = p.label || 'PUBLIC ACCESS';
-      if (p.mode === 'upload' && p.latestUploadUrl) {
-        streamAttached = false;
-        showUnmute(false);
-        v.srcObject = null;
-        v.src = p.latestUploadUrl;
-        playVideo('fallback_upload');
-        standby.style.display = 'none';
-        mode.textContent = 'LATEST UPLOAD';
-      }
-      return;
-    }
+  async function onServerMessage(msg) {
     if (msg.type === 'connected' && msg.clientId) {
       viewerId = String(msg.clientId);
       console.info('[watch] viewer websocket connected', { room, viewerId });
       return;
     }
-    if ((msg.type === 'offer' || msg.type === 'watch_offer' || msg.type === 'webrtc_offer') && msg.payload?.sdp) {
-      console.info('[watch] offer received', { viewerId, type: msg.type });
-      isNegotiating = true;
+    if (msg.type === 'state_sync' || msg.type === 'state_update') {
+      const st = msg.state || {};
+      broadcasterPresent = !!st.runtime?.broadcaster_present;
+      if (dom.watchers) dom.watchers.textContent = `watchers ${st.runtime?.viewer_count ?? 0}`;
+      if (dom.ai) dom.ai.textContent = `AI ${st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle')}`;
+      const present = broadcasterPresent;
+      if (present) {
+        requestStream();
+      }
+      if (present && !requestPending) {
+        requestStream();
+      }
+      return;
+    }
+    if (msg.type === 'presence') {
+      broadcasterPresent = !!msg.broadcaster_present;
+      if (dom.watchers) dom.watchers.textContent = `watchers ${msg.viewer_count ?? 0}`;
+      if (broadcasterPresent) {
+        dom.mode && (dom.mode.textContent = 'LIVE');
+        scheduleStreamRequest(100);
+      } else {
+        dom.mode && (dom.mode.textContent = 'OFFLINE');
+        setStandby(true, 'Waiting for broadcaster…');
+        requestPending = false;
+      }
+      return;
+    }
+    if (msg.type === 'stream_started') {
+      broadcasterPresent = true;
+      requestStream(true);
+      return;
+    }
+    if (msg.type === 'broadcaster-start') {
+      broadcasterPresent = true;
+      requestStream(true);
+      return;
+    }
+    if (msg.type === 'broadcaster-stop') {
+      broadcasterPresent = false;
+      requestPending = false;
+      hasRequestedStream = false;
+      setStandby(true, 'Broadcast ended');
+      showJoinOverlay(false);
+      return;
+    }
+    if (msg.type === 'ai_status' && dom.ai) {
+      dom.ai.textContent = `AI ${msg.status || 'idle'}`;
+      return;
+    }
+    if (msg.type === 'stage_state') {
+      const p = msg.payload || {};
+      if (dom.label) dom.label.textContent = p.label || 'PUBLIC ACCESS';
+      if (p.mode === 'upload' && p.latestUploadUrl) {
+        if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+        dom.video.srcObject = null;
+        dom.video.src = p.latestUploadUrl;
+        dom.video.muted = false;
+        await tryPlay('fallback_upload');
+        dom.mode && (dom.mode.textContent = 'LATEST UPLOAD');
+        setStandby(false);
+      }
+      return;
+    }
+    if (msg.type === 'chat' || msg.type === 'ai' || msg.type === 'ai_partial' || msg.type === 'attachment') {
+      appendChat(msg);
+      return;
+    }
+    if (msg.type === 'web_search_result') {
+      const q = encodeURIComponent(msg.query || '');
+      const fallbackUrl = `https://www.google.com/search?q=${q}`;
+      dom.searchPane?.classList.add('open');
+      if (dom.searchFrame) dom.searchFrame.src = fallbackUrl;
+      if (dom.searchOpenLink) dom.searchOpenLink.href = fallbackUrl;
+      if (dom.searchFallback) dom.searchFallback.classList.add('show');
+      return;
+    }
+    if (msg.type === 'waiting' || msg.type === 'error') {
+      if (msg.message === 'stream_offline' || msg.message === 'no_broadcaster') {
+        requestPending = false;
+        hasRequestedStream = false;
+        setStandby(true, msg.message === 'stream_offline' ? 'Broadcaster connected, waiting for media…' : 'Waiting for broadcaster…');
+      }
+      return;
+    }
+    if (msg.type === 'offer' || msg.type === 'watch_offer' || msg.type === 'webrtc_offer') {
+      await onOffer(msg.payload, msg.type);
+      return;
+    }
+    if (msg.type === 'ice-candidate' || msg.type === 'webrtc_ice') {
+      const candidate = msg.candidate || msg.payload?.candidate;
+      if (!candidate) return;
+      await ensurePeerConnection();
       try {
-        const c = await ensureViewerPeerConnection(true);
-        await c.setRemoteDescription(msg.payload);
-        const answer = await c.createAnswer();
-        await c.setLocalDescription(answer);
-        sendJson('answer', { viewerId, sdp: answer.sdp, type: answer.type });
-        sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
-        console.info('[watch] answer sent', { viewerId });
-      } finally {
-        requestPending = false;
-        hasRequestedStream = false;
-        isNegotiating = false;
-      }
-      return;
-    }
-    if ((msg.type === 'ice-candidate' || msg.type === 'webrtc_ice') && pc) {
-      const cand = msg.candidate || msg.payload?.candidate;
-      if (cand) {
+        await pc.addIceCandidate(candidate);
         console.info('[watch] ice received', { viewerId, type: msg.type });
-        try { await pc.addIceCandidate(cand); } catch {}
+      } catch (err) {
+        console.warn('[watch] ice add failed', { message: err?.message || String(err) });
       }
-      return;
     }
-    if (msg.type === 'webrtc_state') {
-      const st = msg.payload?.state;
-      if (st === 'connected') {
-        isNegotiating = false;
-        requestPending = false;
-        hasRequestedStream = false;
-        return;
-      }
-      if ((st === 'closed' || st === 'failed' || st === 'disconnected') && mode.textContent === 'LIVE') {
-        resetViewerPlaybackState(`server_state_${st}`);
-        if (broadcasterPresent) scheduleRequestStream(500);
-      }
-      return;
-    }
-    if (msg.type === 'pong') return;
   }
 
-  function connectWatchSocket() {
+  function connect() {
     const url = `${wsBase}/ws/watch`;
-    console.info('[watch] websocket connect', { url, room });
     ws = new WebSocket(url);
-    conn.textContent = 'connecting';
+    dom.conn && (dom.conn.textContent = 'connecting');
+
     ws.onopen = () => {
-      retryDelayMs = 1000;
-      conn.textContent = 'connected';
+      reconnectDelayMs = 1000;
+      dom.conn && (dom.conn.textContent = 'connected');
       requestPending = false;
-      isNegotiating = false;
       hasRequestedStream = false;
-      lastStreamRequestAt = 0;
-      nextStreamRequestAllowedAt = 0;
-      needsStreamRequest = true;
+      setStandby(true, 'Waiting for live stream…');
+      setLiveMutedAutoplay();
       sendJson('join');
-      if (broadcasterPresent) requestStream();
+      requestStream();
     };
+
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      handleWatchSocketMessage(msg).catch((err) => console.warn('[watch] message handling failed', err));
+      onServerMessage(msg).catch((err) => console.warn('[watch] message handling failed', err));
     };
-    ws.onerror = (err) => console.warn('[watch] websocket error', { url, room, err });
+
+    ws.onerror = (err) => console.warn('[watch] websocket error', { room, err });
+
     ws.onclose = (ev) => {
-      conn.textContent = 'reconnecting';
+      dom.conn && (dom.conn.textContent = 'reconnecting');
       requestPending = false;
-      isNegotiating = false;
       hasRequestedStream = false;
-      lastStreamRequestAt = 0;
-      nextStreamRequestAllowedAt = Date.now() + 1200;
-      streamAttached = false;
-      resetViewerPlaybackState('ws_closed');
-      console.warn('[watch] websocket closed', { url, room, code: ev?.code, reason: ev?.reason, retryDelayMs });
-      setTimeout(connectWatchSocket, retryDelayMs);
-      retryDelayMs = Math.min(20000, Math.round(retryDelayMs * 1.8));
+      setStandby(true, 'Reconnecting viewer socket…');
+      console.warn('[watch] websocket disconnected', { code: ev.code, reason: ev.reason, reconnectDelayMs });
+      setTimeout(connect, reconnectDelayMs);
+      reconnectDelayMs = Math.min(20000, Math.round(reconnectDelayMs * 1.8));
     };
   }
 
-  window.addEventListener('beforeunload', () => { hideLiveOverlay().catch(() => {}); });
+  dom.joinBtn?.addEventListener('click', async () => {
+    dom.video.muted = false;
+    await tryPlay('manual_overlay_click');
+  });
 
-  connectWatchSocket();
+  dom.chatCollapseBtn?.addEventListener('click', () => {
+    if (!dom.chatDock) return;
+    dom.chatDock.classList.toggle('collapsed');
+    dom.chatCollapseBtn.textContent = dom.chatDock.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+  });
+
+  dom.sendBtn?.addEventListener('click', () => {
+    const text = (dom.chatInput?.value || '').trim();
+    if (!text) return;
+    sendJson('chat', { text });
+    dom.chatInput.value = '';
+  });
+
+  dom.chatInput?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      dom.sendBtn?.click();
+    }
+  });
+
+  dom.attachBtn?.addEventListener('click', () => dom.fileInput?.click());
+  dom.fileInput?.addEventListener('change', async () => {
+    const f = dom.fileInput.files?.[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    const uploadType = /^image\//i.test(f.type || '') ? 'image' : 'location_video';
+    fd.append('upload_type', uploadType);
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      const payload = await r.json();
+      sendJson('attachment', { attachment: payload });
+      sendJson('attachment_uploaded', { attachment: payload });
+      appendChat({ user: 'you', text: `Uploaded: ${payload.url || payload.path || f.name}` });
+    } catch (err) {
+      appendChat({ user: 'system', text: `Upload failed: ${err?.message || String(err)}` });
+    } finally {
+      dom.fileInput.value = '';
+    }
+  });
+
+  dom.webBtn?.addEventListener('click', () => {
+    const query = (dom.chatInput?.value || '').trim();
+    if (!query) return;
+    sendJson('web_search', { query });
+  });
+
+  dom.searchCloseBtn?.addEventListener('click', () => dom.searchPane?.classList.remove('open'));
+
+  connect();
 })();
