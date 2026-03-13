@@ -21,13 +21,9 @@ function hashPhaseSeed(input) {
 }
 
 function greenForProbability(probability) {
-  if (probability >= 0.66) return '#39ff78';
-  if (probability >= 0.33) return '#58f592';
-  return '#43d97a';
-}
-
-function orbSizeForProbability(probability) {
-  return 42 + Math.round(probability * 8);
+  if (probability >= 0.66) return { r: 57, g: 255, b: 120 };
+  if (probability >= 0.33) return { r: 88, g: 245, b: 146 };
+  return { r: 67, g: 217, b: 122 };
 }
 
 function pulseEnvelope(probability, phase, seconds) {
@@ -46,33 +42,65 @@ function pulseEnvelope(probability, phase, seconds) {
   return 0.28 + (smooth * 0.44);
 }
 
-function createOrbTemplate(probability) {
-  const color = greenForProbability(probability);
-  const size = orbSizeForProbability(probability);
+function markerPinCtor() {
+  return window.google?.maps?.marker?.PinElement || null;
+}
+
+function pinStyle(probability, glow) {
+  const c = greenForProbability(probability);
+  const alpha = Math.min(0.95, 0.34 + glow * 0.55);
+  return {
+    scale: Math.min(2.6, 1.15 + probability * 0.75 + glow * 0.45),
+    background: `rgba(${c.r},${c.g},${c.b},${alpha.toFixed(3)})`,
+    borderColor: 'rgba(220,252,231,0.95)',
+    glyphColor: 'rgba(236,255,241,0.95)',
+  };
+}
+
+function createFallbackTemplateOrb(probability) {
+  const c = greenForProbability(probability);
   const uid = `orb-${Math.random().toString(36).slice(2, 10)}`;
   const tpl = document.createElement('template');
   tpl.innerHTML = `
-    <svg width="${size}" height="${size}" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="pointer-events:none">
+    <svg width="48" height="48" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="pointer-events:none">
       <defs>
         <radialGradient id="${uid}-core" cx="30%" cy="28%" r="70%">
           <stop offset="0%" stop-color="#dcffe9"/>
-          <stop offset="42%" stop-color="${color}"/>
+          <stop offset="42%" stop-color="rgb(${c.r},${c.g},${c.b})"/>
           <stop offset="100%" stop-color="#0a3c22"/>
         </radialGradient>
         <radialGradient id="${uid}-halo" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="${color}" stop-opacity="0.62"/>
-          <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+          <stop offset="0%" stop-color="rgb(${c.r},${c.g},${c.b})" stop-opacity="0.62"/>
+          <stop offset="100%" stop-color="rgb(${c.r},${c.g},${c.b})" stop-opacity="0"/>
         </radialGradient>
       </defs>
       <circle data-role="halo" cx="22" cy="22" r="19" fill="url(#${uid}-halo)"/>
       <circle data-role="core" cx="22" cy="22" r="12.5" fill="url(#${uid}-core)"/>
       <ellipse data-role="highlight" cx="17.5" cy="15" rx="4.5" ry="2.6" fill="white" fill-opacity="0.82" transform="rotate(-24 17.5 15)"/>
     </svg>`;
+  return {
+    kind: 'template',
+    content: tpl,
+    core: tpl.content.querySelector('[data-role="core"]'),
+    halo: tpl.content.querySelector('[data-role="halo"]'),
+    highlight: tpl.content.querySelector('[data-role="highlight"]'),
+  };
+}
 
-  const core = tpl.content.querySelector('[data-role=\"core\"]');
-  const halo = tpl.content.querySelector('[data-role=\"halo\"]');
-  const highlight = tpl.content.querySelector('[data-role=\"highlight\"]');
-  return { tpl, core, halo, highlight };
+function createOrbContent(probability) {
+  const PinElement = markerPinCtor();
+  if (PinElement) {
+    const style = pinStyle(probability, 0.45);
+    const pin = new PinElement({
+      scale: style.scale,
+      background: style.background,
+      borderColor: style.borderColor,
+      glyphColor: style.glyphColor,
+      glyph: '●',
+    });
+    return { kind: 'pin', content: pin, pin };
+  }
+  return createFallbackTemplateOrb(probability);
 }
 
 function createFishMarker({ maps3d, loc, altitudeMode }) {
@@ -86,11 +114,11 @@ function createFishMarker({ maps3d, loc, altitudeMode }) {
     extruded: false,
   });
 
-  const orb = createOrbTemplate(probability);
-  marker.append(orb.tpl);
+  const orb = createOrbContent(probability);
+  marker.append(orb.content);
 
   if (MARKER_DEBUG) {
-    console.debug('[gfs markers] created svg orb marker', { id: loc?.id, probability });
+    console.debug('[gfs markers] created marker orb', { id: loc?.id, probability, kind: orb.kind });
   }
 
   return { marker, probability, orb };
@@ -101,12 +129,21 @@ function startPulseLoop(animatedOrbs) {
   const tick = (now) => {
     const seconds = now * 0.001;
     for (const orb of animatedOrbs) {
-      if (!orb?.core || !orb?.halo || !orb?.highlight) continue;
       const glow = pulseEnvelope(orb.probability, orb.phase, seconds);
+      if (orb.kind === 'pin' && orb.pin) {
+        const style = pinStyle(orb.probability, glow);
+        try {
+          orb.pin.scale = style.scale;
+          orb.pin.background = style.background;
+          orb.pin.borderColor = style.borderColor;
+          orb.pin.glyphColor = style.glyphColor;
+        } catch (_) {}
+        continue;
+      }
+      if (!orb?.core || !orb?.halo || !orb?.highlight) continue;
       const coreOpacity = Math.min(1, 0.5 + glow * 0.55);
       const haloOpacity = Math.min(1, 0.22 + glow * 0.7);
       const highlightOpacity = Math.min(1, 0.34 + glow * 0.55);
-
       orb.core.setAttribute('fill-opacity', coreOpacity.toFixed(3));
       orb.halo.setAttribute('fill-opacity', haloOpacity.toFixed(3));
       orb.highlight.setAttribute('fill-opacity', highlightOpacity.toFixed(3));
@@ -156,6 +193,8 @@ export function renderMarkers({ locations, globeEl, maps3d, onSelect }) {
 
     const phaseSeed = `${normalizedLoc.id || normalizedLoc.name || ''}:${lat.toFixed(4)}:${lon.toFixed(4)}`;
     animatedOrbs.push({
+      kind: built.orb.kind,
+      pin: built.orb.pin,
       probability: built.probability,
       phase: hashPhaseSeed(phaseSeed) * Math.PI * 2,
       core: built.orb.core,

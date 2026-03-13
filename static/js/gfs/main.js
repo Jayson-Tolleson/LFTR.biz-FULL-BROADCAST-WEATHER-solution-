@@ -39,6 +39,9 @@ const overlayState = {
   latest: { weather: null, clouds: null, baitBase: null, baitAdvanced: null, bbox: null },
   pendingBuffer: null,
   lastRenderReason: 'boot',
+  lastHeavySignature: '',
+  lastCloudSignature: '',
+  fallbackReasonLoggedForSig: '',
 };
 
 function showStatus(text) {
@@ -215,7 +218,19 @@ function renderOverlays(reason = 'manual') {
   if (allowHeavyDraw) {
     const buffered = overlayState.pendingBuffer;
     const weatherPayload = buffered?.weather || overlayState.latest.weather;
-    const baitPayload = buffered?.baitAdvanced || overlayState.latest.baitAdvanced;
+    const advancedPayload = buffered?.baitAdvanced || overlayState.latest.baitAdvanced;
+    let baitPayload = advancedPayload;
+    const advancedStatus = advancedPayload?.bait?.status;
+    const advancedSource = advancedPayload?.bait?.source;
+    const shouldFallbackToBase = !advancedPayload || (advancedStatus === 'incomplete') || (advancedSource === 'suppressed_incomplete');
+    if (shouldFallbackToBase) {
+      baitPayload = overlayState.latest.baitBase;
+      const reasonKey = `${overlayState.lastSignature}:${advancedStatus || 'none'}:${advancedSource || 'none'}`;
+      if (overlayState.fallbackReasonLoggedForSig !== reasonKey) {
+        overlayState.fallbackReasonLoggedForSig = reasonKey;
+        console.info('[gfs bait] advanced fallback to base', { status: advancedStatus || 'missing', source: advancedSource || 'missing' });
+      }
+    }
 
     overlayState.cleanupRain?.();
     overlayState.cleanupBait?.();
@@ -250,12 +265,22 @@ function renderOverlays(reason = 'manual') {
 
 async function refreshOverlays(reason = 'manual') {
   const viewport = getCanonicalViewport();
-  console.info('[gfs overlays] viewport', { viewport, reason });
   const b = viewport;
   const signature = bboxSignature(b);
+  const isBoot = reason === 'boot';
+  const isSteady = reason === 'steady';
+  const isToggle = reason === 'toggle';
 
-  if (!overlayState.pending && overlayState.lastSignature === signature && reason !== 'toggle') {
-    if (reason === 'steady' && overlayState.pendingBuffer) {
+  const fetchClouds = isBoot && overlayState.cloudsEnabled;
+  const fetchHeavy = isSteady || (isToggle && (overlayState.rainEnabled || overlayState.baitEnabled));
+  if (!fetchClouds && !fetchHeavy) {
+    if (isSteady) renderOverlays('steady');
+    return;
+  }
+
+  const heavySignature = `${signature}:heavy`;
+  if (fetchHeavy && !overlayState.pending && overlayState.lastHeavySignature === heavySignature && !isToggle) {
+    if (isSteady && overlayState.pendingBuffer) {
       renderOverlays('steady');
     }
     return;
@@ -272,62 +297,54 @@ async function refreshOverlays(reason = 'manual') {
   const controller = new AbortController();
   overlayState.activeAbort = controller;
 
-  const expectedSignature = signature;
-  const fetchAdvanced = async () => {
-    try {
-      const bboxQ = encodeURIComponent(bboxToQuery(b));
-      const vpQ = viewportToQuery(viewport);
-      const baitAdvanced = await getJsonSafe(`/gfs/api/bait/advanced?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`, null, { signal: controller.signal });
-      if (seq !== overlayState.requestSeq || expectedSignature !== overlayState.lastSignature) {
-        if (GFS_DEBUG) console.debug('[gfs overlays] stale advanced response discarded', { seq, latest: overlayState.requestSeq });
-        return;
-      }
-      if (baitAdvanced) {
-        overlayState.latest.baitAdvanced = baitAdvanced;
-        renderOverlays(reason);
-        if (GFS_DEBUG) console.debug('[gfs overlays] advanced bait replaced base', { seq });
-      }
-    } catch (err) {
-      if (err?.name !== 'AbortError') {
-        console.warn('[gfs overlays] advanced bait fetch failed', err?.message || err);
-      }
-    }
-  };
-
   try {
     const bboxQ = encodeURIComponent(bboxToQuery(b));
-    window.__gfsLastBbox = bboxToQuery(b);
     const vpQ = viewportToQuery(viewport);
-    const req = (path) => getJsonSafe(path, null, { signal: controller.signal });
-    const [weather, clouds, baitBase] = await Promise.all([
-      req(`/gfs/api/weather?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`),
-      req(`/gfs/api/clouds?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`),
-      req(`/gfs/api/bait?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`),
-    ]);
+    window.__gfsLastBbox = bboxToQuery(b);
 
-    if (seq !== overlayState.requestSeq) {
-      if (GFS_DEBUG) console.debug('[gfs overlays] stale response discarded', { seq, latest: overlayState.requestSeq });
-      return;
+    if (fetchClouds) {
+      const clouds = await getJsonSafe(`/gfs/api/clouds?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`, null, { signal: controller.signal });
+      if (seq !== overlayState.requestSeq) return;
+      overlayState.latest.clouds = clouds;
+      overlayState.lastCloudSignature = signature;
+      overlayState.latest.bbox = b;
+      overlayState.lastSignature = signature;
+      renderOverlays('boot');
+      console.info('[gfs overlays] clouds refreshed', { reason, signature, seq, clouds: Boolean(clouds) });
     }
 
-    overlayState.latest = { weather, clouds, baitBase, baitAdvanced: null, bbox: b };
-    overlayState.lastSignature = signature;
-    renderOverlays(reason);
-    console.info('[gfs overlays] refreshed', {
-      reason,
-      signature,
-      seq,
-      clouds: Boolean(clouds),
-      rain: Boolean(weather),
-      baitBase: Boolean(baitBase),
-    });
+    if (fetchHeavy) {
+      const req = (path) => getJsonSafe(path, null, { signal: controller.signal });
+      const [weather, baitBase] = await Promise.all([
+        req(`/gfs/api/weather?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`),
+        req(`/gfs/api/bait?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`),
+      ]);
+      if (seq !== overlayState.requestSeq) return;
 
-    fetchAdvanced();
+      overlayState.latest.weather = weather;
+      overlayState.latest.baitBase = baitBase;
+      overlayState.latest.baitAdvanced = null;
+      overlayState.latest.bbox = b;
+      overlayState.lastSignature = signature;
+      overlayState.lastHeavySignature = heavySignature;
+      renderOverlays(isSteady ? 'steady' : reason);
+      console.info('[gfs overlays] heavy refreshed', { reason, signature, seq, rain: Boolean(weather), baitBase: Boolean(baitBase) });
+
+      if (overlayState.baitEnabled) {
+        const baitAdvanced = await req(`/gfs/api/bait/advanced?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`);
+        if (seq !== overlayState.requestSeq) return;
+        if (baitAdvanced) {
+          overlayState.latest.baitAdvanced = baitAdvanced;
+          renderOverlays(isSteady ? 'steady' : reason);
+          if (GFS_DEBUG) console.debug('[gfs overlays] advanced bait applied', { seq });
+        }
+      }
+    }
   } catch (err) {
-    if (err?.name === 'AbortError') {
-      if (GFS_DEBUG) console.debug('[gfs overlays] request aborted', { reason, seq });
-    } else {
+    if (err?.name !== 'AbortError') {
       console.warn('[gfs overlays] refresh failed', err?.message || err);
+    } else if (GFS_DEBUG) {
+      console.debug('[gfs overlays] request aborted', { reason, seq });
     }
   } finally {
     if (overlayState.activeAbort === controller) {
@@ -335,10 +352,6 @@ async function refreshOverlays(reason = 'manual') {
     }
     if (seq === overlayState.requestSeq) {
       overlayState.inFlight = false;
-    }
-    if (overlayState.pending && !overlayState.inFlight) {
-      overlayState.pending = false;
-      refreshOverlays('pending');
     }
   }
 }
@@ -373,13 +386,6 @@ function installSteadyRefresh() {
   };
 }
 
-
-function installTimerRefresh() {
-  const id = setInterval(() => {
-    if (!document.hidden) refreshOverlays('timer');
-  }, 90000);
-  return () => clearInterval(id);
-}
 
 function createGfsSocket() {
   let ws = null;
@@ -533,6 +539,7 @@ const hud = createHud({
   getOverlaySummary: nearestOverlaySummary,
   onSelectLocation: (loc) => {
     selectedLocation = loc;
+    gfsSocket.connect();
     refreshSelectedLiveState();
   },
   onStartLive: async (loc) => {
@@ -598,10 +605,9 @@ async function boot() {
   const { maps3d } = await libs();
   const payload = await getJsonSafe('/gfs/api/locations', { locations: [] });
   const locations = payload?.locations || [];
-  renderMarkers({ locations, globeEl, maps3d, onSelect: (loc) => hud.open(loc) });
+  renderMarkers({ locations, globeEl, maps3d, onSelect: (loc) => { gfsSocket.connect(); hud.open(loc); } });
 
   const teardownSteady = installSteadyRefresh();
-  const teardownTimerRefresh = installTimerRefresh();
   const teardownHoverHud = installHoverHud();
 
   pillClouds?.addEventListener('click', () => {
@@ -629,10 +635,8 @@ async function boot() {
 
   showStatus(`Ready • ${locations.length} fish beacons`);
   startLivePolling();
-  gfsSocket.connect();
 
   window.addEventListener('beforeunload', teardownSteady, { once: true });
-  window.addEventListener('beforeunload', teardownTimerRefresh, { once: true });
   window.addEventListener('beforeunload', teardownHoverHud, { once: true });
 }
 
