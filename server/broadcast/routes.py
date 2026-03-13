@@ -126,6 +126,43 @@ async def _chat_emit(room_id: str, payload: dict[str, Any]) -> None:
     await registry.broadcast_room(room_id, {"type": "chat", "room": room_id, **payload, "ts": now_ms()})
 
 
+def _find_ws_by_client(room_id: str, kind: str, client_id: str) -> Any | None:
+    bucket = registry.rooms.get(room_id, {}).get(kind, {})
+    for ws, cid in bucket.items():
+        if cid == client_id:
+            return ws
+    return None
+
+
+async def _route_to_viewer(room_id: str, viewer_id: str, payload: dict[str, Any]) -> bool:
+    ws = _find_ws_by_client(room_id, "watch", viewer_id)
+    if ws is None:
+        log.warning("signal route miss room=%s kind=watch viewer=%s type=%s", room_id, viewer_id, payload.get("type"))
+        return False
+    try:
+        await ws.send_json(payload)
+        return True
+    except Exception:
+        log.warning("signal route failed room=%s kind=watch viewer=%s type=%s", room_id, viewer_id, payload.get("type"), exc_info=True)
+        registry.unregister(room_id, "watch", ws)
+        return False
+
+
+async def _route_to_broadcaster(room_id: str, payload: dict[str, Any]) -> bool:
+    bucket = registry.rooms.get(room_id, {}).get("broadcast", {})
+    ws = next(iter(bucket.keys()), None)
+    if ws is None:
+        log.debug("signal route miss room=%s kind=broadcast type=%s", room_id, payload.get("type"))
+        return False
+    try:
+        await ws.send_json(payload)
+        return True
+    except Exception:
+        log.warning("signal route failed room=%s kind=broadcast type=%s", room_id, payload.get("type"), exc_info=True)
+        registry.unregister(room_id, "broadcast", ws)
+        return False
+
+
 async def _handle_chat_text(state: AppState, room_id: str, client_id: str, role: str, text: str, source: str | None = None) -> None:
     room = state.ensure_room(room_id)
     base_payload = {"user": role, "clientId": client_id, "text": text}
@@ -347,6 +384,32 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     if rtc is not None:
                         cand = rtc.parse_ice(data or {})
                         await rtc.add_broadcaster_ice_candidate(room_id, client_id, cand)
+                elif kind == "offer":
+                    viewer_id = str(data.get("viewerId") or "").strip()
+                    sdp = data.get("sdp")
+                    sdp_type = data.get("type") or "offer"
+                    if viewer_id and sdp:
+                        ok = await _route_to_viewer(
+                            room_id,
+                            viewer_id,
+                            {"type": "offer", "room": room_id, "viewerId": viewer_id, "payload": {"sdp": sdp, "type": sdp_type}, "ts": now_ms()},
+                        )
+                        log.info("signal offer route room=%s viewer=%s ok=%s", room_id, viewer_id, ok)
+                elif kind == "ice-candidate":
+                    viewer_id = str(data.get("viewerId") or "").strip()
+                    cand = data.get("candidate")
+                    if viewer_id and cand:
+                        ok = await _route_to_viewer(
+                            room_id,
+                            viewer_id,
+                            {"type": "ice-candidate", "room": room_id, "viewerId": viewer_id, "candidate": cand, "ts": now_ms()},
+                        )
+                        log.debug("signal ice route room=%s viewer=%s ok=%s", room_id, viewer_id, ok)
+                elif kind == "media_ready":
+                    room.media.live_active = True
+                    room.media.mode = "live"
+                    await registry.broadcast_room(room_id, {"type": "broadcaster-start", "room": room_id, "ts": now_ms()}, kinds=("watch",))
+                    await _broadcast_presence(state, room_id)
                 elif kind == "toggle_state":
                     _merge_room_state(room, data.get("state") or {})
                     await _broadcast_presence(state, room_id)
@@ -427,6 +490,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
 
         registry.register(room_id, "watch", ws, client_id)
         state.ensure_room(room_id).viewers[client_id] = True
+        await ws.send_json({"type": "connected", "room": room_id, "clientId": client_id, "role": "viewer", "ts": now_ms()})
         await ws.send_json({"type": "state_sync", "room": room_id, "state": state.room_state_payload(room_id), "ts": now_ms()})
         await _broadcast_presence(state, room_id)
         _set_state("joined", "auto_join")
@@ -434,6 +498,8 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
         if room.broadcaster_sid is None:
             _set_state("waiting_for_broadcaster", "auto_no_broadcaster")
             await _send_waiting_no_broadcaster(room_id, client_id)
+        elif await _route_to_broadcaster(room_id, {"type": "viewer_joined", "room": room_id, "viewerId": client_id, "ts": now_ms()}):
+            _set_state("request_pending", "auto_viewer_joined")
         elif rtc is not None and _room_has_live_source(room_id):
             _set_state("request_pending", "auto_request_stream")
             try:
@@ -540,6 +606,9 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         next_request_allowed_at = now_loop + WATCH_RETRY_BACKOFF_S
                         await _send_waiting_no_broadcaster(room_id, client_id)
                         continue
+                    if await _route_to_broadcaster(room_id, {"type": "viewer_joined", "room": room_id, "viewerId": client_id, "ts": now_ms()}):
+                        log.info("watcher resumed room=%s client=%s via viewer_joined", room_id, client_id)
+                        continue
                     if rtc is None:
                         _set_state("waiting_for_broadcaster", "rtc_unavailable")
                         await ws.send_json({"type": "error", "room": room_id, "message": "rtc_unavailable", "ts": now_ms()})
@@ -571,11 +640,29 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         log.info("watch answer received room=%s client=%s", room_id, client_id)
                         if rtc is not None:
                             await rtc.set_viewer_answer(room_id, client_id, sdp, sdp_type)
+                elif kind == "answer":
+                    sdp = data.get("sdp")
+                    sdp_type = data.get("type") or "answer"
+                    if sdp:
+                        offer_outstanding = False
+                        offer_started_at = 0.0
+                        _set_state("peer_active", "answer_routed")
+                        await _route_to_broadcaster(
+                            room_id,
+                            {"type": "answer", "room": room_id, "viewerId": client_id, "payload": {"sdp": sdp, "type": sdp_type}, "ts": now_ms()},
+                        )
                 elif kind in {"webrtc_ice", "watch_ice"}:
                     if rtc is not None:
                         cand = rtc.parse_ice(data or {})
                         log.debug("watch ice queued room=%s client=%s", room_id, client_id)
                         await rtc.add_viewer_ice_candidate(room_id, client_id, cand)
+                elif kind == "ice-candidate":
+                    cand = data.get("candidate")
+                    if cand:
+                        await _route_to_broadcaster(
+                            room_id,
+                            {"type": "ice-candidate", "room": room_id, "viewerId": client_id, "candidate": cand, "ts": now_ms()},
+                        )
                 elif kind == "chat":
                     text = str(data.get("text") or "").strip()
                     if text:
@@ -585,6 +672,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 _set_state("cleanup_pending", "disconnect")
                 registry.unregister(room_id, "watch", ws)
                 state.ensure_room(room_id).viewers.pop(client_id, None)
+                await _route_to_broadcaster(room_id, {"type": "viewer_left", "room": room_id, "viewerId": client_id, "ts": now_ms()})
                 if rtc is not None:
                     try:
                         await rtc.stop_viewer(room_id, client_id)

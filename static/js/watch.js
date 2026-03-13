@@ -3,6 +3,7 @@
   const wsBase = `${wsProto}://${location.host}`;
   const room = (new URLSearchParams(location.search).get('room') || 'default').trim() || 'default';
   const clientId = `w-${Math.random().toString(36).slice(2, 10)}`;
+  let viewerId = clientId;
 
   const v = document.getElementById('remoteVideo') || document.getElementById('v');
   const standby = document.getElementById('standby');
@@ -113,9 +114,11 @@
   async function playVideo(reason) {
     try {
       await v.play();
+      console.info('[watch] playback started successfully', { reason });
       showJoinOverlay(false);
     } catch (err) {
       console.warn('[watch] video play blocked', { reason, message: err?.message || String(err) });
+      console.info('[watch] autoplay blocked / manual overlay shown', { reason });
       showJoinOverlay(true);
     }
   }
@@ -149,7 +152,7 @@
 
   function sendJson(type, extra = {}) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type, room, clientId, role: 'viewer', ...extra }));
+    ws.send(JSON.stringify({ type, room, clientId: viewerId, role: 'viewer', ...extra }));
   }
 
   function requestStream(force = false) {
@@ -171,8 +174,10 @@
 
   function attachRemoteTrack(event) {
     const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+    if (v.srcObject === stream) return;
     v.srcObject = stream;
     streamAttached = true;
+    console.info('[watch] remote track attached', { trackKind: event.track?.kind || 'unknown' });
     setLiveMutedAutoplay();
     playVideo('remote_track_attach');
     standby.style.display = 'none';
@@ -182,6 +187,7 @@
 
   function sendIceCandidate(candidate) {
     if (!candidate) return;
+    sendJson('ice-candidate', { viewerId, candidate });
     sendJson('webrtc_ice', { candidate });
   }
 
@@ -315,14 +321,22 @@
       }
       return;
     }
-    if ((msg.type === 'watch_offer' || msg.type === 'webrtc_offer') && msg.payload?.sdp) {
+    if (msg.type === 'connected' && msg.clientId) {
+      viewerId = String(msg.clientId);
+      console.info('[watch] viewer websocket connected', { room, viewerId });
+      return;
+    }
+    if ((msg.type === 'offer' || msg.type === 'watch_offer' || msg.type === 'webrtc_offer') && msg.payload?.sdp) {
+      console.info('[watch] offer received', { viewerId, type: msg.type });
       isNegotiating = true;
       try {
         const c = await ensureViewerPeerConnection(true);
         await c.setRemoteDescription(msg.payload);
         const answer = await c.createAnswer();
         await c.setLocalDescription(answer);
+        sendJson('answer', { viewerId, sdp: answer.sdp, type: answer.type });
         sendJson('webrtc_answer', { sdp: answer.sdp, type: answer.type });
+        console.info('[watch] answer sent', { viewerId });
       } finally {
         requestPending = false;
         hasRequestedStream = false;
@@ -330,9 +344,10 @@
       }
       return;
     }
-    if (msg.type === 'webrtc_ice' && pc) {
+    if ((msg.type === 'ice-candidate' || msg.type === 'webrtc_ice') && pc) {
       const cand = msg.candidate || msg.payload?.candidate;
       if (cand) {
+        console.info('[watch] ice received', { viewerId, type: msg.type });
         try { await pc.addIceCandidate(cand); } catch {}
       }
       return;

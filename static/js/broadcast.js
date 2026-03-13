@@ -47,6 +47,7 @@
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
     clientId: `b-${Math.random().toString(36).slice(2, 10)}`,
     pc: null,
+    peerConnections: {},
     chatWs: null,
     signalWs: null,
     camStream: null,
@@ -171,36 +172,52 @@
     return state.screenStream;
   }
 
-  async function ensurePeerConnection() {
-    if (state.pc) return state.pc;
+  async function ensurePeerConnection(viewerId = null) {
+    if (!viewerId && state.pc) return state.pc;
+    if (viewerId && state.peerConnections[viewerId]) return state.peerConnections[viewerId];
     const iceCfg = await fetch(cfg.iceConfigUrl || '/webrtc/ice-config').then((r) => r.json()).catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
     const pc = new RTCPeerConnection({ iceServers: iceCfg.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }] });
-    state.pc = pc;
-    pc.onicecandidate = (e) => { if (e.candidate) sendJson(state.signalWs, 'webrtc_ice', { candidate: e.candidate }); };
+    if (viewerId) state.peerConnections[viewerId] = pc;
+    else state.pc = pc;
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) return;
+      if (viewerId) sendJson(state.signalWs, 'ice-candidate', { viewerId, candidate: e.candidate });
+      else sendJson(state.signalWs, 'webrtc_ice', { candidate: e.candidate });
+    };
     pc.onconnectionstatechange = () => dom.stPc && (dom.stPc.textContent = pc.connectionState);
     pc.oniceconnectionstatechange = () => dom.stIce && (dom.stIce.textContent = pc.iceConnectionState);
+    if (viewerId) {
+      const stream = state.media.screen_enabled ? state.screenStream : state.camStream;
+      (stream?.getTracks?.() || []).forEach((track) => pc.addTrack(track, stream));
+    }
     return pc;
   }
 
+  async function createOfferForViewer(viewerId) {
+    const pc = await ensurePeerConnection(viewerId);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendJson(state.signalWs, 'offer', { viewerId, sdp: offer.sdp, type: offer.type });
+  }
+
+  function removeViewerPeer(viewerId) {
+    const pc = state.peerConnections[viewerId];
+    if (!pc) return;
+    try { pc.close(); } catch (_) {}
+    delete state.peerConnections[viewerId];
+  }
+
   async function replaceOutgoingVideoTrack(newTrack) {
-    const pc = await ensurePeerConnection();
-    const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-    if (sender) {
-      await sender.replaceTrack(newTrack || null);
-    } else if (newTrack) {
-      pc.addTrack(newTrack, state.media.screen_enabled ? state.screenStream : state.camStream);
-      await negotiate('add-video');
+    for (const pc of Object.values(state.peerConnections)) {
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+      if (sender) await sender.replaceTrack(newTrack || null);
     }
   }
 
   async function replaceOutgoingAudioTrack(newTrack) {
-    const pc = await ensurePeerConnection();
-    const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
-    if (sender) {
-      await sender.replaceTrack(newTrack || null);
-    } else if (newTrack) {
-      pc.addTrack(newTrack, state.camStream || new MediaStream([newTrack]));
-      await negotiate('add-audio');
+    for (const pc of Object.values(state.peerConnections)) {
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+      if (sender) await sender.replaceTrack(newTrack || null);
     }
   }
 
@@ -218,13 +235,6 @@
     } else {
       await replaceOutgoingAudioTrack(null);
     }
-  }
-
-  async function negotiate(reason = 'update') {
-    const pc = await ensurePeerConnection();
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    sendJson(state.signalWs, 'webrtc_offer', { sdp: offer.sdp, type: offer.type, reason });
   }
 
   async function switchToScreen() {
@@ -384,10 +394,26 @@
       signalRetryMs = 1200;
       sendJson(ws, 'join', { role: 'broadcaster' });
       await syncTracks();
-      await negotiate('initial');
+      sendJson(ws, 'media_ready');
     };
     ws.onmessage = async (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'viewer_joined' && msg.viewerId) {
+        await createOfferForViewer(msg.viewerId);
+      }
+      if (msg.type === 'viewer_left' && msg.viewerId) {
+        removeViewerPeer(msg.viewerId);
+      }
+      if (msg.type === 'answer' && msg.viewerId && msg.payload?.sdp) {
+        const pc = state.peerConnections[msg.viewerId];
+        if (pc) await pc.setRemoteDescription({ type: msg.payload.type || 'answer', sdp: msg.payload.sdp });
+      }
+      if (msg.type === 'ice-candidate' && msg.viewerId && msg.candidate) {
+        const pc = state.peerConnections[msg.viewerId];
+        if (pc) {
+          try { await pc.addIceCandidate(msg.candidate); } catch (_) {}
+        }
+      }
       if (msg.type === 'webrtc_answer' && msg.sdp && state.pc) {
         await state.pc.setRemoteDescription({ type: msg.answerType || 'answer', sdp: msg.sdp });
       }
@@ -395,6 +421,7 @@
       if (msg.type === 'state_sync' || msg.type === 'state_update') applyRoomState(msg.state || {});
     };
     ws.onclose = () => {
+      Object.keys(state.peerConnections).forEach(removeViewerPeer);
       setTimeout(connectSignal, signalRetryMs);
       signalRetryMs = Math.min(15000, Math.round(signalRetryMs * 1.7));
     };

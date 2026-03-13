@@ -172,9 +172,13 @@ class ThreddsGfsProvider:
     @staticmethod
     def _to_2d_float32(da: xr.DataArray) -> list[list[float]]:
         work = da
+        if "time" in work.dims and int(work.sizes.get("time", 0)) == 1:
+            work = work.squeeze(dim="time", drop=False)
         lat_like = {"lat", "latitude"}
         lon_like = {"lon", "longitude"}
         for dim in list(work.dims):
+            if dim == "time":
+                continue
             if dim not in lat_like and dim not in lon_like:
                 work = work.isel({dim: 0})
         arr = work.fillna(0).astype("float32").values
