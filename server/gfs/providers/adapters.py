@@ -56,12 +56,13 @@ def split_antimeridian(viewport: Viewport) -> list[ErddapSlice]:
 
 
 def build_ncss_subset_request(viewport: Viewport, vars: list[str], stride: int, valid_time: datetime | None, base_url: str) -> str:
+    _ = valid_time
     query: list[tuple[str, str]] = [
         ("north", str(viewport.north)),
         ("south", str(viewport.south)),
         ("west", str(viewport.west)),
         ("east", str(viewport.east)),
-        ("time", "present" if valid_time is None else _iso_time_or_last(valid_time)),
+        ("time", "present"),
         ("horizStride", str(max(1, int(stride)))),
         ("accept", "netCDF4"),
         ("addLatLon", "true"),

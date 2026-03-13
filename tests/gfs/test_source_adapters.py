@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from server.gfs.providers.adapters import Viewport, build_erddap_subset_request, build_ncss_subset_request, split_antimeridian
 
 
@@ -11,6 +13,13 @@ def test_ncss_adapter_includes_bbox_stride_time_vars():
     assert "horizStride=4" in url
     assert "time=present" in url
     assert "var=A" in url and "var=B" in url
+
+
+def test_ncss_adapter_forces_present_even_with_explicit_valid_time():
+    vp = Viewport(west=-130, south=20, east=-110, north=35)
+    url = build_ncss_subset_request(vp, ["A"], 1, datetime(2026, 3, 13, tzinfo=timezone.utc), "https://example/ncss")
+    assert "time=present" in url
+    assert "2026-" not in url
 
 
 def test_erddap_adapter_uses_dap_dimension_constraints_and_antimeridian_split():

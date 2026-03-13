@@ -128,26 +128,30 @@ class ThreddsGfsProvider:
         self._discovered_var_map = mapping
         return {k: v for k, v in mapping.items() if k in requested}
 
-    def _build_ncss_url_sync(self, *, var_names: list[str], bbox: BBox, stride: int, time_selector: str) -> str:
+    def _build_ncss_params_sync(self, *, var_names: list[str], bbox: BBox, stride: int) -> list[tuple[str, str]]:
         query: list[tuple[str, str]] = [
             ("north", str(bbox.north)),
             ("south", str(bbox.south)),
             ("west", str(bbox.west)),
             ("east", str(bbox.east)),
-            ("time", time_selector),
+            # NCSS live fetches must always request nearest indexed time.
+            ("time", "present"),
             ("accept", "netCDF4"),
             ("addLatLon", "true"),
             ("horizStride", str(max(1, int(stride)))),
         ]
         for var_name in var_names:
             query.append(("var", var_name))
+        return query
+
+    def _build_ncss_url_sync(self, *, var_names: list[str], bbox: BBox, stride: int) -> str:
+        query = self._build_ncss_params_sync(var_names=var_names, bbox=bbox, stride=stride)
+        log.debug("ncss params bbox=%s stride=%s time=present vars=%s", bbox.as_list(), stride, var_names)
         return f"{self.ncss_grid_url}?{urllib.parse.urlencode(query)}"
 
     @staticmethod
-    def _requested_time_selector(valid_time: datetime | None) -> str:
-        if valid_time is None:
-            return "present"
-        return str(iso_utc(valid_time))
+    def _requested_time_selector(_valid_time: datetime | None) -> str:
+        return "present"
 
     def _fetch_ncss_bytes_sync(self, url: str) -> bytes:
         req = urllib.request.Request(url, headers={"Accept": "application/x-netcdf"})
@@ -191,7 +195,7 @@ class ThreddsGfsProvider:
         if not resolved:
             raise ValueError("no requested atmospheric variables were resolved from dataset metadata")
 
-        url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride, time_selector=requested_time_selector)
+        url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride)
         payload_bytes = self._fetch_ncss_bytes_sync(url)
         ds = self._open_ncss_dataset_sync(payload_bytes)
 
@@ -220,7 +224,7 @@ class ThreddsGfsProvider:
         try:
             resolved = self._discover_var_names_sync(variables)
             requested_time_selector = self._requested_time_selector(valid_time)
-            url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride, time_selector=requested_time_selector)
+            url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride)
             data, source_time = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._fetch_subset_sync,

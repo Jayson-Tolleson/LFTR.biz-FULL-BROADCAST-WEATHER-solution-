@@ -26,7 +26,7 @@ def test_source_time_preserves_present_selector_when_valid_time_none():
     assert data["resolved_time"] == "2026-03-13T00:00:00Z"
 
 
-def test_source_time_preserves_explicit_time_selector_literal():
+def test_source_time_uses_present_even_with_explicit_valid_time():
     ds = xr.Dataset(
         {"u": (("lat", "lon"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=float))},
         coords={"lat": [1.0, 2.0], "lon": [3.0, 4.0]},
@@ -34,5 +34,5 @@ def test_source_time_preserves_explicit_time_selector_literal():
     p = _provider_with_dataset(ds)
     vt = datetime(2026, 3, 13, 1, 2, 3, tzinfo=timezone.utc)
     data, _resolved_dt = p._fetch_subset_sync(variables=("wind_u",), bbox=BBox(-10, 0, 10, 10), stride=1, valid_time=vt)
-    assert data["source_time"] == "2026-03-13T01:02:03Z"
+    assert data["source_time"] == "present"
     assert data["resolved_time"] is None
