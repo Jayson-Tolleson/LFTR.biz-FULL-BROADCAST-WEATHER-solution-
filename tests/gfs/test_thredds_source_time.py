@@ -23,7 +23,9 @@ def test_source_time_preserves_present_selector_when_valid_time_none():
     p = _provider_with_dataset(ds)
     data, _resolved_dt = p._fetch_subset_sync(variables=("wind_u",), bbox=BBox(-10, 0, 10, 10), stride=1, valid_time=None)
     assert data["source_time"] == "present"
-    assert data["resolved_time"] == "2026-03-13T00:00:00Z"
+    assert isinstance(data["resolved_time"], str)
+    assert data["resolved_time"].endswith("Z")
+    assert data["dataset_time"] == "2026-03-13T00:00:00Z"
 
 
 def test_source_time_uses_present_even_with_explicit_valid_time():
@@ -35,4 +37,6 @@ def test_source_time_uses_present_even_with_explicit_valid_time():
     vt = datetime(2026, 3, 13, 1, 2, 3, tzinfo=timezone.utc)
     data, _resolved_dt = p._fetch_subset_sync(variables=("wind_u",), bbox=BBox(-10, 0, 10, 10), stride=1, valid_time=vt)
     assert data["source_time"] == "present"
-    assert data["resolved_time"] is None
+    assert isinstance(data["resolved_time"], str)
+    assert data["resolved_time"].endswith("Z")
+    assert data["dataset_time"] is None

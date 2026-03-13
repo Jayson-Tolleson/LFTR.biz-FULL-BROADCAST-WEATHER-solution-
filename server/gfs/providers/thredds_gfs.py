@@ -210,12 +210,14 @@ class ThreddsGfsProvider:
             data[internal_name] = self._to_2d_float32(ds[upstream_name])
 
         time_coord = self._coord_name(ds, ("time", "valid_time"))
-        source_time = self._safe_dt(ds.coords[time_coord].values if time_coord else None)
+        dataset_time = self._safe_dt(ds.coords[time_coord].values if time_coord else None)
+        resolved_time = datetime.now(timezone.utc)
         data["source_time"] = requested_time_selector
-        data["resolved_time"] = iso_utc(source_time)
+        data["resolved_time"] = iso_utc(resolved_time)
+        data["dataset_time"] = iso_utc(dataset_time)
         self._last_fetch_at = datetime.now(timezone.utc)
         self._last_error = None
-        return data, source_time
+        return data, dataset_time
 
     async def fetch_subset(
         self,
