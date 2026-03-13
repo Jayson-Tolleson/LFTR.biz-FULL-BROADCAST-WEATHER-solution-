@@ -35,6 +35,8 @@
     searchPane: document.getElementById('searchPane'),
     searchResults: document.getElementById('searchResults'),
     fileInput: document.getElementById('file'),
+    chatCollapseBtn: document.getElementById('chatCollapseBtn'),
+    chatPanel: document.querySelector('.chat'),
   };
 
   let chatRetryMs = 1200;
@@ -42,6 +44,9 @@
   const DEBUG_CHAT = false;
   let lastChatSendAt = 0;
   let lastChatText = '';
+  let selectedVideoDeviceId = '';
+  let cachedVideoInputs = [];
+  let cameraCycleIndex = -1;
 
   const state = {
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
@@ -103,7 +108,9 @@
 
     const setTxt = (id, txt) => { const n = document.getElementById(id); if (n) n.textContent = txt; };
     setLed(document.getElementById('camLed'), !!state.media.camera_enabled);
-    setTxt('camTxt', `CAM: ${state.media.camera_enabled ? 'on' : 'off'}`);
+    if (!state.media.camera_enabled) {
+      setTxt('camTxt', 'CAM: off');
+    }
     setLed(document.getElementById('screenLed'), !!state.media.screen_enabled);
     setTxt('screenTxt', `SCREEN: ${state.media.screen_enabled ? 'on' : 'off'}`);
     setLed(document.getElementById('micLed'), !!state.media.mic_enabled);
@@ -116,6 +123,20 @@
     setTxt('ttsMonTxt', `Hear AI voice: ${state.media.hear_ai_voice ? 'on' : 'off'}`);
     setLed(document.getElementById('aiEnableLed'), !!state.media.ai_enabled);
     setTxt('aiEnableTxt', `AI: ${state.media.ai_enabled ? 'on' : 'off'}`);
+  }
+
+  function compactCameraName(label) {
+    const text = String(label || '').trim();
+    if (!text) return 'camera';
+    if (/front|user/i.test(text)) return 'front cam';
+    if (/back|rear|environment/i.test(text)) return 'back cam';
+    return text.length > 18 ? `${text.slice(0, 18)}…` : text;
+  }
+
+  function updateCameraLabel(label) {
+    const camTxt = document.getElementById('camTxt');
+    if (!camTxt) return;
+    camTxt.textContent = state.media.camera_enabled ? `CAM: ${compactCameraName(label)}` : 'CAM: off';
   }
 
   function appendChat(msg) {
@@ -185,9 +206,18 @@
   }
 
   async function startCameraStream() {
-    if (state.camStream) return state.camStream;
+    if (state.camStream) {
+      const activeTrack = state.camStream.getVideoTracks()[0];
+      const activeDeviceId = activeTrack?.getSettings?.().deviceId || '';
+      if (!selectedVideoDeviceId || selectedVideoDeviceId === activeDeviceId) {
+        return state.camStream;
+      }
+      state.camStream.getTracks().forEach((t) => t.stop());
+      state.camStream = null;
+    }
+    const videoConstraints = selectedVideoDeviceId ? { deviceId: { exact: selectedVideoDeviceId } } : { facingMode: 'user' };
     state.camStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
+      video: videoConstraints,
       audio: {
         echoCancellation: true,
         noiseSuppression: !!state.media.noise_cancel_enabled,
@@ -197,7 +227,42 @@
       },
     });
     if (dom.preview && !state.media.screen_enabled) dom.preview.srcObject = state.camStream;
+    const track = state.camStream.getVideoTracks()[0];
+    selectedVideoDeviceId = track?.getSettings?.().deviceId || selectedVideoDeviceId;
+    updateCameraLabel(track?.label || 'camera');
     return state.camStream;
+  }
+
+  async function refreshVideoInputs() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      cachedVideoInputs = devices.filter((d) => d.kind === 'videoinput');
+    } catch {
+      cachedVideoInputs = [];
+    }
+    return cachedVideoInputs;
+  }
+
+  async function cycleCameraDevice() {
+    const inputs = await refreshVideoInputs();
+    if (!inputs.length) {
+      state.media.camera_enabled = !state.media.camera_enabled;
+      await syncTracks();
+      announceState();
+      return;
+    }
+    const idx = inputs.findIndex((d) => d.deviceId === selectedVideoDeviceId);
+    cameraCycleIndex = idx >= 0 ? idx : cameraCycleIndex;
+    cameraCycleIndex = (cameraCycleIndex + 1) % inputs.length;
+    selectedVideoDeviceId = inputs[cameraCycleIndex].deviceId;
+    state.media.camera_enabled = true;
+    if (state.camStream) {
+      state.camStream.getTracks().forEach((t) => t.stop());
+      state.camStream = null;
+    }
+    await syncTracks();
+    updateCameraLabel(inputs[cameraCycleIndex].label || `camera ${cameraCycleIndex + 1}`);
+    announceState();
   }
 
   async function startScreenStream() {
@@ -505,9 +570,7 @@
   });
 
   dom.camBtn?.addEventListener('click', async () => {
-    state.media.camera_enabled = !state.media.camera_enabled;
-    await syncTracks();
-    announceState();
+    await cycleCameraDevice();
   });
   dom.screenBtn?.addEventListener('click', async () => {
     if (state.media.screen_enabled) await switchToCamera(); else await switchToScreen();
@@ -534,10 +597,20 @@
   });
   dom.aiEnableBtn?.addEventListener('click', () => { state.media.ai_enabled = !state.media.ai_enabled; announceState(); });
   dom.ttsMonBtn?.addEventListener('click', () => { state.media.hear_ai_voice = !state.media.hear_ai_voice; announceState(); });
+  dom.chatCollapseBtn?.addEventListener('click', () => {
+    if (!dom.chatPanel) return;
+    dom.chatPanel.classList.toggle('collapsed');
+    dom.chatCollapseBtn.textContent = dom.chatPanel.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+  });
+
+  if (window.matchMedia && window.matchMedia('(max-width: 980px)').matches && dom.chatPanel) {
+    dom.chatPanel.classList.add('collapsed');
+    if (dom.chatCollapseBtn) dom.chatCollapseBtn.textContent = 'Expand';
+  }
   applyRoomState({ settings: state.media, runtime: { broadcaster_present: false, viewer_count: 0 } });
   connectChat();
   connectSignal();
 
   // Best effort startup: UI stays ON even if browser prompts for permissions first.
-  startCameraStream().then(syncTracks).then(() => { announceState(); startSpeechCaptureFromMic().catch(() => {}); }).catch(() => announceState());
+  startCameraStream().then(refreshVideoInputs).then(syncTracks).then(() => { announceState(); startSpeechCaptureFromMic().catch(() => {}); }).catch(() => announceState());
 })();
