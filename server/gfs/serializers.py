@@ -25,6 +25,8 @@ def serialize_weather(
     stride: int,
     fields: dict[str, Any],
     stale: bool,
+    source_time: str | None = None,
+    resolved_time: str | None = None,
     polygon_field_v1: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sample = next(iter(fields.values()), [])
@@ -37,6 +39,8 @@ def serialize_weather(
         "grid": {"nx": nx, "ny": ny, "dx": 0.25 * stride, "dy": 0.25 * stride},
         "fields": fields,
         "stale": stale,
+        "source_time": source_time,
+        "resolved_time": resolved_time,
         "polygon_field_v1": polygon_field_v1 or None,
     }
 
@@ -48,6 +52,8 @@ def serialize_clouds(
     layers: list[dict[str, Any]],
     convective: dict[str, Any],
     stale: bool,
+    source_time: str | None = None,
+    resolved_time: str | None = None,
     polygon_field_v1: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -56,6 +62,8 @@ def serialize_clouds(
         "cloud_layers": layers,
         "convective": convective,
         "stale": stale,
+        "source_time": source_time,
+        "resolved_time": resolved_time,
         "polygon_field_v1": polygon_field_v1 or None,
     }
 
@@ -70,6 +78,8 @@ def serialize_bait(
     boil_probability_polygons: list[Any] | None = None,
     confidence: dict[str, float] | None = None,
     stale: bool,
+    source_time: str | None = None,
+    resolved_time: str | None = None,
     polygon_field_v1: dict[str, Any] | None = None,
     bait_base_field_v1: dict[str, Any] | None = None,
     bait_advanced_field_v1: dict[str, Any] | None = None,
@@ -84,6 +94,8 @@ def serialize_bait(
         "boil_probability_polygons": boil_probability_polygons or [],
         "confidence": confidence or {},
         "stale": stale,
+        "source_time": source_time,
+        "resolved_time": resolved_time,
         "polygon_field_v1": polygon_field_v1 or None,
         "bait_base_field_v1": bait_base_field_v1 or None,
         "bait_advanced_field_v1": bait_advanced_field_v1 or None,

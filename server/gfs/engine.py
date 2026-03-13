@@ -122,6 +122,8 @@ class GfsEngine:
             stride=intent.stride,
             fields=fields,
             stale=stale,
+            source_time=raw.get("source_time"),
+            resolved_time=raw.get("resolved_time"),
             polygon_field_v1=build_polygon_field_v1_from_atmos(
                 layer="weather",
                 bbox=intent.bbox.as_list(),
@@ -145,6 +147,8 @@ class GfsEngine:
             layers=layers,
             convective=convective,
             stale=stale,
+            source_time=raw.get("source_time"),
+            resolved_time=raw.get("resolved_time"),
             polygon_field_v1=build_polygon_field_v1_from_atmos(
                 layer="clouds",
                 bbox=intent.bbox.as_list(),
@@ -164,6 +168,8 @@ class GfsEngine:
             valid_time=valid_time,
             bbox=intent.bbox.as_list(),
             stale=stale,
+            source_time=atmospheric.get("source_time"),
+            resolved_time=atmospheric.get("resolved_time"),
             bait_score=[],
             front_lines=[],
             convergence_polygons=[],
@@ -242,6 +248,8 @@ class GfsEngine:
                 valid_time=valid_time,
                 bbox=intent.bbox.as_list(),
                 stale=stale,
+                source_time=atmospheric.get("source_time"),
+                resolved_time=atmospheric.get("resolved_time"),
                 bait_base_field_v1=build_bait_base_field_v1(
                     bbox=intent.bbox.as_list(),
                     cell_size_deg=0.25 * intent.stride,

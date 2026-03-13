@@ -14,6 +14,7 @@ import xarray as xr
 
 from server.gfs.errors import ProviderUnavailableError
 from server.gfs.models import BBox
+from server.gfs.serializers import iso_utc
 
 
 log = logging.getLogger("server.gfs.provider.thredds")
@@ -127,13 +128,13 @@ class ThreddsGfsProvider:
         self._discovered_var_map = mapping
         return {k: v for k, v in mapping.items() if k in requested}
 
-    def _build_ncss_url_sync(self, *, var_names: list[str], bbox: BBox, stride: int) -> str:
+    def _build_ncss_url_sync(self, *, var_names: list[str], bbox: BBox, stride: int, time_selector: str) -> str:
         query: list[tuple[str, str]] = [
             ("north", str(bbox.north)),
             ("south", str(bbox.south)),
             ("west", str(bbox.west)),
             ("east", str(bbox.east)),
-            ("time", "present"),
+            ("time", time_selector),
             ("accept", "netCDF4"),
             ("addLatLon", "true"),
             ("horizStride", str(max(1, int(stride)))),
@@ -141,6 +142,12 @@ class ThreddsGfsProvider:
         for var_name in var_names:
             query.append(("var", var_name))
         return f"{self.ncss_grid_url}?{urllib.parse.urlencode(query)}"
+
+    @staticmethod
+    def _requested_time_selector(valid_time: datetime | None) -> str:
+        if valid_time is None:
+            return "present"
+        return str(iso_utc(valid_time))
 
     def _fetch_ncss_bytes_sync(self, url: str) -> bytes:
         req = urllib.request.Request(url, headers={"Accept": "application/x-netcdf"})
@@ -179,12 +186,12 @@ class ThreddsGfsProvider:
         stride: int,
         valid_time: datetime | None,
     ) -> tuple[dict[str, Any], datetime | None]:
-        _ = valid_time
+        requested_time_selector = self._requested_time_selector(valid_time)
         resolved = self._discover_var_names_sync(variables)
         if not resolved:
             raise ValueError("no requested atmospheric variables were resolved from dataset metadata")
 
-        url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride)
+        url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride, time_selector=requested_time_selector)
         payload_bytes = self._fetch_ncss_bytes_sync(url)
         ds = self._open_ncss_dataset_sync(payload_bytes)
 
@@ -196,6 +203,8 @@ class ThreddsGfsProvider:
 
         time_coord = self._coord_name(ds, ("time", "valid_time"))
         source_time = self._safe_dt(ds.coords[time_coord].values if time_coord else None)
+        data["source_time"] = requested_time_selector
+        data["resolved_time"] = iso_utc(source_time)
         self._last_fetch_at = datetime.now(timezone.utc)
         self._last_error = None
         return data, source_time
@@ -210,7 +219,8 @@ class ThreddsGfsProvider:
     ) -> tuple[dict[str, Any], datetime | None]:
         try:
             resolved = self._discover_var_names_sync(variables)
-            url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride)
+            requested_time_selector = self._requested_time_selector(valid_time)
+            url = self._build_ncss_url_sync(var_names=list(resolved.values()), bbox=bbox, stride=stride, time_selector=requested_time_selector)
             data, source_time = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._fetch_subset_sync,
@@ -222,12 +232,13 @@ class ThreddsGfsProvider:
                 timeout=self.fetch_timeout_s,
             )
             log.info(
-                "ncss subset fetch success url=%s vars=%s bbox=%s stride=%s source_time=%s",
+                "ncss subset fetch success url=%s vars=%s bbox=%s stride=%s source_time=%s resolved_time=%s",
                 url,
                 list(resolved.keys()),
                 bbox.as_list(),
                 stride,
-                source_time,
+                data.get("source_time"),
+                data.get("resolved_time"),
             )
             return data, source_time
         except Exception as exc:

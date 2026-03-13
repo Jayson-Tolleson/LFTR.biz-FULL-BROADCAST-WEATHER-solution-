@@ -114,6 +114,14 @@ async def _broadcast_presence(state: AppState, room_id: str) -> None:
     await registry.broadcast_room(room_id, {"type": "state_update", "room": room_id, "state": snapshot, "ts": now_ms()})
 
 
+def _rtc_room_live(rtc, room_id: str, room) -> bool:
+    rtc_live = bool(rtc is not None and rtc.has_live_source(room_id))
+    if room.media.live_active != rtc_live:
+        room.media.live_active = rtc_live
+        room.media.mode = "live" if rtc_live else ("upload" if room.media.latest_upload_url else "none")
+    return rtc_live
+
+
 async def _chat_emit(room_id: str, payload: dict[str, Any]) -> None:
     await registry.broadcast_room(room_id, {"type": "chat", "room": room_id, **payload, "ts": now_ms()})
 
@@ -331,6 +339,7 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                         log.info("broadcaster offer received room=%s client=%s sdp_type=%s", room_id, client_id, sdp_type)
                         answer = await rtc.start_broadcaster_from_offer(room_id, client_id, sdp, sdp_type) if rtc is not None else {"sdp": None, "type": "answer"}
                         log.info("broadcaster answer sent room=%s client=%s answer_type=%s", room_id, client_id, answer.get("type", "answer"))
+                        _rtc_room_live(rtc, room_id, room)
                         await ws.send_json({"type": "webrtc_answer", "room": room_id, "clientId": client_id, "sdp": answer.get("sdp"), "answerType": answer.get("type", "answer"), "ts": now_ms()})
                         await registry.broadcast_room(room_id, {"type": "stage_state", "payload": _stage_payload(room_id, room)})
                         await _broadcast_presence(state, room_id)
@@ -402,7 +411,10 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
             await ws.send_json({"ok": False, "type": "waiting", "room": active_room_id, "message": "stream_offline", "ts": now_ms()})
 
         def _room_has_live_source(active_room_id: str) -> bool:
-            return rtc is not None and rtc.has_live_source(active_room_id)
+            room = state.ensure_room(active_room_id)
+            live = _rtc_room_live(rtc, active_room_id, room)
+            log.debug("watch live-check room=%s client=%s broadcaster_present=%s rtc_live=%s", active_room_id, client_id, bool(room.broadcaster_sid), live)
+            return live
 
         async def _send_offer(active_room_id: str, active_client_id: str) -> None:
             nonlocal offer_outstanding, offer_started_at
@@ -431,6 +443,9 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 await _send_waiting_stream_offline(room_id, client_id)
             except Exception:
                 log.exception("watch auto-offer creation failed room=%s client=%s", room_id, client_id)
+        else:
+            _set_state("waiting_for_broadcaster", "auto_stream_pending")
+            await _send_waiting_stream_offline(room_id, client_id)
 
         try:
             while True:

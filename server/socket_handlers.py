@@ -32,6 +32,13 @@ def _stage_payload(room_id: str, room) -> dict[str, Any]:
     }
 
 
+def _sync_room_live_from_rtc(room, rtc, room_id: str) -> bool:
+    rtc_live = bool(rtc and rtc.has_live_source(room_id))
+    room.media.live_active = rtc_live
+    room.media.mode = "live" if rtc_live else ("upload" if room.media.latest_upload_url else "none")
+    return rtc_live
+
+
 async def _emit_room_status(sio, room_id: str, room) -> None:
     await sio.emit(
         "room_status",
@@ -311,6 +318,7 @@ def register_socket_handlers(sio, state: AppState, settings: Settings, rtc: RTCM
             log.info("socketio broadcaster offer received room=%s sid=%s sdp_type=%s", room_id, sid, sdp_type)
             answer = await rtc.start_broadcaster_from_offer(room_id, sid, sdp, sdp_type)
             log.info("socketio broadcaster answer sent room=%s sid=%s answer_type=%s", room_id, sid, answer.get("type"))
+            _sync_room_live_from_rtc(room, rtc, room_id)
             await _emit_stage_state(sio, room_id, room)
             await sio.emit("webrtc_answer", answer, to=sid)
         except Exception as exc:
