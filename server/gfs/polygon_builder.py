@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from server.gfs.normalize import normalize_lon_deg, to_number
+from server.gfs.serializers import iso_utc
 
 
 SCHEMA_NAME = "gfs_polygon_field_v1"
@@ -28,7 +29,7 @@ def _cell_lat_lon(i: int, j: int, ny: int, nx: int, bbox: list[float]) -> tuple[
 
 
 def _source_time_text(source_time: datetime | None) -> str | None:
-    return source_time.isoformat() + "Z" if source_time else None
+    return iso_utc(source_time)
 
 
 def _finite_number(value: Any) -> float | None:

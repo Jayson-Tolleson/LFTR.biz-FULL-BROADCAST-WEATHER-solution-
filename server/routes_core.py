@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from quart import Quart, jsonify, request, send_file
@@ -11,6 +12,7 @@ from server.config import Settings
 
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+log = logging.getLogger("server.routes_core")
 
 
 def _static_file(path_name: str, static_dir: Path | None = None) -> Path:
@@ -57,16 +59,18 @@ def _normalize_ice_url(raw: str, default_scheme: str = "turn") -> str:
 
 def build_ice_servers(settings: Settings):
     servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+    has_turn_credentials = bool(settings.turn_username and settings.turn_password)
     raw_urls: list[str] = []
-    if settings.turn_url:
+    if has_turn_credentials and settings.turn_url:
         raw_urls.append(_normalize_ice_url(settings.turn_url, "turn"))
-    if settings.turns_url:
+    if has_turn_credentials and settings.turns_url:
         raw_urls.append(_normalize_ice_url(settings.turns_url, "turns"))
-    for raw in settings.turn_urls.split(","):
-        if raw.strip():
-            raw_urls.append(_normalize_ice_url(raw.strip(), "turn"))
+    if has_turn_credentials:
+        for raw in settings.turn_urls.split(","):
+            if raw.strip():
+                raw_urls.append(_normalize_ice_url(raw.strip(), "turn"))
     host = settings.domain or settings.public_ip
-    if host:
+    if has_turn_credentials and host:
         raw_urls.extend([
             f"turn:{host}:3478?transport=udp",
             f"turn:{host}:3478?transport=tcp",
@@ -79,7 +83,7 @@ def build_ice_servers(settings: Settings):
             continue
         seen.add(u)
         turn_urls.append(u)
-    if turn_urls and settings.turn_username and settings.turn_password:
+    if turn_urls and has_turn_credentials:
         servers.append({"urls": turn_urls, "username": settings.turn_username, "credential": settings.turn_password})
     return servers
 
@@ -127,7 +131,17 @@ def register_core_routes(app: Quart, settings: Settings, static_dir: Path | None
 
     @app.get("/webrtc/ice-config")
     async def webrtc_ice_config():
-        return jsonify({"iceServers": build_ice_servers(settings)})
+        ice_servers = build_ice_servers(settings)
+        turn_entries = [s for s in ice_servers if isinstance(s, dict) and s.get("username") and s.get("credential")]
+        if turn_entries:
+            turn_urls = []
+            for entry in turn_entries:
+                urls = entry.get("urls") or []
+                turn_urls.extend(urls if isinstance(urls, list) else [urls])
+            log.info("ice_config mode=stun_turn turn_urls=%s", sorted(set(turn_urls)))
+        else:
+            log.info("ice_config mode=stun_only")
+        return jsonify({"iceServers": ice_servers})
 
     @app.get("/ai_status")
     async def ai_status():

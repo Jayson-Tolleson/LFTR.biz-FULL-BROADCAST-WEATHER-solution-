@@ -9,6 +9,7 @@ from datetime import datetime
 from server.gfs.models import BBox
 from server.gfs.providers.adapters import build_erddap_subset_request, split_antimeridian, viewport_from_bbox
 from server.gfs.providers.erddap_csv import ErddapParseDiagnostics, parse_erddap_grid
+from server.gfs.serializers import iso_utc
 
 
 log = logging.getLogger("server.gfs.provider.coastwatch")
@@ -149,6 +150,6 @@ class CoastwatchProvider:
             "provider": "coastwatch",
             "status": "viewport_subset_only",
             "upstreams": ["erddap_chlorophyll"],
-            "last_fetch_at": self._last_fetch_at.isoformat() + "Z" if self._last_fetch_at else None,
+            "last_fetch_at": iso_utc(self._last_fetch_at),
             "last_error": self._last_error,
         }

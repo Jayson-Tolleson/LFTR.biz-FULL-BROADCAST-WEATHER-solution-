@@ -328,12 +328,11 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                     sdp = data.get("sdp")
                     sdp_type = data.get("type") or "offer"
                     if sdp:
+                        log.info("broadcaster offer received room=%s client=%s sdp_type=%s", room_id, client_id, sdp_type)
                         answer = await rtc.start_broadcaster_from_offer(room_id, client_id, sdp, sdp_type) if rtc is not None else {"sdp": None, "type": "answer"}
-                        room.media.live_active = True
-                        room.media.mode = "live"
+                        log.info("broadcaster answer sent room=%s client=%s answer_type=%s", room_id, client_id, answer.get("type", "answer"))
                         await ws.send_json({"type": "webrtc_answer", "room": room_id, "clientId": client_id, "sdp": answer.get("sdp"), "answerType": answer.get("type", "answer"), "ts": now_ms()})
                         await registry.broadcast_room(room_id, {"type": "stage_state", "payload": _stage_payload(room_id, room)})
-                        await registry.broadcast_room(room_id, {"type": "broadcaster-start", "room": room_id, "ts": now_ms()}, kinds=("watch",))
                         await _broadcast_presence(state, room_id)
                 elif kind in {"webrtc_ice", "watch_ice"}:
                     if rtc is not None:

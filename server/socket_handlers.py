@@ -308,9 +308,9 @@ def register_socket_handlers(sio, state: AppState, settings: Settings, rtc: RTCM
             log.warning("webrtc_offer missing SDP room=%s sid=%s", room_id, sid)
             return
         try:
+            log.info("socketio broadcaster offer received room=%s sid=%s sdp_type=%s", room_id, sid, sdp_type)
             answer = await rtc.start_broadcaster_from_offer(room_id, sid, sdp, sdp_type)
-            room.media.live_active = True
-            room.media.mode = "live"
+            log.info("socketio broadcaster answer sent room=%s sid=%s answer_type=%s", room_id, sid, answer.get("type"))
             await _emit_stage_state(sio, room_id, room)
             await sio.emit("webrtc_answer", answer, to=sid)
         except Exception as exc:

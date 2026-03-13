@@ -14,6 +14,7 @@ const fallbackEl = document.getElementById('globeFallback');
 const pillClouds = document.getElementById('pillClouds');
 const pillRain = document.getElementById('pillRain');
 const pillBait = document.getElementById('pillBait');
+const pillJetstream = document.getElementById('pillJetstream');
 
 let activeLocation = null;
 let liveManuallyDismissed = false;
@@ -24,9 +25,11 @@ const overlayState = {
   cloudsEnabled: true,
   rainEnabled: true,
   baitEnabled: true,
+  jetstreamEnabled: true,
   cleanupClouds: null,
   cleanupRain: null,
   cleanupBait: null,
+  cleanupJetstream: null,
   lastSignature: '',
   inFlight: false,
   pending: false,
@@ -171,15 +174,28 @@ function updatePillVisuals() {
   pillClouds?.classList.toggle('active', overlayState.cloudsEnabled);
   pillRain?.classList.toggle('active', overlayState.rainEnabled);
   pillBait?.classList.toggle('active', overlayState.baitEnabled);
+  pillJetstream?.classList.toggle('active', overlayState.jetstreamEnabled);
 }
 
 function clearLayers() {
   overlayState.cleanupClouds?.();
   overlayState.cleanupRain?.();
   overlayState.cleanupBait?.();
+  overlayState.cleanupJetstream?.();
   overlayState.cleanupClouds = null;
   overlayState.cleanupRain = null;
   overlayState.cleanupBait = null;
+  overlayState.cleanupJetstream = null;
+}
+
+function renderJetstreamLayer() {
+  if (typeof window.drawJetBalloons !== 'function') return () => {};
+  window.drawJetBalloons().catch((err) => console.warn('[gfs jetstream] render failed', err?.message || err));
+  return () => {
+    if (typeof window.clearJetBalloons === 'function') {
+      window.clearJetBalloons();
+    }
+  };
 }
 
 function renderOverlays() {
@@ -203,6 +219,12 @@ function renderOverlays() {
     overlayState.cleanupBait = renderBaitZones({ payload: overlayState.latest.baitAdvanced, map3DElement: globeEl });
   } else {
     overlayState.cleanupBait = null;
+  }
+
+  if (overlayState.jetstreamEnabled) {
+    overlayState.cleanupJetstream = renderJetstreamLayer();
+  } else {
+    overlayState.cleanupJetstream = null;
   }
 }
 
@@ -278,9 +300,6 @@ async function refreshOverlays(reason = 'manual') {
     });
 
     fetchAdvanced();
-    if (typeof window.drawJetBalloons === 'function') {
-      window.drawJetBalloons().catch(() => {});
-    }
   } catch (err) {
     if (err?.name === 'AbortError') {
       console.info('[gfs overlays] request aborted', { reason, seq });
@@ -582,6 +601,11 @@ async function boot() {
   });
   pillBait?.addEventListener('click', () => {
     overlayState.baitEnabled = !overlayState.baitEnabled;
+    updatePillVisuals();
+    refreshOverlays('toggle');
+  });
+  pillJetstream?.addEventListener('click', () => {
+    overlayState.jetstreamEnabled = !overlayState.jetstreamEnabled;
     updatePillVisuals();
     refreshOverlays('toggle');
   });

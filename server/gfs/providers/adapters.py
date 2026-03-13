@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from server.gfs.models import BBox
+from server.gfs.serializers import iso_utc
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,9 @@ class ErddapSlice:
 
 
 def _iso_time_or_last(valid_time: datetime | None) -> str:
-    return f"{valid_time.isoformat()}Z" if valid_time else "last"
+    if not valid_time:
+        return "last"
+    return str(iso_utc(valid_time))
 
 
 def normalize_lon(lon: float, convention: str) -> float:

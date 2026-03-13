@@ -18,6 +18,7 @@
           <button id="pillClouds" class="overlay-pill active" data-layer="clouds" type="button">Clouds</button>
           <button id="pillRain" class="overlay-pill active" data-layer="rain" type="button">Rain</button>
           <button id="pillBait" class="overlay-pill active" data-layer="bait" type="button">Bait</button>
+          <button id="pillJetstream" class="overlay-pill active" data-layer="jetstream" type="button">Jetstream Balloons</button>
         </div>
         <div id="status">Booting…</div>
       </div>
@@ -117,6 +118,7 @@
       });
       window.__gfsJetOrbMarkers = [];
     }
+    window.clearJetBalloons = clearJetBalloons;
 
     function createJetOrb(lat, lng, mph, alt) {
       var globe = document.getElementById('globe');

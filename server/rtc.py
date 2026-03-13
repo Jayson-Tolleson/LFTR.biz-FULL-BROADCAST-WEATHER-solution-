@@ -268,8 +268,13 @@ class RTCManager:
                     self.live_audio_source[room_id] = track
                 if self.has_live_source(room_id):
                     self._room_live_event(room_id).set()
+                    room = self.state.ensure_room(room_id)
+                    room.media.live_active = True
+                    room.media.mode = "live"
                 log.info("broadcaster track published room=%s sid=%s kind=%s live_video=%s live_audio=%s", room_id, sid, track.kind, bool(self.live_video_source.get(room_id)), bool(self.live_audio_source.get(room_id)))
                 await self._emit_room(room_id, "stream_started", {"room": room_id, "kind": track.kind, "ts": now_ms()})
+                await self._emit_room(room_id, "broadcaster-start", {"room": room_id, "kind": track.kind, "ts": now_ms()})
+                await self._emit_status(room_id)
 
         room = self.state.ensure_room(room_id)
         room.broadcaster_sid = sid
@@ -340,6 +345,7 @@ class RTCManager:
                 await self.stop_viewer(room_id, sid)
 
         if not self.has_live_source(room_id):
+            log.info("viewer offer rejected no live source room=%s sid=%s", room_id, sid)
             try:
                 await pc.close()
             except Exception:
@@ -413,6 +419,7 @@ class RTCManager:
             return
         if candidate is None:
             await b.pc.addIceCandidate(None)
+            log.debug("broadcaster ICE end-of-candidates room=%s sid=%s", room_id, sid)
             return
         if b.pc.remoteDescription is None:
             self._queue_ice_candidate(
@@ -426,6 +433,7 @@ class RTCManager:
             )
             return
         await b.pc.addIceCandidate(candidate)
+        log.debug("broadcaster ICE applied room=%s sid=%s", room_id, sid)
 
     async def add_viewer_ice_candidate(self, room_id: str, sid: str, candidate: Optional[RTCIceCandidate]) -> None:
         pc = self.viewers.get(room_id, {}).get(sid)
@@ -444,6 +452,7 @@ class RTCManager:
             return
         if candidate is None:
             await pc.addIceCandidate(None)
+            log.debug("viewer ICE end-of-candidates room=%s sid=%s", room_id, sid)
             return
         if pc.remoteDescription is None:
             self._queue_ice_candidate(
@@ -457,6 +466,7 @@ class RTCManager:
             )
             return
         await pc.addIceCandidate(candidate)
+        log.debug("viewer ICE applied room=%s sid=%s", room_id, sid)
 
     async def stop_viewer(self, room_id: str, sid: str) -> None:
         pc = self.viewers.get(room_id, {}).pop(sid, None)
@@ -498,10 +508,13 @@ class RTCManager:
 
         room = self.state.ensure_room(room_id)
         room.broadcaster_sid = None
+        room.media.live_active = False
+        room.media.mode = "upload" if room.media.latest_upload_url else "none"
 
         viewers = list(self.viewers.get(room_id, {}).keys())
         for vsid in viewers:
             await self.stop_viewer(room_id, vsid)
 
         await self._emit_room(room_id, "stream_stopped", {"room": room_id, "ts": now_ms()})
+        await self._emit_room(room_id, "broadcaster-stop", {"room": room_id, "ts": now_ms()})
         await self._emit_status(room_id)

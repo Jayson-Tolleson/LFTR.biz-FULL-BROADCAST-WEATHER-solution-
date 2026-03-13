@@ -11,6 +11,7 @@ from typing import Any
 from server.gfs.models import BBox
 from server.gfs.providers.adapters import build_erddap_subset_request, build_station_enrichment_request, split_antimeridian, viewport_from_bbox
 from server.gfs.providers.erddap_csv import ErddapParseDiagnostics, parse_erddap_grid
+from server.gfs.serializers import iso_utc
 
 
 log = logging.getLogger("server.gfs.provider.rtofs")
@@ -199,6 +200,6 @@ class RtofsProvider:
             "provider": "rtofs",
             "status": "viewport_subset_only",
             "upstreams": ["erddap_oisst", "noaa_coops_aux"],
-            "last_fetch_at": self._last_fetch_at.isoformat() + "Z" if self._last_fetch_at else None,
+            "last_fetch_at": iso_utc(self._last_fetch_at),
             "last_error": self._last_error,
         }

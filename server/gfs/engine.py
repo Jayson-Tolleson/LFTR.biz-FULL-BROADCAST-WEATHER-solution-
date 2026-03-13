@@ -21,6 +21,7 @@ from server.gfs.polygon_builder import build_bait_base_field_v1, build_bait_ocea
 from server.gfs.providers.coastwatch import CoastwatchProvider
 from server.gfs.providers.rtofs import RtofsProvider
 from server.gfs.providers.thredds_gfs import ThreddsGfsProvider
+from server.gfs.serializers import iso_utc
 from server.gfs.serializers import serialize_bait, serialize_clouds, serialize_weather
 from server.gfs.snapshot import SnapshotState
 
@@ -209,9 +210,9 @@ class GfsEngine:
             has_full_stack = bool(ocean.get("sst")) and bool(bio.get("chlorophyll")) and derived.get("bait", {}).get("status") == "ready"
             bait_meta = dict(derived.get("bait", {}).get("meta") or {})
             bait_meta.update({
-                "atmos_time": valid_time.isoformat() + "Z" if valid_time else None,
-                "ocean_time": ocean_time.isoformat() + "Z" if ocean_time else None,
-                "bio_time": bio_time.isoformat() + "Z" if bio_time else None,
+                "atmos_time": iso_utc(valid_time),
+                "ocean_time": iso_utc(ocean_time),
+                "bio_time": iso_utc(bio_time),
             })
             if not has_full_stack:
                 derived["bait"] = {
@@ -304,8 +305,8 @@ class GfsEngine:
                 "rtofs": self.rtofs.health(),
                 "coastwatch": self.coastwatch.health(),
             },
-            "last_successful_fetch": self.snapshot.last_successful_fetch.isoformat() + "Z" if self.snapshot.last_successful_fetch else None,
-            "last_valid_data_time": self.snapshot.last_valid_time.isoformat() + "Z" if self.snapshot.last_valid_time else None,
+            "last_successful_fetch": iso_utc(self.snapshot.last_successful_fetch),
+            "last_valid_data_time": iso_utc(self.snapshot.last_valid_time),
             "degraded": self.snapshot.degraded,
             "cache": self.cache.stats(),
             "dataset_urls": {"thredds_best": self.config.thredds_best_url},
