@@ -68,8 +68,14 @@ textarea{flex:1;min-height:58px;max-height:140px;background:#0b1220;color:#eaf1f
         <button id="aiEnableBtn" class="btn"><span id="aiEnableLed" class="led r"></span><span id="aiEnableTxt">AI: off</span></button>
         <button id="aiStatusBtn" class="btn">AI idle</button>
         <button id="ttsMonBtn" class="btn"><span id="ttsMonLed" class="led r"></span><span id="ttsMonTxt">Hear AI voice: off</span></button>
+        <button id="recordBtn" class="btn"><span id="recordLed" class="led r"></span><span id="recordTxt">Record: off</span></button>
+        <button id="rtmpBtn" class="btn"><span id="rtmpLed" class="led r"></span><span id="rtmpTxt">RTMP: off</span></button>
       </div>
       <div class="tip">Tip: keep "Hear AI voice" off when STT is enabled to avoid loopback. Screen-share ending in browser auto-falls back to camera.</div>
+      <div class="tip" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="rtmpKeyInput" placeholder="YouTube stream key (optional)" style="min-width:260px;background:#0b1220;color:#eaf1ff;border:1px solid #334161;border-radius:8px;padding:8px"/>
+        <span class="mono" id="recordingStatus"></span>
+      </div>
     </div>
 
     <div class="glass chat">

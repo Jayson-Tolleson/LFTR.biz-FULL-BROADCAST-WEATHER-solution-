@@ -69,6 +69,7 @@ export function renderCloudZones({ payload, map3DElement }) {
       const opacity = Math.min(0.58, 0.18 + confidence * 0.48);
       const height = 700 + Math.round(confidence * 1800);
       const col = makeColumn({ lat: f.lat, lon: f.lon, height, color: '#cfe8ff', opacity });
+      if (!col) continue;
       frag.append(col);
       created.push(col);
     }
@@ -99,6 +100,7 @@ export function renderCloudZones({ payload, map3DElement }) {
       const height = Math.min(2400, 500 + lowVal * 18 + reflVal * 10);
       const opacity = Math.min(0.58, 0.16 + (lowVal / 200) + (reflVal / 150));
       const col = makeColumn({ lat, lon, height, color: '#cfe8ff', opacity });
+      if (!col) continue;
       frag.append(col);
       created.push(col);
       count += 1;

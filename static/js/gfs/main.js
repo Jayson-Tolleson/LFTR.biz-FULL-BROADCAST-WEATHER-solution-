@@ -20,6 +20,7 @@ let activeLocation = null;
 let liveManuallyDismissed = false;
 let selectedLocation = null;
 let liveStatePollId = null;
+const GFS_DEBUG = Boolean(window.__GFS_DEBUG);
 
 const overlayState = {
   cloudsEnabled: true,
@@ -278,13 +279,13 @@ async function refreshOverlays(reason = 'manual') {
       const vpQ = viewportToQuery(viewport);
       const baitAdvanced = await getJsonSafe(`/gfs/api/bait/advanced?bbox=${bboxQ}&viewport=${vpQ}&quality=${viewport.quality}`, null, { signal: controller.signal });
       if (seq !== overlayState.requestSeq || expectedSignature !== overlayState.lastSignature) {
-        console.info('[gfs overlays] stale advanced response discarded', { seq, latest: overlayState.requestSeq });
+        if (GFS_DEBUG) console.debug('[gfs overlays] stale advanced response discarded', { seq, latest: overlayState.requestSeq });
         return;
       }
       if (baitAdvanced) {
         overlayState.latest.baitAdvanced = baitAdvanced;
         renderOverlays(reason);
-        console.info('[gfs overlays] advanced bait replaced base', { seq });
+        if (GFS_DEBUG) console.debug('[gfs overlays] advanced bait replaced base', { seq });
       }
     } catch (err) {
       if (err?.name !== 'AbortError') {
@@ -305,7 +306,7 @@ async function refreshOverlays(reason = 'manual') {
     ]);
 
     if (seq !== overlayState.requestSeq) {
-      console.info('[gfs overlays] stale response discarded', { seq, latest: overlayState.requestSeq });
+      if (GFS_DEBUG) console.debug('[gfs overlays] stale response discarded', { seq, latest: overlayState.requestSeq });
       return;
     }
 
@@ -324,7 +325,7 @@ async function refreshOverlays(reason = 'manual') {
     fetchAdvanced();
   } catch (err) {
     if (err?.name === 'AbortError') {
-      console.info('[gfs overlays] request aborted', { reason, seq });
+      if (GFS_DEBUG) console.debug('[gfs overlays] request aborted', { reason, seq });
     } else {
       console.warn('[gfs overlays] refresh failed', err?.message || err);
     }
@@ -344,22 +345,15 @@ async function refreshOverlays(reason = 'manual') {
 
 function installSteadyRefresh() {
   let dirty = true;
-  let timer = null;
 
   const onMove = () => {
     dirty = true;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (dirty) {
-        dirty = false;
-        refreshOverlays('debounced');
-      }
-    }, 900);
   };
 
   const onSteady = (ev) => {
     const isSteady = ev?.isSteady;
     if (typeof isSteady === 'boolean' && !isSteady) return;
+    if (!dirty) return;
     dirty = false;
     refreshOverlays('steady');
   };
@@ -371,7 +365,6 @@ function installSteadyRefresh() {
   globeEl.addEventListener('gmp-steadychange', onSteady);
 
   return () => {
-    if (timer) clearTimeout(timer);
     ['gmp-centerchange', 'gmp-headingchange', 'gmp-rangechange', 'gmp-rollchange', 'gmp-tiltchange', 'gmp-camerapositionchange'].forEach((evt) => {
       globeEl.removeEventListener(evt, onMove);
     });

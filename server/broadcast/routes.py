@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
+from uuid import uuid4
 from collections import defaultdict
 from dataclasses import asdict
 from typing import Any
+import shutil
 
 from quart import jsonify, request, websocket
 
@@ -24,6 +27,8 @@ WATCH_OFFER_TIMEOUT_S = 12.0
 STT_FAILURE_BACKOFF_S = 20.0
 STT_FAILURE_THRESHOLD = 3
 WATCH_RETRY_BACKOFF_S = 1.5
+RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "uploads" / "recordings"
+RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class RoomRegistry:
@@ -199,6 +204,9 @@ def _merge_room_state(room, update: dict[str, Any]) -> dict[str, Any]:
         "camera_enabled": bool(update.get("camera_enabled", room.settings.camera_enabled)),
         "screen_enabled": bool(update.get("screen_enabled", room.settings.screen_enabled)),
         "noise_cancel_enabled": bool(update.get("noise_cancel_enabled", room.settings.noise_cancel_enabled)),
+        "record_enabled": bool(update.get("record_enabled", room.settings.record_enabled)),
+        "rtmp_enabled": bool(update.get("rtmp_enabled", room.settings.rtmp_enabled)),
+        "rtmp_url": str(update.get("rtmp_url", room.settings.rtmp_url or "") or ""),
     }
     for k, v in normalized.items():
         setattr(room.settings, k, v)
@@ -691,6 +699,47 @@ def register_broadcast_routes(app, state: AppState | None = None, rtc=None) -> N
                 await _broadcast_presence(state, room_id)
             _set_state("disconnected", "ws_close")
             log.info("watch socket disconnected room=%s client=%s", room_id, client_id)
+
+    @app.post('/api/broadcast/recording')
+    async def api_broadcast_recording():
+        files = await request.files
+        file_storage = files.get('file')
+        room_id = (request.args.get('room') or state.default_room or 'default').strip() or 'default'
+        if not file_storage:
+            return jsonify({'ok': False, 'error': 'file required'}), 400
+        token = uuid4().hex[:10]
+        src = RECORDINGS_DIR / f"{room_id}_{token}.webm"
+        out = RECORDINGS_DIR / f"{room_id}_{token}.mp4"
+        await file_storage.save(src)
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            return jsonify({'ok': False, 'error': 'ffmpeg unavailable'}), 500
+        cmd = [ffmpeg, '-y', '-i', str(src), '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-c:a', 'aac', '-b:a', '128k', str(out)]
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.warning('recording transcode failed room=%s err=%s', room_id, (stderr or b'')[:400].decode(errors='ignore'))
+            return jsonify({'ok': False, 'error': 'ffmpeg transcode failed'}), 500
+        room = state.ensure_room(room_id)
+        room.media.latest_upload_url = f"/uploads/recordings/{out.name}"
+        room.media.latest_upload_mime = 'video/mp4'
+        room.media.latest_upload_at = now_ms()
+        room.media.mode = 'upload'
+        await registry.broadcast_room(room_id, {'type': 'stage_state', 'payload': _stage_payload(room_id, room), 'ts': now_ms()})
+        return jsonify({'ok': True, 'url': room.media.latest_upload_url})
+
+    @app.post('/api/broadcast/rtmp')
+    async def api_broadcast_rtmp():
+        body = await request.get_json(force=True, silent=True) or {}
+        room_id = str(body.get('room') or state.default_room or 'default')
+        enabled = bool(body.get('enabled', False))
+        stream_key = str(body.get('stream_key') or '').strip()
+        base_url = str(body.get('rtmp_url') or 'rtmp://a.rtmp.youtube.com/live2').strip()
+        room = state.ensure_room(room_id)
+        room.settings.rtmp_enabled = enabled
+        room.settings.rtmp_url = f"{base_url}/{stream_key}" if (enabled and stream_key) else ''
+        await registry.broadcast_room(room_id, {'type': 'state_update', 'room': room_id, 'state': state.room_state_payload(room_id), 'ts': now_ms()})
+        return jsonify({'ok': True, 'enabled': room.settings.rtmp_enabled, 'rtmp_url': room.settings.rtmp_url})
 
     @app.post('/api/upload')
     async def api_upload():

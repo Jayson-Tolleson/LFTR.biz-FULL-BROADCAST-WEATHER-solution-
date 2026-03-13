@@ -29,6 +29,10 @@
     aiEnableBtn: document.getElementById('aiEnableBtn'),
     aiStatusBtn: document.getElementById('aiStatusBtn'),
     ttsMonBtn: document.getElementById('ttsMonBtn'),
+    recordBtn: document.getElementById('recordBtn'),
+    rtmpBtn: document.getElementById('rtmpBtn'),
+    rtmpKeyInput: document.getElementById('rtmpKeyInput'),
+    recordingStatus: document.getElementById('recordingStatus'),
     attachBtn: document.getElementById('attachBtn'),
     webBtn: document.getElementById('webBtn'),
     searchCloseBtn: document.getElementById('searchCloseBtn'),
@@ -47,6 +51,9 @@
   let selectedVideoDeviceId = '';
   let cachedVideoInputs = [];
   let cameraCycleIndex = -1;
+  let recordingStream = null;
+  let recordingChunks = [];
+  let recordingMedia = null;
 
   const state = {
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
@@ -70,6 +77,9 @@
       camera_enabled: true,
       screen_enabled: false,
       noise_cancel_enabled: true,
+      record_enabled: false,
+      rtmp_enabled: false,
+      rtmp_url: '',
     },
   };
   dom.stRoom && (dom.stRoom.textContent = state.room);
@@ -123,6 +133,10 @@
     setTxt('ttsMonTxt', `Hear AI voice: ${state.media.hear_ai_voice ? 'on' : 'off'}`);
     setLed(document.getElementById('aiEnableLed'), !!state.media.ai_enabled);
     setTxt('aiEnableTxt', `AI: ${state.media.ai_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('recordLed'), !!state.media.record_enabled);
+    setTxt('recordTxt', `Record: ${state.media.record_enabled ? 'on' : 'off'}`);
+    setLed(document.getElementById('rtmpLed'), !!state.media.rtmp_enabled);
+    setTxt('rtmpTxt', `RTMP: ${state.media.rtmp_enabled ? 'on' : 'off'}`);
   }
 
   function compactCameraName(label) {
@@ -378,6 +392,84 @@
     }
   }
 
+  async function playAiVoice(url) {
+    if (!url || !state.media.hear_ai_voice) return;
+    try {
+      const audio = new Audio(url);
+      audio.volume = 0.9;
+      await audio.play();
+    } catch (_) {}
+  }
+
+  function currentProgramStream() {
+    const base = state.media.screen_enabled ? state.screenStream : state.camStream;
+    if (!base) return null;
+    const tracks = [];
+    const videoTrack = base.getVideoTracks()[0];
+    const audioTrack = base.getAudioTracks()[0];
+    if (videoTrack) tracks.push(videoTrack.clone());
+    if (audioTrack) tracks.push(audioTrack.clone());
+    return tracks.length ? new MediaStream(tracks) : null;
+  }
+
+  async function uploadRecording(blob) {
+    const fd = new FormData();
+    fd.append('file', new File([blob], `broadcast-${Date.now()}.webm`, { type: blob.type || 'video/webm' }));
+    const resp = await fetch(`/api/broadcast/recording?room=${encodeURIComponent(state.room)}`, { method: 'POST', body: fd });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok || !payload?.ok) throw new Error(payload?.error || `record upload failed (${resp.status})`);
+    return payload;
+  }
+
+  async function toggleRecording() {
+    if (recordingMedia && recordingMedia.state === 'recording') {
+      recordingMedia.stop();
+      state.media.record_enabled = false;
+      announceState();
+      return;
+    }
+    const stream = currentProgramStream();
+    if (!stream) {
+      if (dom.recordingStatus) dom.recordingStatus.textContent = 'Record unavailable: no active camera/screen';
+      return;
+    }
+    recordingChunks = [];
+    recordingStream = stream;
+    recordingMedia = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
+    recordingMedia.ondataavailable = (ev) => { if (ev.data?.size) recordingChunks.push(ev.data); };
+    recordingMedia.onstop = async () => {
+      const blob = new Blob(recordingChunks, { type: 'video/webm' });
+      recordingChunks = [];
+      recordingStream?.getTracks().forEach((t) => t.stop());
+      recordingStream = null;
+      if (dom.recordingStatus) dom.recordingStatus.textContent = 'Processing MP4…';
+      try {
+        const saved = await uploadRecording(blob);
+        if (dom.recordingStatus) dom.recordingStatus.textContent = `Saved ${saved.url || 'recording'}`;
+      } catch (err) {
+        if (dom.recordingStatus) dom.recordingStatus.textContent = `Recording failed: ${err.message || err}`;
+      }
+    };
+    recordingMedia.start(1000);
+    state.media.record_enabled = true;
+    if (dom.recordingStatus) dom.recordingStatus.textContent = 'Recording live…';
+    announceState();
+  }
+
+  async function toggleRtmp() {
+    const next = !state.media.rtmp_enabled;
+    const streamKey = (dom.rtmpKeyInput?.value || '').trim();
+    const res = await fetch('/api/broadcast/rtmp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: state.room, enabled: next, stream_key: streamKey }),
+    }).then((r) => r.json()).catch(() => ({ ok: false }));
+    if (!res.ok) return;
+    state.media.rtmp_enabled = !!res.enabled;
+    state.media.rtmp_url = res.rtmp_url || '';
+    announceState();
+  }
+
   function sendAudioChunk(b64, sampleRate) {
     sendJson(state.chatWs, 'audio_chunk', {
       encoding: 'linear16',
@@ -475,6 +567,7 @@
       if (msg.type === 'presence') applyPresence(msg);
       if (msg.type === 'ai_status') updateAiStatus(msg.status || 'idle');
       if (['chat', 'ai', 'ai_partial', 'attachment'].includes(msg.type)) appendChat(msg);
+      if (msg.type === 'ai' && msg.voice) playAiVoice(msg.voice);
       if (msg.type === 'web_search_result') {
         renderSearchResults(msg.query || '', msg.result || {});
       }
@@ -597,6 +690,8 @@
   });
   dom.aiEnableBtn?.addEventListener('click', () => { state.media.ai_enabled = !state.media.ai_enabled; announceState(); });
   dom.ttsMonBtn?.addEventListener('click', () => { state.media.hear_ai_voice = !state.media.hear_ai_voice; announceState(); });
+  dom.recordBtn?.addEventListener('click', () => { toggleRecording().catch(() => {}); });
+  dom.rtmpBtn?.addEventListener('click', () => { toggleRtmp().catch(() => {}); });
   dom.chatCollapseBtn?.addEventListener('click', () => {
     if (!dom.chatPanel) return;
     dom.chatPanel.classList.toggle('collapsed');

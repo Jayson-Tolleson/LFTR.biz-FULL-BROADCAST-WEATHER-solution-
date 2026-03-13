@@ -18,6 +18,9 @@ class RoomSettings:
     noise_cancel_enabled: bool = True
     web_search_enabled: bool = True
     attachments_enabled: bool = True
+    record_enabled: bool = False
+    rtmp_enabled: bool = False
+    rtmp_url: str = ""
 
 
 @dataclass

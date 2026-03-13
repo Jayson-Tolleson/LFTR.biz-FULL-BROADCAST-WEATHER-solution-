@@ -50,9 +50,8 @@ function createOrbTemplate(probability) {
   const color = greenForProbability(probability);
   const size = orbSizeForProbability(probability);
   const uid = `orb-${Math.random().toString(36).slice(2, 10)}`;
-  const icon = document.createElement('div');
-  icon.slot = 'icon';
-  icon.innerHTML = `
+  const tpl = document.createElement('template');
+  tpl.innerHTML = `
     <svg width="${size}" height="${size}" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="pointer-events:none">
       <defs>
         <radialGradient id="${uid}-core" cx="30%" cy="28%" r="70%">
@@ -70,10 +69,10 @@ function createOrbTemplate(probability) {
       <ellipse data-role="highlight" cx="17.5" cy="15" rx="4.5" ry="2.6" fill="white" fill-opacity="0.82" transform="rotate(-24 17.5 15)"/>
     </svg>`;
 
-  const core = icon.querySelector('[data-role="core"]');
-  const halo = icon.querySelector('[data-role="halo"]');
-  const highlight = icon.querySelector('[data-role="highlight"]');
-  return { icon, core, halo, highlight };
+  const core = tpl.content.querySelector('[data-role=\"core\"]');
+  const halo = tpl.content.querySelector('[data-role=\"halo\"]');
+  const highlight = tpl.content.querySelector('[data-role=\"highlight\"]');
+  return { tpl, core, halo, highlight };
 }
 
 function createFishMarker({ maps3d, loc, altitudeMode }) {
@@ -88,9 +87,7 @@ function createFishMarker({ maps3d, loc, altitudeMode }) {
   });
 
   const orb = createOrbTemplate(probability);
-  const pin = document.createElement('gmp-pin-3d');
-  pin.append(orb.icon);
-  marker.append(pin);
+  marker.append(orb.tpl);
 
   if (MARKER_DEBUG) {
     console.debug('[gfs markers] created svg orb marker', { id: loc?.id, probability });

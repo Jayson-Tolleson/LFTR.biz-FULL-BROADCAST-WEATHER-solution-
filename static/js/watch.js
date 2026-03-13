@@ -41,6 +41,8 @@
   let requestPending = false;
   let hasRequestedStream = false;
   let retryTimer = null;
+  let requestTimeout = null;
+  let hearAiVoice = true;
   const DEBUG_CHAT = false;
   let lastChatSendAt = 0;
   let lastChatText = '';
@@ -60,6 +62,15 @@
   function setStandby(show, reason = 'Waiting for live stream…') {
     if (dom.standby) dom.standby.style.display = show ? 'block' : 'none';
     if (show) setStatus(reason);
+  }
+
+  async function playAiVoice(url) {
+    if (!url || !hearAiVoice) return;
+    try {
+      const audio = new Audio(url);
+      audio.volume = 0.9;
+      await audio.play();
+    } catch (_) {}
   }
 
   function appendChat(entry) {
@@ -147,6 +158,16 @@
       if (!broadcasterPresent || requestPending || hasRequestedStream) return;
       requestPending = sendJson('request_stream');
       hasRequestedStream = requestPending || hasRequestedStream;
+      if (requestPending) {
+        if (requestTimeout) clearTimeout(requestTimeout);
+        requestTimeout = setTimeout(() => {
+          if (!requestPending || !broadcasterPresent) return;
+          requestPending = false;
+          hasRequestedStream = false;
+          console.info('[watch] request_stream timeout; retrying');
+          scheduleStreamRequest(250);
+        }, 4000);
+      }
       console.info('[watch] request_stream sent', { room, viewerId, requestPending });
     }, delayMs);
   }
@@ -186,6 +207,7 @@
       console.info('[watch] pc connection state', { state });
       if (state === 'failed' || state === 'disconnected' || state === 'closed') {
         requestPending = false;
+        if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
         hasRequestedStream = false;
         setStandby(true, 'Reconnecting stream…');
         if (broadcasterPresent) scheduleStreamRequest(500);
@@ -219,6 +241,7 @@
       broadcasterPresent = !!st.runtime?.broadcaster_present;
       if (dom.watchers) dom.watchers.textContent = `watchers ${st.runtime?.viewer_count ?? 0}`;
       if (dom.ai) dom.ai.textContent = `AI ${st.settings?.ai_status || (st.settings?.ai_enabled ? 'active' : 'idle')}`;
+      hearAiVoice = Boolean(st.settings?.hear_ai_voice ?? hearAiVoice);
       const present = broadcasterPresent;
       if (present) {
         requestStream();
@@ -254,6 +277,7 @@
     if (msg.type === 'broadcaster-stop') {
       broadcasterPresent = false;
       requestPending = false;
+      if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
       hasRequestedStream = false;
       setStandby(true, 'Broadcast ended');
       showJoinOverlay(false);
@@ -279,6 +303,7 @@
     }
     if (msg.type === 'chat' || msg.type === 'ai' || msg.type === 'ai_partial' || msg.type === 'attachment') {
       appendChat(msg);
+      if (msg.type === 'ai' && msg.voice) playAiVoice(msg.voice);
       return;
     }
     if (msg.type === 'web_search_result') {
@@ -288,6 +313,7 @@
     if (msg.type === 'waiting' || msg.type === 'error') {
       if (msg.message === 'stream_offline' || msg.message === 'no_broadcaster') {
         requestPending = false;
+        if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
         hasRequestedStream = false;
         setStandby(true, msg.message === 'stream_offline' ? 'Broadcaster connected, waiting for media…' : 'Waiting for broadcaster…');
       }
@@ -319,6 +345,7 @@
       reconnectDelayMs = 1000;
       dom.conn && (dom.conn.textContent = 'connected');
       requestPending = false;
+      if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
       hasRequestedStream = false;
       setStandby(true, 'Waiting for live stream…');
       setLiveMutedAutoplay();
