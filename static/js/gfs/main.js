@@ -36,6 +36,8 @@ const overlayState = {
   requestSeq: 0,
   activeAbort: null,
   latest: { weather: null, clouds: null, baitBase: null, baitAdvanced: null, bbox: null },
+  pendingBuffer: null,
+  lastRenderReason: 'boot',
 };
 
 function showStatus(text) {
@@ -198,10 +200,9 @@ function renderJetstreamLayer() {
   };
 }
 
-function renderOverlays() {
+function renderOverlays(reason = 'manual') {
+  overlayState.lastRenderReason = reason;
   overlayState.cleanupClouds?.();
-  overlayState.cleanupRain?.();
-  overlayState.cleanupBait?.();
 
   if (overlayState.cloudsEnabled) {
     overlayState.cleanupClouds = renderCloudZones({ payload: overlayState.latest.clouds, map3DElement: globeEl });
@@ -209,16 +210,34 @@ function renderOverlays() {
     overlayState.cleanupClouds = null;
   }
 
-  if (overlayState.rainEnabled) {
-    overlayState.cleanupRain = renderRainZones({ payload: overlayState.latest.weather, map3DElement: globeEl });
-  } else {
-    overlayState.cleanupRain = null;
-  }
+  const allowHeavyDraw = reason === 'steady';
+  if (allowHeavyDraw) {
+    const buffered = overlayState.pendingBuffer;
+    const weatherPayload = buffered?.weather || overlayState.latest.weather;
+    const baitPayload = buffered?.baitAdvanced || overlayState.latest.baitAdvanced;
 
-  if (overlayState.baitEnabled) {
-    overlayState.cleanupBait = renderBaitZones({ payload: overlayState.latest.baitAdvanced, map3DElement: globeEl });
+    overlayState.cleanupRain?.();
+    overlayState.cleanupBait?.();
+
+    if (overlayState.rainEnabled) {
+      overlayState.cleanupRain = renderRainZones({ payload: weatherPayload, map3DElement: globeEl, viewportReason: reason });
+    } else {
+      overlayState.cleanupRain = null;
+    }
+
+    if (overlayState.baitEnabled) {
+      overlayState.cleanupBait = renderBaitZones({ payload: baitPayload, map3DElement: globeEl, viewportReason: reason });
+    } else {
+      overlayState.cleanupBait = null;
+    }
+
+    overlayState.pendingBuffer = null;
   } else {
-    overlayState.cleanupBait = null;
+    overlayState.pendingBuffer = {
+      weather: overlayState.latest.weather,
+      baitAdvanced: overlayState.latest.baitAdvanced,
+    };
+    console.info('[gfs overlays] heavy layers deferred', { reason });
   }
 
   if (overlayState.jetstreamEnabled) {
@@ -235,6 +254,9 @@ async function refreshOverlays(reason = 'manual') {
   const signature = bboxSignature(b);
 
   if (!overlayState.pending && overlayState.lastSignature === signature && reason !== 'toggle') {
+    if (reason === 'steady' && overlayState.pendingBuffer) {
+      renderOverlays('steady');
+    }
     return;
   }
 
@@ -261,7 +283,7 @@ async function refreshOverlays(reason = 'manual') {
       }
       if (baitAdvanced) {
         overlayState.latest.baitAdvanced = baitAdvanced;
-        renderOverlays();
+        renderOverlays(reason);
         console.info('[gfs overlays] advanced bait replaced base', { seq });
       }
     } catch (err) {
@@ -289,7 +311,7 @@ async function refreshOverlays(reason = 'manual') {
 
     overlayState.latest = { weather, clouds, baitBase, baitAdvanced: null, bbox: b };
     overlayState.lastSignature = signature;
-    renderOverlays();
+    renderOverlays(reason);
     console.info('[gfs overlays] refreshed', {
       reason,
       signature,

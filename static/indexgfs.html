@@ -130,11 +130,14 @@
         altitudeMode: maps3d.AltitudeMode.ABSOLUTE,
         collisionBehavior: maps3d.CollisionBehavior && maps3d.CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY,
       });
+      var pin = document.createElement('gmp-pin-3d');
       var img = document.createElement('img');
+      img.slot = 'icon';
       img.src = generateWindOrbSVG(mph);
       img.width = 30;
       img.height = 30;
-      marker.append(img);
+      pin.append(img);
+      marker.append(pin);
       globe.append(marker);
       return marker;
     }

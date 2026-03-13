@@ -2,6 +2,51 @@ function warn(prefix, detail) {
   console.warn(`[gfs/api] ${prefix}`, detail || '');
 }
 
+
+const gfsAbortState = new Map();
+
+function shouldAbortPreviousGet(url, options) {
+  if (options?.abortPrevious === false) return false;
+  return typeof url === 'string' && url.startsWith('/gfs/api/');
+}
+
+function gfsRequestKey(url) {
+  try {
+    const u = new URL(url, window.location.origin);
+    return u.pathname;
+  } catch (_) {
+    return String(url || '');
+  }
+}
+
+function buildGetSignal(url, options = {}) {
+  const externalSignal = options?.signal || null;
+  if (!shouldAbortPreviousGet(url, options)) {
+    return { signal: externalSignal, controller: null, key: '' };
+  }
+
+  const key = gfsRequestKey(url);
+  const prior = gfsAbortState.get(key);
+  if (prior) {
+    try { prior.abort(); } catch (_) {}
+  }
+
+  const controller = new AbortController();
+  gfsAbortState.set(key, controller);
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      try { controller.abort(); } catch (_) {}
+    } else {
+      externalSignal.addEventListener('abort', () => {
+        try { controller.abort(); } catch (_) {}
+      }, { once: true });
+    }
+  }
+
+  return { signal: controller.signal, controller, key };
+}
+
 async function parseJsonSafe(res, fallback, context) {
   const ctype = (res.headers.get('content-type') || '').toLowerCase();
   if (!ctype.includes('application/json')) {
@@ -17,11 +62,12 @@ async function parseJsonSafe(res, fallback, context) {
 }
 
 export async function getJsonSafe(url, fallback = null, options = {}) {
+  const { signal, controller, key } = buildGetSignal(url, options);
   try {
     const res = await fetch(url, {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
-      signal: options.signal,
+      signal,
     });
     if (!res.ok) {
       warn('GET non-ok', { url, status: res.status });
@@ -29,8 +75,15 @@ export async function getJsonSafe(url, fallback = null, options = {}) {
     }
     return await parseJsonSafe(res, fallback, `GET ${url}`);
   } catch (err) {
+    if (err?.name === 'AbortError') {
+      return fallback;
+    }
     warn('GET network failure', { url, err: err?.message || err });
     return fallback;
+  } finally {
+    if (controller && key && gfsAbortState.get(key) === controller) {
+      gfsAbortState.delete(key);
+    }
   }
 }
 

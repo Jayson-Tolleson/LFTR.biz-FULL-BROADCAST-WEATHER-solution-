@@ -1,6 +1,8 @@
 import { buildCellRing, normalizePolygonFeature, normalizePolygonFieldPayload } from './polygon_math.js';
 import { ringRadToPath } from './polygon_render.js';
 
+const MAX_POLYGONS_PER_FRAME = 40;
+
 function polygonApiPath() {
   return 'gmp-polygon-3d.path';
 }
@@ -44,16 +46,52 @@ function makePatch({ lat, lon, height, opacity }) {
   return el;
 }
 
-export function renderRainZones({ payload, map3DElement }) {
+function startFrameBatch({ queue, map3DElement, created }) {
+  let rafId = null;
+  let disposed = false;
+
+  const pump = () => {
+    if (disposed) return;
+    let injected = 0;
+    const frag = document.createDocumentFragment();
+    while (queue.length && injected < MAX_POLYGONS_PER_FRAME) {
+      const item = queue.shift();
+      const patch = makePatch(item);
+      frag.append(patch);
+      created.push(patch);
+      injected += 1;
+    }
+    if (injected) {
+      map3DElement.append(frag);
+    }
+    if (queue.length) {
+      rafId = requestAnimationFrame(pump);
+    }
+  };
+
+  rafId = requestAnimationFrame(pump);
+
+  return () => {
+    disposed = true;
+    if (rafId) cancelAnimationFrame(rafId);
+  };
+}
+
+export function renderRainZones({ payload, map3DElement, viewportReason = 'steady' }) {
   const created = [];
   if (!map3DElement || !payload?.fields) return () => {};
   console.info('[gfs rain] polygon api', { api: polygonApiPath() });
+  if (viewportReason !== 'steady') {
+    console.info('[gfs rain] suppressed render', { reason: viewportReason });
+    return () => {};
+  }
+
   const bbox = bboxFromPayload(payload);
   if (!bbox) return () => {};
 
+  const queue = [];
   const contractFeatures = normalizePolygonFieldPayload(payload?.polygon_field_v1 || null);
   if (contractFeatures.length) {
-    const frag = document.createDocumentFragment();
     const count = Math.min(contractFeatures.length, 320);
     for (let i = 0; i < count; i += 1) {
       const f = contractFeatures[i];
@@ -62,13 +100,15 @@ export function renderRainZones({ payload, map3DElement }) {
       const cloudBoost = Math.max(0, f.cloud_total) / 300;
       const opacity = Math.min(0.62, 0.12 + rainIntensity * 0.23 + cloudBoost);
       const height = 180 + Math.round(Math.min(1, rainIntensity) * 1100);
-      const patch = makePatch({ lat: f.lat, lon: f.lon, height, opacity });
-      frag.append(patch);
-      created.push(patch);
+      queue.push({ lat: f.lat, lon: f.lon, height, opacity });
     }
-    map3DElement.append(frag);
-    console.info('[gfs rain] rendered patches', { count });
-    return () => { created.forEach((el) => { try { el.remove(); } catch (_) {} }); };
+
+    const stopBatch = startFrameBatch({ queue, map3DElement, created });
+    console.info('[gfs rain] queued patches', { count: queue.length, batchSize: MAX_POLYGONS_PER_FRAME });
+    return () => {
+      stopBatch();
+      created.forEach((el) => { try { el.remove(); } catch (_) {} });
+    };
   }
 
   const prate = to2DGrid(payload.fields.prate);
@@ -80,8 +120,6 @@ export function renderRainZones({ payload, map3DElement }) {
   if (!ny || !nx) return () => {};
 
   const step = Math.max(1, Math.floor(Math.max(nx, ny) / 36));
-  const frag = document.createDocumentFragment();
-  let count = 0;
   for (let i = 0; i < ny; i += step) {
     for (let j = 0; j < nx; j += step) {
       const p = toNumber(prate[i]?.[j], 0);
@@ -90,19 +128,16 @@ export function renderRainZones({ payload, map3DElement }) {
       const { lat, lon } = latLonFromIndex(i, j, ny, nx, bbox);
       const height = Math.min(1300, 150 + p * 400 + c * 2.5);
       const opacity = Math.min(0.62, 0.16 + p * 0.23 + c / 250);
-      const patch = makePatch({ lat, lon, height, opacity });
-      frag.append(patch);
-      created.push(patch);
-      count += 1;
-      if (count >= 320) break;
+      queue.push({ lat, lon, height, opacity });
+      if (queue.length >= 320) break;
     }
-    if (count >= 320) break;
+    if (queue.length >= 320) break;
   }
 
-  map3DElement.append(frag);
-  console.info('[gfs rain] rendered patches', { count });
-
+  const stopBatch = startFrameBatch({ queue, map3DElement, created });
+  console.info('[gfs rain] queued patches', { count: queue.length, batchSize: MAX_POLYGONS_PER_FRAME });
   return () => {
+    stopBatch();
     created.forEach((el) => { try { el.remove(); } catch (_) {} });
   };
 }

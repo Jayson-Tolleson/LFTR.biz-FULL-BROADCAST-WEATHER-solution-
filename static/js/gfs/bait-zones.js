@@ -2,6 +2,8 @@ import { normalizePolygonFieldPayload } from './polygon_math.js';
 import { clamp01 } from './greek_math.js';
 import { createPolygon3D } from './polygon3d.js';
 
+const MAX_POLYGONS_PER_FRAME = 40;
+
 function polygonApiPath() {
   return window.google?.maps?.maps3d?.Polygon3DElement ? 'Polygon3DElement.path' : 'gmp-polygon-3d.path';
 }
@@ -93,10 +95,49 @@ function makeLineOverlay(line) {
   return el;
 }
 
-export function renderBaitZones({ payload, map3DElement }) {
+function startFrameBatch({ queue, map3DElement, created }) {
+  let rafId = null;
+  let disposed = false;
+
+  const pump = () => {
+    if (disposed) return;
+    let injected = 0;
+    const frag = document.createDocumentFragment();
+    while (queue.length && injected < MAX_POLYGONS_PER_FRAME) {
+      const poly = queue.shift();
+      const p = clampProbability(poly?.probability);
+      const { coreColor, innerColor, outerColor } = probabilityColorRamp(p);
+      const core = makePolygonLayer(poly.path, coreColor, 0.84, 90);
+      const inner = makePolygonLayer(poly.path, innerColor, 0.46, 62);
+      const outer = makePolygonLayer(poly.path, outerColor, 0.2, 36);
+      frag.append(core, inner, outer);
+      created.push(core, inner, outer);
+      injected += 1;
+    }
+    if (injected) {
+      map3DElement.append(frag);
+    }
+    if (queue.length) {
+      rafId = requestAnimationFrame(pump);
+    }
+  };
+
+  rafId = requestAnimationFrame(pump);
+
+  return () => {
+    disposed = true;
+    if (rafId) cancelAnimationFrame(rafId);
+  };
+}
+
+export function renderBaitZones({ payload, map3DElement, viewportReason = 'steady' }) {
   const created = [];
   if (!map3DElement || !payload) return () => {};
   console.info('[gfs bait] polygon api', { api: polygonApiPath() });
+  if (viewportReason !== 'steady') {
+    console.info('[gfs bait] suppressed render', { reason: viewportReason });
+    return () => {};
+  }
 
   const bait = payload?.bait || {};
   const legacyPolygonField = payload?.polygon_field_v1;
@@ -109,20 +150,14 @@ export function renderBaitZones({ payload, map3DElement }) {
   }
 
   const polygons = Array.isArray(bait.polygons) ? bait.polygons : [];
-  const frag = document.createDocumentFragment();
-
+  const polygonQueue = [];
   polygons.forEach((poly) => {
     const path = toPath(poly?.coordinates, 20);
     if (path.length < 3) return;
-    const p = clampProbability(poly?.probability);
-    const { coreColor, innerColor, outerColor } = probabilityColorRamp(p);
-    const core = makePolygonLayer(path, coreColor, 0.84, 90);
-    const inner = makePolygonLayer(path, innerColor, 0.46, 62);
-    const outer = makePolygonLayer(path, outerColor, 0.2, 36);
-    frag.append(core, inner, outer);
-    created.push(core, inner, outer);
+    polygonQueue.push({ path, probability: poly?.probability });
   });
 
+  const frag = document.createDocumentFragment();
   const lines = Array.isArray(payload?.front_lines) ? payload.front_lines : [];
   lines.forEach((line) => {
     const el = makeLineOverlay(line);
@@ -130,12 +165,15 @@ export function renderBaitZones({ payload, map3DElement }) {
     frag.append(el);
     created.push(el);
   });
+  if (created.length) {
+    map3DElement.append(frag);
+  }
 
-  if (!created.length) return () => {};
-  map3DElement.append(frag);
-  console.info('[gfs bait] rendered full-stack polygons', { polygons: polygons.length, lines: lines.length });
+  const stopBatch = startFrameBatch({ queue: polygonQueue, map3DElement, created });
+  console.info('[gfs bait] queued full-stack polygons', { polygons: polygonQueue.length, lines: lines.length, batchSize: MAX_POLYGONS_PER_FRAME });
 
   return () => {
+    stopBatch();
     created.forEach((el) => {
       try { el.remove(); } catch (_) {}
     });
