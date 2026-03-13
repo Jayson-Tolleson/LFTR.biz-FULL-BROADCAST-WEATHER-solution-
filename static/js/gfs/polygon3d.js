@@ -14,7 +14,6 @@ export function createPolygon3D({ path, altitude = 0, altitudeMode = 'relative',
   if (maps3d?.Polygon3DElement && maps3d?.AltitudeMode) {
     const mode = altitudeMode === 'absolute' ? maps3d.AltitudeMode.ABSOLUTE : maps3d.AltitudeMode.RELATIVE_TO_GROUND;
     const polygon = new maps3d.Polygon3DElement({
-      geometry: coords,
       altitudeMode: mode,
       fillColor,
       fillOpacity,
@@ -24,7 +23,7 @@ export function createPolygon3D({ path, altitude = 0, altitudeMode = 'relative',
       extruded: extrudedHeight > 0,
       extrudedHeight,
     });
-    polygon.geometry = coords;
+    polygon.path = coords;
     return polygon;
   }
 

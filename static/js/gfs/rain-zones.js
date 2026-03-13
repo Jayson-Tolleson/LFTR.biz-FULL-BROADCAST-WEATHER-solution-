@@ -1,5 +1,9 @@
 import { buildCellRing, normalizePolygonFeature, normalizePolygonFieldPayload } from './polygon_math.js';
-import { pathToOuterCoordinates, ringRadToPath } from './polygon_render.js';
+import { ringRadToPath } from './polygon_render.js';
+
+function polygonApiPath() {
+  return 'gmp-polygon-3d.path';
+}
 
 function toNumber(v, fallback = 0) {
   const n = Number(v);
@@ -30,7 +34,7 @@ function makePatch({ lat, lon, height, opacity }) {
   const feature = normalizePolygonFeature({ lat, lon, altitude_m: 0, cell_size_deg: 0.05 });
   const ring = buildCellRing(feature);
   const path = ringRadToPath(ring);
-  el.setAttribute('outer-coordinates', pathToOuterCoordinates(path));
+  el.path = path;
   el.setAttribute('altitude-mode', 'relative-to-ground');
   el.setAttribute('fill-color', '#5be7ff');
   el.setAttribute('fill-opacity', String(opacity));
@@ -43,6 +47,7 @@ function makePatch({ lat, lon, height, opacity }) {
 export function renderRainZones({ payload, map3DElement }) {
   const created = [];
   if (!map3DElement || !payload?.fields) return () => {};
+  console.info('[gfs rain] polygon api', { api: polygonApiPath() });
   const bbox = bboxFromPayload(payload);
   if (!bbox) return () => {};
 

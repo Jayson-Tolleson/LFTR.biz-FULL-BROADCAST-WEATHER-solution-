@@ -2,6 +2,10 @@ import { normalizePolygonFieldPayload } from './polygon_math.js';
 import { clamp01 } from './greek_math.js';
 import { createPolygon3D } from './polygon3d.js';
 
+function polygonApiPath() {
+  return window.google?.maps?.maps3d?.Polygon3DElement ? 'Polygon3DElement.path' : 'gmp-polygon-3d.path';
+}
+
 function toNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -92,6 +96,7 @@ function makeLineOverlay(line) {
 export function renderBaitZones({ payload, map3DElement }) {
   const created = [];
   if (!map3DElement || !payload) return () => {};
+  console.info('[gfs bait] polygon api', { api: polygonApiPath() });
 
   const bait = payload?.bait || {};
   const legacyPolygonField = payload?.polygon_field_v1;
