@@ -54,6 +54,7 @@
   let recordingStream = null;
   let recordingChunks = [];
   let recordingMedia = null;
+  let wakeLockSentinel = null;
 
   const state = {
     room: cfg.room || new URLSearchParams(location.search).get('room') || 'default',
@@ -108,6 +109,34 @@
     dom.stAi && (dom.stAi.textContent = state.media.ai_status);
     if (dom.aiStatusBtn) dom.aiStatusBtn.textContent = `AI ${state.media.ai_status}`;
     setLed(dom.ledAi, state.media.ai_status === 'active' || state.media.ai_enabled);
+  }
+
+
+
+  async function acquireWakeLock(reason = 'init') {
+    if (!('wakeLock' in navigator)) return;
+    if (document.visibilityState !== 'visible') return;
+    try {
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => {
+        if (document.visibilityState === 'visible') {
+          acquireWakeLock('released').catch(() => {});
+        }
+      }, { once: true });
+      console.info('[broadcast] wake lock active', { reason });
+    } catch (err) {
+      console.info('[broadcast] wake lock unavailable', { reason, message: err?.message || String(err) });
+    }
+  }
+
+  function installWakeLock() {
+    const retry = () => acquireWakeLock('visibility').catch(() => {});
+    document.addEventListener('visibilitychange', retry);
+    const activate = () => acquireWakeLock('gesture').catch(() => {});
+    window.addEventListener('pointerdown', activate, { passive: true });
+    window.addEventListener('touchstart', activate, { passive: true });
+    window.addEventListener('keydown', activate, { passive: true });
+    acquireWakeLock('boot').catch(() => {});
   }
 
   function applyRoomState(next = {}) {
@@ -703,6 +732,7 @@
     if (dom.chatCollapseBtn) dom.chatCollapseBtn.textContent = 'Expand';
   }
   applyRoomState({ settings: state.media, runtime: { broadcaster_present: false, viewer_count: 0 } });
+  installWakeLock();
   connectChat();
   connectSignal();
 
