@@ -53,6 +53,7 @@ class RTCManager:
         self._ice_queue_started: set[tuple[str, str, str]] = set()
         self.max_pending_ice = 64
         self.viewer_offer_ttl_ms = 8000
+        self.source_epoch: Dict[str, int] = {}
 
     async def _emit_room(self, room_id: str, event: str, payload: Dict[str, Any]) -> None:
         emitter = getattr(self.state, "ws_emit_room", None)
@@ -212,6 +213,40 @@ class RTCManager:
             except Exception:
                 log.exception("failed queued viewer ICE apply")
 
+
+    def _next_source_epoch(self, room_id: str) -> int:
+        nxt = int(self.source_epoch.get(room_id, 0)) + 1
+        self.source_epoch[room_id] = nxt
+        return nxt
+
+    async def _invalidate_viewers_for_handoff(self, room_id: str) -> None:
+        viewer_ids = list(self.viewers.get(room_id, {}).keys())
+        if viewer_ids:
+            log.info("watcher renegotiation requested room=%s viewers=%s", room_id, len(viewer_ids))
+        for sid in viewer_ids:
+            pc = self.viewers.get(room_id, {}).pop(sid, None)
+            if pc:
+                try:
+                    await pc.close()
+                except Exception:
+                    log.exception("error closing viewer pc during handoff room=%s sid=%s", room_id, sid)
+            self.state.ensure_room(room_id).viewers.pop(sid, None)
+            vkey = self._viewer_ice_key(room_id, sid)
+            self._pending_viewer_ice.pop(vkey, None)
+            self._pending_viewer_ice_seen.pop(vkey, None)
+            self._viewer_offer_cache.pop((room_id, sid), None)
+            self._ice_queue_started.discard(("viewer", room_id, sid))
+
+    async def _replace_broadcaster_session(self, room_id: str, old: BroadcasterSession) -> None:
+        try:
+            await old.pc.close()
+        except Exception:
+            log.exception("error closing replaced broadcaster pc room=%s sid=%s", room_id, old.sid)
+        bkey = self._broadcaster_ice_key(room_id, old.sid)
+        self._pending_broadcaster_ice.pop(bkey, None)
+        self._pending_broadcaster_ice_seen.pop(bkey, None)
+        self._ice_queue_started.discard(("broadcaster", room_id, old.sid))
+
     async def enable_stt_for_broadcaster(self, room_id: str, sid: str) -> tuple[bool, str]:
         room = self.state.ensure_room(room_id)
         if room.broadcaster_sid != sid:
@@ -232,8 +267,12 @@ class RTCManager:
 
     async def start_broadcaster_from_offer(self, room_id: str, sid: str, sdp: str, sdp_type: str) -> Dict[str, str]:
         existing = self.broadcasters.get(room_id)
+        handoff = False
         if existing and existing.sid != sid:
-            await self.stop_broadcaster(room_id, existing.sid)
+            handoff = True
+            log.info("source handoff start room=%s old_sid=%s new_sid=%s", room_id, existing.sid, sid)
+            await self._replace_broadcaster_session(room_id, existing)
+            await self._invalidate_viewers_for_handoff(room_id)
             existing = None
         stale = [k for k in self._pending_broadcaster_ice.keys() if k[0] == room_id and k[1] != sid]
         for k in stale:
@@ -278,6 +317,12 @@ class RTCManager:
 
         room = self.state.ensure_room(room_id)
         room.broadcaster_sid = sid
+        if handoff:
+            room.media.live_active = True
+            room.media.mode = "live"
+            epoch = self._next_source_epoch(room_id)
+            await self._emit_room(room_id, "source_switched", {"room": room_id, "sid": sid, "epoch": epoch, "ts": now_ms()})
+            log.info("source handoff complete room=%s sid=%s epoch=%s", room_id, sid, epoch)
 
         if pc.signalingState != "stable":
             log.info("broadcaster offer while signaling=%s; resetting peer for room=%s", pc.signalingState, room_id)
@@ -508,6 +553,7 @@ class RTCManager:
 
         room = self.state.ensure_room(room_id)
         room.broadcaster_sid = None
+        self.source_epoch.pop(room_id, None)
         room.media.live_active = False
         room.media.mode = "upload" if room.media.latest_upload_url else "none"
 

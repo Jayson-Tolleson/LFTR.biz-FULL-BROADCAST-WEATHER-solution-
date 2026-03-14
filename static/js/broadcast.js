@@ -610,13 +610,20 @@
   }
 
   function connectSignal() {
+    console.info('[broadcast] reconnect start');
     const ws = new WebSocket(`${wsBase}/ws/broadcast`);
     state.signalWs = ws;
     ws.onopen = async () => {
       signalRetryMs = 1200;
-      sendJson(ws, 'join', { role: 'broadcaster' });
-      await syncTracks();
-      sendJson(ws, 'media_ready');
+      try {
+        sendJson(ws, 'join', { role: 'broadcaster' });
+        await syncTracks();
+        sendJson(ws, 'media_ready');
+        announceState();
+        console.info('[broadcast] reconnect success');
+      } catch (err) {
+        console.warn('[broadcast] reconnect republish failed', { message: err?.message || String(err) });
+      }
     };
     ws.onmessage = async (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
@@ -641,6 +648,9 @@
       }
       if (msg.type === 'presence') applyPresence(msg);
       if (msg.type === 'state_sync' || msg.type === 'state_update') applyRoomState(msg.state || {});
+    };
+    ws.onerror = (err) => {
+      console.warn('[broadcast] reconnect failure', { message: err?.message || String(err) });
     };
     ws.onclose = () => {
       Object.keys(state.peerConnections).forEach(removeViewerPeer);

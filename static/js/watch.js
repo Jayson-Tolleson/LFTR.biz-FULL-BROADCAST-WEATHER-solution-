@@ -274,6 +274,19 @@
       requestStream(true);
       return;
     }
+    if (msg.type === 'source_switched') {
+      broadcasterPresent = true;
+      requestPending = false;
+      hasRequestedStream = false;
+      if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
+      if (pc) {
+        try { pc.close(); } catch (_) {}
+        pc = null;
+      }
+      setStandby(true, 'Switching live source…');
+      scheduleStreamRequest(100);
+      return;
+    }
     if (msg.type === 'broadcaster-stop') {
       broadcasterPresent = false;
       requestPending = false;
